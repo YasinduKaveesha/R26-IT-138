@@ -1,4 +1,10 @@
-import type { ApiErrorEnvelope, MeResponse } from '@/src/api/contracts';
+import type {
+  ApiErrorEnvelope,
+  HealthReadyResponse,
+  MeResponse,
+  PendingStartSessionCommand,
+  StartSessionResponse,
+} from '@/src/api/contracts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -50,5 +56,52 @@ export function isMeResponse(value: unknown): value is MeResponse {
     rolesAreValid &&
     learnerIsValid &&
     isNonEmptyString(value.request_id)
+  );
+}
+
+const sessionStates = new Set([
+  'starting',
+  'active',
+  'completing',
+  'completed',
+  'abandoned',
+  'expired',
+  'technical_failed',
+]);
+
+export function isHealthReadyResponse(value: unknown): value is HealthReadyResponse {
+  return (
+    isRecord(value) &&
+    value.status === 'ready' &&
+    (value.request_id === undefined || isNonEmptyString(value.request_id))
+  );
+}
+
+export function isStartSessionResponse(value: unknown): value is StartSessionResponse {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.b_session_id) &&
+    Number.isInteger(value.session_number) &&
+    (value.session_number as number) > 0 &&
+    typeof value.state === 'string' &&
+    sessionStates.has(value.state) &&
+    typeof value.resume === 'boolean' &&
+    (value.current_opportunity_id === null || isNonEmptyString(value.current_opportunity_id)) &&
+    isNonEmptyString(value.runtime_bundle_version) &&
+    isNonEmptyString(value.expires_at) &&
+    !Number.isNaN(Date.parse(value.expires_at)) &&
+    isNonEmptyString(value.request_id)
+  );
+}
+
+export function isPendingStartSessionCommand(value: unknown): value is PendingStartSessionCommand {
+  if (!isRecord(value) || !isRecord(value.body)) return false;
+  return (
+    value.kind === 'start_session' &&
+    value.endpoint === '/api/v1/b/sessions' &&
+    isNonEmptyString(value.idempotencyKey) &&
+    isNonEmptyString(value.createdAt) &&
+    isNonEmptyString(value.body.client_timezone) &&
+    isNonEmptyString(value.body.mobile_app_version)
   );
 }

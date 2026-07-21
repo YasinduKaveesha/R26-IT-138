@@ -17,9 +17,11 @@ type LearnerTab = 'home' | 'play' | 'profile';
 
 export function LearnerTabBar({
   activeTab,
+  activeHomePressEnabled = false,
   playEnabled = false,
 }: {
   activeTab: LearnerTab;
+  activeHomePressEnabled?: boolean;
   playEnabled?: boolean;
 }) {
   const compact = useWindowDimensions().height < 760;
@@ -30,6 +32,7 @@ export function LearnerTabBar({
         active={activeTab === 'home'}
         label="Home"
         onPress={() => router.replace('/(learner)/home')}
+        pressWhenActive={activeHomePressEnabled}
         selectedSource={tabArtwork.homeSelected}
         source={tabArtwork.home}
       />
@@ -53,12 +56,13 @@ export function LearnerTabBar({
   );
 }
 
-function TabItem({ active, accessibilityHint, disabled = false, label, onPress, selectedSource, source }: {
+function TabItem({ active, accessibilityHint, disabled = false, label, onPress, pressWhenActive = false, selectedSource, source }: {
   active: boolean;
   accessibilityHint?: string;
   disabled?: boolean;
   label: string;
   onPress: () => void;
+  pressWhenActive?: boolean;
   selectedSource: number;
   source: number;
 }) {
@@ -68,7 +72,7 @@ function TabItem({ active, accessibilityHint, disabled = false, label, onPress, 
       accessibilityLabel={`${label} tab${active ? ', selected' : disabled ? ', unavailable' : ''}`}
       accessibilityRole="button"
       accessibilityState={{ disabled: disabled || undefined, selected: active }}
-      disabled={active || disabled}
+      disabled={(active && !pressWhenActive) || disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.navItem,

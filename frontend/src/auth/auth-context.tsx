@@ -45,6 +45,7 @@ type AuthContextValue = {
   profileName: string | null;
   status: AuthStatus;
   continueToComponentBPreview: () => void;
+  getAccessToken: (refresh?: boolean) => Promise<string | null>;
   retryAuthorization: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<AuthActionResult>;
   signOut: () => Promise<void>;
@@ -315,9 +316,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
   }, [config]);
 
+  const getAccessToken = useCallback(async (refresh = false) => {
+    if (!config) return null;
+    const supabase = getSupabaseClient(config);
+    if (refresh) {
+      const { data, error } = await supabase.auth.refreshSession();
+      return error ? null : (data.session?.access_token ?? null);
+    }
+    const { data, error } = await supabase.auth.getSession();
+    return error ? null : (data.session?.access_token ?? null);
+  }, [config]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       continueToComponentBPreview,
+      getAccessToken,
       me,
       notice,
       profileName,
@@ -329,6 +342,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }),
     [
       continueToComponentBPreview,
+      getAccessToken,
       me,
       notice,
       profileName,

@@ -1,6 +1,6 @@
-import { SessionPreparationPlaceholderScreen } from '@/src/features/session/session-preparation-placeholder-screen';
+import { SessionPreparationScreen } from '@/src/features/session/session-preparation-screen';
 
 /** Temporary route target; the full Session Preparation page is the next batch. */
-export default function SessionPreparationPlaceholderRoute() {
-  return <SessionPreparationPlaceholderScreen />;
+export default function SessionPreparationRoute() {
+  return <SessionPreparationScreen />;
 }

@@ -19,3 +19,41 @@ export type ApiErrorEnvelope = {
   retryable: boolean;
   details?: ApiFieldIssue[];
 };
+
+export type SessionState =
+  | 'starting'
+  | 'active'
+  | 'completing'
+  | 'completed'
+  | 'abandoned'
+  | 'expired'
+  | 'technical_failed';
+
+export type HealthReadyResponse = {
+  status: 'ready';
+  request_id?: string;
+};
+
+export type StartSessionRequest = {
+  client_timezone: string;
+  mobile_app_version: string;
+};
+
+export type StartSessionResponse = {
+  b_session_id: string;
+  session_number: number;
+  state: SessionState;
+  resume: boolean;
+  current_opportunity_id: string | null;
+  runtime_bundle_version: string;
+  expires_at: string;
+  request_id: string;
+};
+
+export type PendingStartSessionCommand = {
+  kind: 'start_session';
+  endpoint: '/api/v1/b/sessions';
+  idempotencyKey: string;
+  body: StartSessionRequest;
+  createdAt: string;
+};
