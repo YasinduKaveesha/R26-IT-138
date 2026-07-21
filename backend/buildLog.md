@@ -1483,3 +1483,122 @@ Result: **PASS — BE1 Batch 3 is complete.**
 Exact next recommended task: conduct a BE1 closure/security review of Batches 1–3 and define the
 BE1-to-BE2 transition decision. Do not create learner/session business tables or session behavior
 until BE2 scope and unresolved policies are explicitly authorized.
+
+## Phase BE1 Closure — Infrastructure, Database and Authentication Review
+
+### Repository and review scope
+
+Reviewed the committed BE1 Batch 1–3 implementation without adding or changing runtime
+functionality. Batch 3 commit `7d6ef7036120185a1017a7773bb46990c39d7c66` is present locally and
+at `origin/B_frontend`; the pre-review tree was clean. All Batch 3 application and test files are
+tracked. This build log contains the Batch 1, Batch 2, and Batch 3 evidence sections.
+
+Security-critical files reviewed included the Dockerfile, Compose definition, environment example,
+dependency input/lock, application configuration, request middleware, error/logging infrastructure,
+JWT/JWKS verifier, principal and identity route, async database/session lifecycle, unit of work,
+Alembic environment and empty baseline, health routes, and all tests.
+
+### Dependency and supply-chain review
+
+The committed dependency lock was reproduced to a temporary file with the documented CPython 3.11
+x86_64-manylinux `uv pip compile --generate-hashes` command. The reproduced file was byte-identical
+to the committed lock. Both SHA-256 values are
+`79998c3267fb0129bac47732c0e9b0971f3839ff20ddee385cc50a6f0c54f1e6`.
+
+Direct pins include PyJWT `[crypto]` `2.13.0`, SQLAlchemy `[asyncio]` `2.0.46`, asyncpg `0.31.0`,
+Alembic `1.18.4`, FastAPI `0.137.1`, and Uvicorn `0.49.0`. The resolved lock pins cryptography
+`49.0.0`. The image copies only `requirements.lock` before running
+`pip install --require-hashes --no-deps`; application and tests are copied afterward. No research
+generator appears in the dependency input or lock, and runtime package inspection reports
+`upadya-component-b-generator` absent.
+
+### Authentication security review
+
+PASS. The server verifies JWT signature and explicitly allowlists `RS256` and `ES256`. It requires a
+non-empty `kid`, expiry, issuer, and non-empty subject; validates configured audience and not-before
+when present; and rejects unsigned, malformed, unsupported-algorithm, expired, premature,
+wrong-issuer, wrong-audience, invalid-signature, missing-subject, and unknown-key tokens. Failure to
+load or verify JWKS fails closed through the stable version `1.0` authentication error envelope.
+
+JWKS caching has a configured TTL clamped to 30–3600 seconds, five-second fetch timeout, no
+indefinite per-key cache, locked forced refresh, and 5–30 second unknown-key refresh cooldown.
+Deterministic tests prove rotation succeeds after one refresh and repeated unknown-key attempts do
+not cause immediate additional fetches.
+
+The raw token is not stored in the principal, response, log fields, exception text, or database.
+Authorization headers are never passed to logging. `/api/v1/me` returns only `user_id` and an email
+whose signed claims assert verification/confirmation. Authentication failures return a user-safe
+401 with request ID matching `X-Request-ID`.
+
+### Docker and infrastructure verification
+
+Executed `docker compose config --quiet`, `docker compose build --no-cache`, `docker compose up -d`,
+`docker compose ps`, in-container Python/compile/test/migration commands, PostgreSQL readiness,
+health and authentication-error requests, API/database logs, image/container/history inspection,
+schema inspection, and `docker compose down`.
+
+- API base remains pinned to Python `3.11.15-slim-bookworm` digest
+  `sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba`.
+- PostgreSQL remains pinned to `16.10-bookworm` digest
+  `sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74`.
+- Closure no-cache API image/index digest:
+  `sha256:5219bce0ea3ab0eac38f744658fcc732a79cae36759237fddaabd288870edb13`.
+- Runtime Python: `3.11.15`; API user: UID/GID `10001:10001`; API mounts: zero.
+- `DATABASE_URL` resolves hostname `db`; PostgreSQL host-port bindings are `{}`.
+- Named volume `upadya-be1-postgres-data` is attached at `/var/lib/postgresql/data`, survived the
+  review, and remains present after shutdown.
+- API filesystem search found no Yass path or wheel. Image history contains no research artefact,
+  credential, token, or secret-bearing build instruction.
+- Targeted tracked-file credential-signature scan found no private key, Supabase secret key, or
+  service-role credential. Reviewed API/database logs contain no token, Authorization header,
+  database URL, password, or learner-sensitive data. Committed local-development values and
+  `.env.example` Supabase URLs are explicitly non-secret placeholders.
+
+### Database and migration review
+
+PASS. Alembic upgrade-head, downgrade-base, and upgrade-head all completed using PostgreSQL
+transactional DDL. The sole revision `20260722_0001` has empty upgrade/downgrade functions. Schema
+inspection found only `alembic_version` and the pre-existing Batch 1 infrastructure marker
+`be1_persistence_check`. No learner, session, question, attempt, mastery, hint, or progress table
+exists. SQLAlchemy exposes only engine/session/probe lifecycle, and the unit of work exposes only
+open, commit, rollback, and close—no business repository or domain behavior.
+
+### Health, observability, tests, and warning
+
+PASS. `/health/live` returned process liveness. `/health/ready` returned only infrastructure status
+with API and database connection `ok`; generator, catalogue, runtime bundle, migrations, and
+authentication remain `not_checked`. It makes no session, engine, BKT, learner-flow, pilot, or
+production-readiness claim.
+
+Success and error responses preserved supplied request IDs (`closure-live-123`,
+`closure-ready-123`, and `closure-error-123`). Structured JSON logs contain request IDs, method,
+route template, status, duration, version, and environment without sensitive values.
+
+The closure container suite reports `26 passed, 1 warning in 0.66s`. The warning is
+`StarletteDeprecationWarning` from FastAPI's test-only `TestClient` import regarding the current
+httpx integration. It does not occur in the production request path and is non-blocking, but should
+be removed when the upstream-supported test client migration is available. A duplicate idempotent
+`httpx` logger-level assignment is noted as harmless cleanup debt and was not changed during this
+review-only task.
+
+### Unresolved risks, blocked work, and formal exit decision
+
+All implemented BE1 infrastructure and security gates pass. However, the existing governed
+baseline explicitly records `be2_be3_be4_be5_pilot_production` as
+`BLOCKED_BY_PHASE_AND_UNRESOLVED_GOVERNANCE`, and the closure decision register explicitly lists
+`BE2 session behavior and persistence semantics` in blocked scope. This review has no authority to
+override those records or invent the unresolved policies.
+
+The requested final-state vocabulary couples BE1 closure with BE2 authorization. Because BE2 is
+still explicitly blocked, `BE1_CLOSED_BE2_AUTHORIZED` would be false even though BE1 technical gates
+pass. Therefore the formal decision is:
+
+`BE1_NOT_CLOSED`
+
+This means formal transition is withheld by governance, not that a BE1 technical/security test
+failed. Learner/session tables, session APIs, questions, attempts, BKT, sequencing, hints, progress,
+live-engine integration, Component C/3, pilot, and production remain prohibited.
+
+Exact next task: perform a governance-only BE1-to-BE2 authorization review that resolves or
+explicitly defers the recorded BE2 blockers and defines the allowed BE2 persistence scope. Do not
+implement BE2 until that decision is recorded.
