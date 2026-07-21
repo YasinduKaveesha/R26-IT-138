@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.health import router as health_router
+from app.api.routes.identity import router as identity_router
 from app.core.config import get_settings
 from app.core.errors import error_response, install_error_handlers
 from app.core.logging import configure_logging, request_log_fields
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
         return response
 
     application.include_router(health_router)
+    application.include_router(identity_router)
     return application
 
 

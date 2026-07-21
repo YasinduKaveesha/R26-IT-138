@@ -1402,3 +1402,84 @@ Recommended next task: separately authorize BE1 Batch 3 for Supabase JWT verific
 and `GET /api/v1/me`, using the stable error, request-ID, logging, database, and migration
 infrastructure completed here. Do not add sessions, learner business tables, scientific runtime,
 pilot, or production behavior in that task.
+
+## Phase BE1 — Batch 3: Supabase JWT Verification and Authenticated Identity
+
+Implemented server-side asymmetric Supabase JWT verification, authenticated-principal extraction,
+`GET /api/v1/me`, offline authentication tests, and safe environment placeholders only. No learner
+or profile record is created and the endpoint does not access Component B session data.
+
+### Files and dependencies
+
+Created `app/api/routes/identity.py`, `app/domain/principal.py`,
+`app/infrastructure/auth.py`, and `tests/test_auth.py`. Changed `.env.example`, `Dockerfile`,
+`app/core/config.py`, `app/main.py`, `compose.yaml`, `requirements.in`, and `requirements.lock`.
+
+Pinned PyJWT `[crypto]` `2.13.0`; the lock resolves cryptography `49.0.0`, cffi `2.1.0`, and
+pycparser `3.0`. Existing Batch 2 pins remain unchanged. Lock SHA-256:
+`79998c3267fb0129bac47732c0e9b0971f3839ff20ddee385cc50a6f0c54f1e6`. Final image is
+`upadya-backend:be1-batch3` with digest
+`sha256:448504e841889c80290b9cbc83317fcca75a3b365474fc23d7df8cf8143078d2`.
+
+Safe configuration placeholders were added for `SUPABASE_URL`, `SUPABASE_JWT_ISSUER`,
+`SUPABASE_JWT_AUDIENCE`, `SUPABASE_JWKS_URL`, and `SUPABASE_JWKS_CACHE_TTL_SECONDS`. No real key,
+secret, project token, or credential was committed.
+
+### JWT and JWKS design
+
+Only asymmetric `RS256` and `ES256` are allowed. Unsigned, HMAC, unsupported-algorithm, missing-kid,
+malformed, expired, premature, wrong-issuer, wrong-audience, missing-subject, invalid-signature, and
+unknown-key tokens fail closed using the existing request-ID error envelope. PyJWT validates the
+signature, configured issuer, optional audience, expiry, not-before, and non-empty subject. Raw
+tokens are never stored.
+
+The principal exposes only `user_id` and an optional email. Email is included only when the signed
+claims also assert `email_verified=true` or a non-empty `email_confirmed_at`. Roles, metadata, raw
+claims, and tokens are not returned.
+
+The JWKS set cache has a configured TTL clamped to 30–3600 seconds and a five-second timeout. No
+indefinite per-key cache is used. Unknown `kid` performs at most one forced refresh under a process
+lock, supporting key rotation, with a 5–30 second cooldown to prevent key-ID refresh spraying.
+Verification failure or unavailable JWKS always fails closed.
+
+### Commands and results
+
+Ran the reproducible `uv pip compile` command for CPython 3.11/manylinux with hashes, followed by
+`docker compose config --quiet`, `docker compose build`, `docker compose up -d`, `docker compose
+ps`, in-container compileall, full pytest, focused authentication pytest, unauthenticated and
+deterministic authenticated `/api/v1/me` checks, container/log/schema inspection, and final
+`docker compose down`.
+
+Full result: `26 passed, 1 warning in 0.73s`. Focused auth result: `14 passed, 1 warning in 0.64s`.
+The sole warning is the existing upstream FastAPI TestClient/httpx deprecation.
+
+Unauthenticated `/api/v1/me` returned HTTP 401 with schema `1.0` and a request ID matching the
+response header. The deterministic offline authenticated request returned HTTP 200 with exactly
+`{"user_id":"user-123","email":"verified@example.test"}` and request ID `docker-auth-123`.
+
+Rotation testing started with JWKS lacking `key-2`; one refresh loaded the rotated key and verified
+the token. An immediate unknown-kid spray attempt caused no third fetch. Token-leakage tests and
+runtime log inspection found no JWT, Authorization header, test secret, database URL, or credential.
+
+The API remains healthy and non-root (`10001:10001`) with zero mounts; PostgreSQL has no host port.
+Schema remains only `alembic_version` and the pre-existing Batch 1 `be1_persistence_check`; Batch 3
+added no migration or business table. The research-generator package remains uninstalled and no
+Yass path or wheel exists under `/app`.
+
+### Errors, limitations, and next task
+
+The initial unsupported-HMAC test used a short test key and produced a library warning; the test key
+was lengthened without changing application behavior. Security review then identified possible
+repeated default unknown-kid refreshes, so the locked cooldown layer was added and tested.
+
+Tests are offline and no real Supabase project was contacted. Deployment must provide the exact
+issuer, audience policy, and HTTPS JWKS URL through managed configuration. Authentication does not
+create profiles, local authorization policy, learner records, or sessions. Sessions, questions,
+attempts, BKT, hints, sequencing, progress, completion, live-engine integration, Component C/3,
+pilot, and production remain blocked.
+
+Result: **PASS — BE1 Batch 3 is complete.**
+
+Exact next recommended task: conduct a BE1 closure/security review of Batches 1–3 and define the
+BE1-to-BE2 transition decision. Do not create learner/session business tables or session behavior
+until BE2 scope and unresolved policies are explicitly authorized.
