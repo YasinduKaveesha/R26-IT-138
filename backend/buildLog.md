@@ -1787,3 +1787,85 @@ formal sign-off remain unresolved and fail closed.
 Exact next task: conduct the BE2 Limited Batch 1 closure review only. Do not add endpoints,
 lifecycle behavior, live data, scientific fields, or BE3 integration without new machine-readable
 authorization.
+
+## Phase BE2 Limited — Batch 1 Closure Review
+
+### Repository and review boundary
+
+Reviewed implementation commit `c516683` and file-ending-only commit `488dff0`. The full starting
+HEAD was `488dff0d24ec3c9d19e2d3d98a5c3251a6bd2755`; local `B_frontend` matched
+`origin/B_frontend`, and the pre-review working tree was clean. This review changed no application,
+migration, model, repository, test, dependency, or runtime functionality. Only this append-only
+closure evidence was added.
+
+The implementation was assessed against
+`backend/provenance/component-b-be2-governance-authorization.json`, especially its exact eight-table
+boundary and required fail-closed constraints. Reviewed files included the neutral SQLAlchemy
+models, repository protocols and implementations, Alembic environment and revision
+`20260722_0002`, architecture guards, persistence tests, Docker/Compose definitions, dependency
+files, and the documented `be1_persistence_check` ownership exclusion.
+
+### Passing evidence
+
+The implementation creates exactly `app_users`, `b_learners`, `app_user_learner_links`,
+`b_runtime_bundle_records`, `b_sessions`, `b_session_events`, `b_idempotency_records`, and
+`b_audit_events`. PostgreSQL additionally contains only the infrastructure-owned
+`alembic_version` and pre-existing `be1_persistence_check` marker. The marker is excluded only from
+Alembic autogenerate comparison and is not changed or treated as a BE2 business table.
+
+The no-cache Docker build passed. Python compilation passed. The complete suite reported
+`34 passed, 1 warning`; the warning remains the known upstream FastAPI/Starlette TestClient
+deprecation. Alembic upgrade to head, current, downgrade to `20260722_0001`, re-upgrade to head, and
+`alembic check` passed. Final revision was `20260722_0002`, and PostgreSQL readiness passed.
+
+Repository operations remain neutral add/get/existence operations, plus exact scoped idempotency
+lookup. No update/delete convenience API, lifecycle service, scientific formula, task behavior, or
+public route was added. Provenance source classes are constrained and have no default; actor,
+request, source, environment, schema, reason, resource, and timestamp fields are present.
+Idempotency uniqueness is scoped by actor, method, operation, and key. Audit and session-event
+records carry neutral append-only repository contracts.
+
+Architecture guards and direct inspection confirmed that the only OpenAPI paths remain
+`/health/live`, `/health/ready`, and `/api/v1/me`; the API remains UID/GID `10001:10001` with no
+source mounts; PostgreSQL has no host port; the named `upadya-be1-postgres-data` volume was
+preserved; and no Yass module, `component_b_generator`, research wheel, or research artefact exists
+in the application container.
+
+### Closure-blocking findings
+
+Two explicit authorization constraints are not enforced:
+
+1. The authorization requires an `active` session to reference an immutable approved runtime
+   bundle and states that, because no approved bundle exists, live activation must fail closed. The
+   database check only requires `runtime_bundle_record_id IS NOT NULL`. A rollback-only PostgreSQL
+   probe successfully inserted an `active` session referencing a `DRAFT` bundle whose
+   `approval_status` was `UNRESOLVED`.
+2. The authorization requires published runtime-bundle records to be immutable. The database check
+   only requires the boolean `immutable_after_publication` to be true when state is `PUBLISHED`; it
+   does not prevent later updates. The same rollback-only probe successfully changed the manifest
+   checksum of a `PUBLISHED` record marked immutable.
+
+PostgreSQL reported zero non-internal triggers on `b_runtime_bundle_records` and `b_sessions`, and
+the repositories contain no alternative enforcement. The diagnostic transaction was rolled back,
+so it left no test records. Existing tests do not cover either required rejection and therefore
+their passing result cannot satisfy these two gates.
+
+These findings do not authorize adding lifecycle behavior. A narrowly scoped corrective task must
+enforce published-bundle immutability and prevent any active-session row from referencing a draft,
+unapproved, or otherwise ineligible bundle, with database-level tests. The correction must not add
+an endpoint, session transition service, real learner data, scientific configuration, engine
+integration, or runtime activation.
+
+### Formal closure decision
+
+The table boundary, repositories, provenance, idempotency, audit structure, migration cycle,
+architecture separation, and infrastructure checks otherwise pass. However, closure requires every
+machine-readable required constraint to hold. Because the two bundle fail-closed constraints above
+are demonstrably bypassable, the formal decision is:
+
+`BE2_LIMITED_BATCH_1_NOT_CLOSED`
+
+Exact next task: perform a governance-bound BE2 Limited Batch 1 corrective patch only for the two
+failed database invariants and their tests, then repeat this closure review. Do not authorize or
+begin endpoints, executable lifecycle transitions, live learner data, attempts, progress,
+scientific logic, or Component B engine integration.
