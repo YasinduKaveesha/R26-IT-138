@@ -1602,3 +1602,100 @@ live-engine integration, Component C/3, pilot, and production remain prohibited.
 Exact next task: perform a governance-only BE1-to-BE2 authorization review that resolves or
 explicitly defers the recorded BE2 blockers and defines the allowed BE2 persistence scope. Do not
 implement BE2 until that decision is recorded.
+
+## BE1-to-BE2 Governance Authorization Review
+
+### Review scope and evidence
+
+This was a governance-only review. No application code, migration, table, API, test, scientific
+logic, or runtime dependency was created or changed. The review used the BE0 baseline, closure,
+coverage, characterization, live-engine boundary, runtime-bundle schema, and prior build-log
+evidence; the backend plan and both Component B application architecture documents; and the
+authoritative Yass Component B specification, variable and shared-foundation registers, approved
+blocking-decisions memo, approval-status confirmation, catalogue, and empirical-parameter record.
+
+The starting technical evidence remains unchanged: Batch 3 commit
+`7d6ef7036120185a1017a7773bb46990c39d7c66`, closure-review commit `6a7b4a9`, 26 tests passed,
+Alembic upgrade/downgrade/upgrade passed, and zero business tables. The prior `BE1_NOT_CLOSED`
+decision was a governance hold rather than a failed infrastructure or security gate.
+
+The complete blocker classification and enforceable scope are recorded in
+`backend/provenance/component-b-be2-governance-authorization.json`.
+
+### Decisions and formal deferrals
+
+The Supabase subject is the canonical external application-user key, not the learner ID. Live
+learners require separate opaque UUIDs. Because account-to-learner cardinality and relationship
+ownership are not approved, the schema may use a cardinality-neutral junction but may not expose
+learner selection, linking, or CRUD. Grade may be nullable and constrained to 2 or 3, with no
+default; grade ownership, mutation, inference, and grade-dependent behavior remain blocked.
+
+The documented session state vocabulary may be represented and constrained, including at most one
+`starting` or `active` session per learner, but no live session may be created and no state
+transition may execute in this limited authorization. Start, resume, recovery, abandonment,
+replacement, expiry, and completion behavior remain blocked. Session expiry has no approved
+duration. Completion remains disabled and must not be conflated with stopped, abandoned, expired,
+or technical-failure states.
+
+Idempotency is an approved engineering contract: scope keys by authenticated actor, operation, and
+opaque key; fingerprint the canonical request body; replay the original committed response for an
+identical request; return a stable conflict for a mismatched body; serialize concurrent replays;
+and commit the record atomically with the future mutation. This foundation may be implemented even
+though no new state-changing endpoint is currently authorized.
+
+Attempt limits remain unresolved and synthetic negative-binomial bounds are non-authoritative for
+the application. The first-attempt-only evidence rule remains a required future invariant, but item
+opportunities, attempts, retries, timing classification, hints, and mastery updates are outside this
+limited BE2 scope. Server issuance and receipt timestamps and raw duration fields may be designed in
+a future attempt schema without a threshold; no timeout, background/pause adjustment, or learner
+outcome may be derived until approved. Network, API, database, and infrastructure failures remain
+technical and never become learner failures.
+
+Safe progress, descriptive summaries, certification, and completion output remain disabled. No
+counts are exposed yet because the presentation, privacy, consent, and retention contracts are not
+approved. BKT, sequencing, hints, certification, Guess-Guard, task generation, answer evaluation,
+and the minimal live-engine adapter remain BE3/BE4 work. No placeholder probability, threshold,
+score, answer, hint, or scientific default is permitted.
+
+### Authorized and prohibited scope
+
+BE2 is authorized only for non-live schema, migration, repository, idempotency, and audit
+foundations using visibly synthetic fixtures in an isolated test database. Authorized table scope
+is: `app_users`, `b_learners`, a cardinality-neutral `app_user_learner_links`, immutable metadata-only
+`b_runtime_bundle_records`, lifecycle/provenance-only `b_sessions`, append-only technical
+`b_session_events`, `b_idempotency_records`, and append-only `b_audit_events`. Runtime-bundle rows
+cannot be activated or used by a live session without complete approved checksums and approvals.
+
+No new endpoint or executable lifecycle transition is authorized. Item-opportunity, attempt,
+mastery/skill-state, hint, selection, session-summary/progress, and integration/outbox tables remain
+prohibited. Learner CRUD, account linking, session start/resume/recovery/abandon/expire/complete,
+descriptive summaries, real-child data collection, research export, live-engine integration,
+Component C/3, pilot, and production behavior remain prohibited.
+
+Every permitted record design must use minimum-data pseudonymous identifiers, UTC server
+timestamps, source class/system/record provenance, environment and schema revision, request and
+actor references, and append-only audit evidence where appropriate. Synthetic/test records must
+remain in isolated non-live databases and may never be copied into live learner records. Prohibited
+fields include population, `dd_subtype`, hidden truth, true mastery, synthetic traits, simulated
+answers/correctness/latency, off-day state, experiment identifiers, and pipeline/pilot/audit-runner
+outputs.
+
+### Owners, unresolved risks, and transition
+
+Product, privacy/child-safety, ethics/project-governance, and academic/research owners still must
+approve account-to-learner relationships, grade control, consent, retention, withdrawal/deletion,
+session lifecycle and expiry, attempt limits, timeout/background rules, completion, safe progress,
+catalogue mappings, scientific configuration, and named formal sign-off. These items are formally
+deferred only from the neutral persistence foundation; they continue to fail closed for live data,
+API behavior, scientific behavior, BE3/BE4, pilot, and production.
+
+The BE1 technical and security gates are complete, and the machine-readable scope prevents this
+transition from being interpreted as authorization for session behavior or learner data collection.
+The formal decision is:
+
+`BE1_CLOSED_BE2_LIMITED_SCOPE_AUTHORIZED`
+
+Exact next task: implement BE2 Limited Batch 1 only—the authorized neutral persistence models,
+Alembic migrations, repositories, idempotency/audit foundations, constraints, and isolated
+synthetic database tests. Add no endpoints, live records, lifecycle execution, item opportunities,
+attempts, scientific fields, live-engine integration, pilot, or production behavior.
