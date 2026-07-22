@@ -1699,3 +1699,91 @@ Exact next task: implement BE2 Limited Batch 1 only—the authorized neutral per
 Alembic migrations, repositories, idempotency/audit foundations, constraints, and isolated
 synthetic database tests. Add no endpoints, live records, lifecycle execution, item opportunities,
 attempts, scientific fields, live-engine integration, pilot, or production behavior.
+
+## Phase BE2 Limited — Batch 1: Neutral Persistence, Audit and Idempotency Foundations
+
+### Authorization and scope
+
+Implementation started from commit `74676f8`. The hard boundary is
+`backend/provenance/component-b-be2-governance-authorization.json`, with decision
+`BE1_CLOSED_BE2_LIMITED_SCOPE_AUTHORIZED`. The complete authorization and preceding governance
+section were read before code changes. No missing scientific, product, privacy, lifecycle, or
+identity decision was inferred.
+
+Only the eight authorized tables were introduced: `app_users`, `b_learners`,
+`app_user_learner_links`, `b_runtime_bundle_records`, `b_sessions`, `b_session_events`,
+`b_idempotency_records`, and `b_audit_events`. Migration `20260722_0002` follows the empty BE1
+baseline `20260722_0001`. No seed data, trigger, dataset, research import, or endpoint was added.
+
+### Files created and changed
+
+Created `app/application/repositories.py`, `app/infrastructure/persistence_models.py`,
+`app/infrastructure/repositories.py`,
+`migrations/versions/20260722_0002_be2_neutral_persistence.py`,
+`tests/test_be2_architecture_guards.py`, and `tests/test_be2_persistence.py`. Changed
+`migrations/env.py` and this build log. Alembic now targets the authorized metadata and excludes
+only the pre-existing documented `be1_persistence_check` connectivity marker from autogenerate
+ownership; the marker itself was not changed.
+
+### Schema, provenance, idempotency, audit, and repositories
+
+Primary resource identifiers are opaque PostgreSQL UUIDs. The Supabase subject is unique and is not
+a learner ID. Learner grade is nullable, has no default, and accepts only 2 or 3. The user-to-learner
+junction does not encode one-to-one cardinality or relationship behavior.
+
+Session states are constrained data only. A partial unique index permits at most one `starting` or
+`active` row per learner. Row version is nonnegative and an active row requires a bundle reference.
+No service executes transitions. Bundle rows contain only authorized identity/checksum/publication/
+approval metadata and nothing is activated or seeded. Timestamps are timezone-aware, foreign keys
+restrict deletion, and event repositories expose no update or delete operation.
+
+Every table requires source class/system, environment, schema revision, request, operation/event,
+reason, resource ID/type, timestamps, and exactly one pseudonymous user or system actor. Source
+class accepts exactly `REAL`, `SYNTHETIC`, `IMPORTED`, or `TEST`, with no default. Tests use visibly
+synthetic subjects and `TEST` provenance in the isolated Docker database.
+
+Idempotency is uniquely scoped by actor, method, operation, and opaque key. It stores the authorized
+request fingerprint, neutral nonblank status, optional canonical response/status, and expiry. No
+endpoint is wired to it. Repositories provide add/get/existence for all eight tables; idempotency
+adds scoped lookup and audit remains append/read only. No lifecycle or scientific policy exists.
+
+### Commands, results, errors, and fixes
+
+Ran Compose configuration, no-cache build, startup/status, Python 3.11.15 and compile checks,
+complete pytest, Alembic upgrade/current/downgrade-to-`20260722_0001`/upgrade, PostgreSQL readiness
+and metadata inspection, non-root/mount/port checks, dependency/source scans, Docker history/log
+leakage scans, and shutdown while preserving the named volume.
+
+Final tests: `34 passed, 1 warning`. The warning is the recorded upstream FastAPI/Starlette
+TestClient deprecation. Tests cover exact tables/columns/nullability/keys/constraints/indexes, the
+migration cycle, all repositories, rollback, audit persistence, provenance rejection, idempotency,
+absence of scientific fields, unchanged OpenAPI paths, and absence of Yass dependencies/imports.
+
+Alembic ends at `20260722_0002 (head)`; the full migration cycle passes and `alembic check` reports
+no drift. PostgreSQL contains the eight application tables plus infrastructure-owned
+`alembic_version` and pre-existing `be1_persistence_check`. PostgreSQL has no host port, the API has
+no source mount and remains UID/GID `10001:10001`, and `upadya-be1-postgres-data` is preserved.
+
+The first run exposed test-harness defects: FastAPI 0.137 represents included routers differently,
+the image intentionally copies only the dependency lock, and pooled async connections crossed
+separate event loops. Guards now use OpenAPI and available committed dependency files; database
+tests use disposed `NullPool` engines and independently upgrade to head. Alembic initially treated
+the BE1 connectivity marker as unmanaged, so exactly that marker is excluded from comparison.
+Idempotency status is merely nonblank because authorization defines no closed status vocabulary.
+
+### Guards, limitations, and blocked work
+
+Guards prove only eight tables were added; paths remain `/health/live`, `/health/ready`, and
+`/api/v1/me`; and no lifecycle service, Yass/research dependency, trigger, seed, BKT, sequencing,
+certification, Guess-Guard, hint, or generation integration exists. Container discovery finds no
+Yass package/path/wheel. Docker history and logs have zero sensitive-pattern matches.
+
+No real learner ingestion, CRUD/linking API, session API/transition, opportunity, attempt,
+retry/hint, timing interpretation, mastery, progress/completion, live engine, Component C/3,
+research export, pilot, or production behavior exists. Consent/retention/deletion, relationship and
+grade ownership, lifecycle/expiry, attempts/timeouts, completion/progress, catalogue/science, and
+formal sign-off remain unresolved and fail closed.
+
+Exact next task: conduct the BE2 Limited Batch 1 closure review only. Do not add endpoints,
+lifecycle behavior, live data, scientific fields, or BE3 integration without new machine-readable
+authorization.
