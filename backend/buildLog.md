@@ -2442,3 +2442,97 @@ production, and synthetic generation remain absent and unauthorized.
 Exact next task: conduct a separate closure and security review of this limited profile/classroom
 batch against `component-b-profile-classroom-authorization.json`. Do not authorize or begin invite,
 membership, session, or scientific behavior during that review.
+
+## BE2 Profile/Classroom Limited Batch Closure and Security Review
+
+### Repository and authorization gate
+
+The review examined pushed implementation commit
+`aa037400aca212e24a4b681c9bef768b23f99fce` (`feat(backend): add teacher learner and
+classroom foundations`). Before review, the working tree was clean and local `B_frontend` exactly
+matched `origin/B_frontend`. The controlling source was
+`backend/provenance/component-b-profile-classroom-authorization.json`, decision
+`BE2_PROFILE_CLASSROOM_SCOPE_LIMITED_AUTHORIZED`.
+
+Reviewed files included revision `20260722_0004`, profile/classroom routes, application service,
+domain contracts, persistence models, repositories, unit of work, error handling, application route
+registration, profile/classroom tests, BE2 persistence tests, architecture guards, Compose and
+Docker inputs, and the preceding implementation evidence in this log. No functionality, migration,
+API, model, dependency, or test was changed during this review.
+
+### Role, ownership, profile reuse, and classroom review
+
+The implementation accepts only LEARNER and TEACHER and protects a selected profile type with both
+service checks and the database immutability trigger. Profile operations resolve the account only
+from the verified Supabase subject. Opposite-role profile access fails closed, and no parent,
+guardian, administrator, or editable role exists. `b_learners` is the sole learner profile table;
+`app_user_learner_links` supplies the unique self-owner mapping. Requests accept only the authorized
+name field, learner creation cannot set grade, and live provenance is assigned by the server as
+REAL. Email is returned only from the verified current principal and is not copied to profile rows.
+
+Teacher profiles are unique by app user. Classroom ownership is derived server-side from that
+teacher profile and cannot be supplied or overridden by the caller. Only teachers create/list/read
+classrooms; lists are owner-filtered, and absent and foreign classroom IDs both return the same
+not-found behavior. Only GRADE_2 and GRADE_3 pass request and database validation. There is no
+classroom update, grade update, learner attachment, invite, membership, QR, session, or learning
+endpoint.
+
+### Idempotency, audit, and closure blocker
+
+The service uses actor/method/operation/key-scoped PostgreSQL advisory transaction locks, canonical
+request fingerprints, atomic idempotency records, stable conflict behavior, and same-transaction
+audit writes. Audit payloads contain neutral operational identifiers and provenance rather than
+names, emails, credentials, Authorization values, or JWTs. Unit-of-work exception handling performs
+rollback, and commits occur only after resource, audit, and canonical response staging.
+
+However, the authorization's `required_tests` expressly requires identical replay, body mismatch,
+concurrency, and rollback tests for every POST command. The committed tests demonstrate teacher
+profile identical replay and mismatch, but do not demonstrate learner-profile or classroom replay
+and mismatch, concurrent duplicate submission for any POST, or injected-failure rollback integrity
+for profile/link/classroom/audit/idempotency state. The authorization exit criterion that all
+idempotency, audit, provenance, and isolation tests pass is therefore not fully evidenced. Static
+reasoning about transaction structure cannot replace the specifically required tests, so closure
+fails closed without asserting a functional defect.
+
+### Schema and API inventories
+
+PostgreSQL contained exactly the twelve authorized application tables: `app_users`, `b_learners`,
+`app_user_learner_links`, `b_runtime_bundle_records`, `b_sessions`, `b_session_events`,
+`b_idempotency_records`, `b_audit_events`, `teacher_profiles`, `classrooms`, `classroom_invites`, and
+`classroom_memberships`. Infrastructure additionally contained `alembic_version` and the existing
+`be1_persistence_check` marker. No `learner_profiles` table exists. The only non-internal triggers
+were the two previously authorized runtime-bundle guards and profile-type immutability; no trigger or
+stored procedure implements invite or membership behavior.
+
+OpenAPI contained exactly GET `/health/live`, GET `/health/ready`, GET `/api/v1/me`, POST/GET
+`/api/v1/teacher/profile`, POST/GET `/api/v1/learner/profile`, POST/GET `/api/v1/classrooms`, and GET
+`/api/v1/classrooms/{classroom_id}`. No invite, membership, QR, session, attempt, progress, or
+scientific operation was present.
+
+### Docker, migration, and security verification
+
+`docker compose config`, build, startup/status, application compilation, the complete test suite,
+migration cycle, PostgreSQL readiness, direct inventories, container identity/mount inspection, and
+targeted leakage scans were run. The suite reported `41 passed, 1 warning in 10.83s`; the warning is
+the known upstream FastAPI/Starlette TestClient deprecation. Alembic reported head
+`20260722_0004`, no new upgrade operations, successful downgrade to `20260722_0003`, and successful
+re-upgrade. PostgreSQL accepted connections.
+
+The API ran as UID/GID `10001:10001` with no mounts. PostgreSQL exposed no host port and used the
+named `upadya-be1-postgres-data` volume, which remained after shutdown. API-log and committed
+application/dependency scans found no bearer token, Authorization header, credential, test learner
+identity, Yass import, research wheel, or generator package. Stable API error handling and existing
+authentication tests retain request IDs and fail-closed token verification.
+
+### Remaining boundary, formal decision, and exact next task
+
+Invite creation, QR generation/resolution, invite reuse/expiry, memberships, learner attachment,
+sessions, attempts, progress, hints, BKT, sequencing, certification, live-engine integration,
+research export, pilot, and production remain blocked and unauthorized.
+
+Formal closure decision: `BE2_PROFILE_CLASSROOM_BATCH_NOT_CLOSED`.
+
+Exact next task: perform a narrowly scoped corrective evidence batch that adds the authorization-
+required idempotent replay, mismatched replay, concurrent duplicate, and injected-failure rollback
+tests for each of the three POST commands, without changing runtime functionality or expanding the
+API/schema boundary; then repeat this closure review.
