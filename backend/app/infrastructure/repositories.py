@@ -7,8 +7,8 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence_models import (
-    AppUser, AppUserLearnerLink, AuditEvent, Base, IdempotencyRecord,
-    Learner, RuntimeBundleRecord, SessionEvent, SessionRecord,
+    AppUser, AppUserLearnerLink, AuditEvent, Base, Classroom, IdempotencyRecord,
+    Learner, RuntimeBundleRecord, SessionEvent, SessionRecord, TeacherProfile,
 )
 
 
@@ -35,6 +35,9 @@ class SqlAlchemyNeutralRepository(Generic[ModelT]):
 class AppUserRepository(SqlAlchemyNeutralRepository[AppUser]):
     model_type = AppUser
 
+    async def find_by_subject(self, subject: str) -> AppUser | None:
+        return await self.session.scalar(select(AppUser).where(AppUser.supabase_subject == subject))
+
 
 class LearnerRepository(SqlAlchemyNeutralRepository[Learner]):
     model_type = Learner
@@ -42,6 +45,9 @@ class LearnerRepository(SqlAlchemyNeutralRepository[Learner]):
 
 class AppUserLearnerLinkRepository(SqlAlchemyNeutralRepository[AppUserLearnerLink]):
     model_type = AppUserLearnerLink
+
+    async def find_by_user(self, user_id: UUID) -> AppUserLearnerLink | None:
+        return await self.session.scalar(select(AppUserLearnerLink).where(AppUserLearnerLink.user_id == user_id))
 
 
 class RuntimeBundleRecordRepository(SqlAlchemyNeutralRepository[RuntimeBundleRecord]):
@@ -77,3 +83,21 @@ class IdempotencyRecordRepository(SqlAlchemyNeutralRepository[IdempotencyRecord]
 
 class AuditEventRepository(SqlAlchemyNeutralRepository[AuditEvent]):
     model_type = AuditEvent
+
+
+class TeacherProfileRepository(SqlAlchemyNeutralRepository[TeacherProfile]):
+    model_type = TeacherProfile
+
+    async def find_by_user(self, user_id: UUID) -> TeacherProfile | None:
+        return await self.session.scalar(select(TeacherProfile).where(TeacherProfile.user_id == user_id))
+
+
+class ClassroomRepository(SqlAlchemyNeutralRepository[Classroom]):
+    model_type = Classroom
+
+    async def list_owned(self, teacher_profile_id: UUID) -> list[Classroom]:
+        result = await self.session.scalars(select(Classroom).where(Classroom.teacher_profile_id == teacher_profile_id).order_by(Classroom.created_at_utc, Classroom.classroom_id))
+        return list(result)
+
+    async def get_owned(self, classroom_id: UUID, teacher_profile_id: UUID) -> Classroom | None:
+        return await self.session.scalar(select(Classroom).where(Classroom.classroom_id == classroom_id, Classroom.teacher_profile_id == teacher_profile_id))

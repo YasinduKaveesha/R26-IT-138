@@ -37,6 +37,8 @@ from app.infrastructure.repositories import (
 EXPECTED_TABLES = {
     "app_users", "b_learners", "app_user_learner_links", "b_runtime_bundle_records",
     "b_sessions", "b_session_events", "b_idempotency_records", "b_audit_events",
+    "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
+    "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
 }
 COMMON_COLUMNS = {
     "created_at_utc", "updated_at_utc", "actor_user_id", "system_actor", "request_id",
@@ -109,6 +111,12 @@ def test_migration_upgrade_schema_constraints_and_cycle() -> None:
                     constraint["name"] for constraint in inspector.get_unique_constraints("b_idempotency_records")
                 }
                 assert "uq_b_idempotency_records_scope" in idempotency_uniques
+                assert "profile_type" in {column["name"] for column in inspector.get_columns("app_users")}
+                assert "name" in {column["name"] for column in inspector.get_columns("b_learners")}
+                assert "learner_profiles" not in actual
+                assert "profile_type" in {column["name"] for column in inspector.get_columns("app_users")}
+                assert "name" in {column["name"] for column in inspector.get_columns("b_learners")}
+                assert "learner_profiles" not in actual
             await connection.run_sync(assertions)
         await database_engine.dispose()
 

@@ -21,11 +21,11 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     false,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy.sql import func
 
 
 SOURCE_CLASSES = ("REAL", "SYNTHETIC", "IMPORTED", "TEST")
@@ -89,12 +89,17 @@ class AppUser(ProvenanceMixin, Base):
         UniqueConstraint("supabase_subject", name="uq_app_users_supabase_subject"),
         CheckConstraint("supabase_subject <> ''", name="ck_app_users_subject_nonblank"),
         CheckConstraint("status <> ''", name="ck_app_users_status_nonblank"),
+        CheckConstraint(
+            "profile_type IS NULL OR profile_type IN ('LEARNER', 'TEACHER')",
+            name="ck_app_users_profile_type",
+        ),
         *ProvenanceMixin.provenance_constraints("app_users"),
     )
 
     user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     supabase_subject: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
+    profile_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
 
 class Learner(ProvenanceMixin, Base):
@@ -102,18 +107,22 @@ class Learner(ProvenanceMixin, Base):
     __table_args__ = (
         CheckConstraint("grade IS NULL OR grade IN (2, 3)", name="ck_b_learners_grade"),
         CheckConstraint("status <> ''", name="ck_b_learners_status_nonblank"),
+        CheckConstraint("name IS NULL OR btrim(name) <> ''", name="ck_b_learners_name_nonblank"),
         *ProvenanceMixin.provenance_constraints("b_learners"),
     )
 
     learner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     grade: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class AppUserLearnerLink(ProvenanceMixin, Base):
     __tablename__ = "app_user_learner_links"
     __table_args__ = (
         UniqueConstraint("user_id", "learner_id", name="uq_app_user_learner_links_pair"),
+        UniqueConstraint("user_id", name="uq_app_user_learner_links_user"),
+        UniqueConstraint("learner_id", name="uq_app_user_learner_links_learner"),
         *ProvenanceMixin.provenance_constraints("app_user_learner_links"),
     )
 
@@ -226,6 +235,75 @@ class AuditEvent(ProvenanceMixin, Base):
     __table_args__ = (*ProvenanceMixin.provenance_constraints("b_audit_events"),)
 
     audit_event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+
+
+class TeacherProfile(ProvenanceMixin, Base):
+    __tablename__ = "teacher_profiles"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_teacher_profiles_user"),
+        CheckConstraint("btrim(name) <> ''", name="ck_teacher_profiles_name_nonblank"),
+        *ProvenanceMixin.provenance_constraints("teacher_profiles"),
+    )
+
+    teacher_profile_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("app_users.user_id", ondelete="RESTRICT"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
+class Classroom(ProvenanceMixin, Base):
+    __tablename__ = "classrooms"
+    __table_args__ = (
+        CheckConstraint("grade IN ('GRADE_2', 'GRADE_3')", name="ck_classrooms_grade"),
+        CheckConstraint("name IS NULL OR btrim(name) <> ''", name="ck_classrooms_name_nonblank"),
+        Index("uq_classrooms_teacher_normalized_name", "teacher_profile_id", func.lower(func.btrim(text("name"))), unique=True, postgresql_where=text("name IS NOT NULL")),
+        CheckConstraint("row_version >= 0", name="ck_classrooms_row_version"),
+        *ProvenanceMixin.provenance_constraints("classrooms"),
+    )
+
+    classroom_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    teacher_profile_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("teacher_profiles.teacher_profile_id", ondelete="RESTRICT"), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    grade: Mapped[str] = mapped_column(String(16), nullable=False)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
+class ClassroomInvite(ProvenanceMixin, Base):
+    __tablename__ = "classroom_invites"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_classroom_invites_token_hash"),
+        CheckConstraint("token_hash ~ '^[0-9a-f]{64}$'", name="ck_classroom_invites_token_hash"),
+        CheckConstraint("row_version >= 0", name="ck_classroom_invites_row_version"),
+        *ProvenanceMixin.provenance_constraints("classroom_invites"),
+    )
+
+    classroom_invite_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    classroom_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("classrooms.classroom_id", ondelete="RESTRICT"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("app_users.user_id", ondelete="RESTRICT"), nullable=False)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
+class ClassroomMembership(ProvenanceMixin, Base):
+    __tablename__ = "classroom_memberships"
+    __table_args__ = (
+        UniqueConstraint("classroom_id", "learner_id", name="uq_classroom_memberships_pair"),
+        CheckConstraint("state IN ('PENDING', 'APPROVED', 'REJECTED')", name="ck_classroom_memberships_state"),
+        CheckConstraint("(state = 'PENDING' AND decided_at_utc IS NULL AND decided_by_user_id IS NULL) OR (state IN ('APPROVED', 'REJECTED') AND decided_at_utc IS NOT NULL AND decided_by_user_id IS NOT NULL)", name="ck_classroom_memberships_decision"),
+        CheckConstraint("row_version >= 0", name="ck_classroom_memberships_row_version"),
+        *ProvenanceMixin.provenance_constraints("classroom_memberships"),
+    )
+
+    classroom_membership_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    classroom_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("classrooms.classroom_id", ondelete="RESTRICT"), nullable=False)
+    learner_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False)
+    classroom_invite_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("classroom_invites.classroom_invite_id", ondelete="RESTRICT"), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    requested_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by_user_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("app_users.user_id", ondelete="RESTRICT"), nullable=True)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
 
 AUTHORIZED_TABLES = frozenset(Base.metadata.tables)

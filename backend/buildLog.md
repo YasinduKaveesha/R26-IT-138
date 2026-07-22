@@ -2299,3 +2299,146 @@ Exact next task: implement one governance-bound BE2 profile and classroom founda
 tables with invite/membership behavior policy-gated, and only the seven authorized profile/classroom
 create/read endpoints. Do not implement invite or membership endpoints, learning sessions, or
 scientific behavior.
+
+## Phase BE2 Limited — Teacher, Learner and Classroom Profile Foundations
+
+### Authorization and starting point
+
+Implementation started from clean commit `6ef693fb6ddc6837c9441f271611c743215e201f` under
+`backend/provenance/component-b-profile-classroom-authorization.json`, whose formal decision is
+`BE2_PROFILE_CLASSROOM_SCOPE_LIMITED_AUTHORIZED`. The authorization was treated as a hard boundary:
+exactly LEARNER and TEACHER profiles, profile/classroom create-read behavior, four governed table
+foundations, and no invite, membership, session, or scientific behavior.
+
+The existing `app_users` table was extended with nullable-onboarding `profile_type`, constrained to
+LEARNER or TEACHER and protected by a database trigger from later change. `b_learners` was reused as
+the learner profile and extended only with `name`; no `learner_profiles` table exists. Existing
+`grade` remains nullable and is neither accepted nor changed by profile endpoints.
+`app_user_learner_links` was reused for learner self-ownership and constrained unique by both user
+and learner, preserving a one-owning-account/one-profile boundary for this limited batch.
+
+Revision `20260722_0004` creates exactly `teacher_profiles`, `classrooms`, `classroom_invites`, and
+`classroom_memberships`. The latter two are schema foundations only. There is no token generator,
+raw token column, QR implementation, invite resolver, expiry executor, membership service, or
+membership route. The migration adds no seed data, learning table, scientific field, or blocked
+invite/membership trigger. Downgrade removes only revision `0004` objects and restores the
+`20260722_0003` schema.
+
+### API, ownership, roles, and grade enforcement
+
+Seven endpoints were added exactly as authorized:
+
+- `POST /api/v1/teacher/profile`
+- `GET /api/v1/teacher/profile`
+- `POST /api/v1/learner/profile`
+- `GET /api/v1/learner/profile`
+- `POST /api/v1/classrooms`
+- `GET /api/v1/classrooms`
+- `GET /api/v1/classrooms/{classroom_id}`
+
+Profile creation provisions or reuses the `app_users` mapping for the verified Supabase subject and
+atomically selects one immutable profile type. A second or opposite profile fails with the stable
+conflict envelope. Teacher and learner reads resolve only through the verified subject mapping.
+Teacher-only classroom operations derive `teacher_profile_id` server-side; callers cannot submit an
+owner. Lists filter by owner, and an absent or foreign classroom ID returns the same not-found
+response to prevent enumeration. Learners receive FORBIDDEN for classroom creation.
+
+Classroom requests accept only optional `name` and required `grade`. Pydantic and PostgreSQL both
+restrict grade to `GRADE_2` or `GRADE_3`; every other grade fails. A normalized non-null classroom
+name is unique within one teacher's classrooms. No update endpoint exists, so classroom grade,
+ownership, archive, transfer, and deletion remain immutable/unavailable in this scope.
+
+### Provenance, audit, idempotency, and privacy
+
+All endpoint mutations assign REAL provenance on the server from the verified app-user actor. No
+provenance field is accepted in request bodies. Records include request, operation, reason,
+resource, source system, environment, schema revision, and server timestamps. Profile and classroom
+creation append `b_audit_events` in the same transaction. Tests confirm REAL provenance and audit
+records; TEST, SYNTHETIC, and IMPORTED values have no live request field through which they can enter.
+
+Every POST requires `Idempotency-Key`. The service serializes an actor/method/operation/key scope
+with a PostgreSQL transaction advisory lock, fingerprints the strict canonical body, persists the
+idempotency record atomically with the mutation and audit, returns the canonical response for an
+identical replay, and returns stable conflict for body mismatch. Learner creation orders learner and
+owning-link persistence explicitly so the foreign-key relationship commits atomically.
+
+Profile responses contain only the authorization allow-list. Verified email is read from the
+authenticated principal and is not copied into `app_users`, `teacher_profiles`, or `b_learners`.
+The backend stores no password or JWT. Logs contain request IDs and route/status evidence but no
+Authorization header, bearer token, invite token, password, credential, learner name, or email.
+
+### Files created and changed
+
+Created application files:
+
+- `app/api/routes/profile_classroom.py`
+- `app/application/profile_classroom.py`
+- `app/domain/profile_classroom.py`
+- `migrations/versions/20260722_0004_profile_classroom_foundations.py`
+- `tests/test_profile_classroom.py`
+
+Changed application and test files:
+
+- `app/core/errors.py`
+- `app/infrastructure/persistence_models.py`
+- `app/infrastructure/repositories.py`
+- `app/main.py`
+- `tests/test_be2_architecture_guards.py`
+- `tests/test_be2_persistence.py`
+
+This append-only section is the only documentation change.
+
+### Verification results
+
+The required final Docker run used a no-cache build from pinned dependency and base-image inputs.
+The final API manifest-list digest was
+`sha256:c2dbabc5c58cebe4f284b7bf8e99f825b8e1e1903bc844a37e21f3d7e0d4b7e3`.
+Compose configuration, startup and status passed; Python compilation passed. Focused profile,
+classroom, migration-boundary, and architecture tests reported `10 passed, 1 warning`. The complete
+suite reported `41 passed, 1 warning in 9.29s`. The warning is the already-recorded upstream
+FastAPI/Starlette TestClient deprecation.
+
+Alembic upgrade/current/check, downgrade from `20260722_0004` to `20260722_0003`, and re-upgrade to
+head passed. Final revision was `20260722_0004`; `alembic check` reported no new operations and
+PostgreSQL readiness passed. Metadata inspection confirmed twelve application tables: the original
+eight plus exactly the four authorized foundations. Infrastructure additionally retains
+`alembic_version` and the pre-existing `be1_persistence_check` marker. Existing runtime-bundle
+eligibility and checksum-integrity triggers remain installed alongside the authorized profile-type
+immutability trigger.
+
+OpenAPI contains only `/health/live`, `/health/ready`, `/api/v1/me`, and the seven new authorized
+operations grouped across four paths. No invite, membership, session, attempt, hint, or progress
+path exists. Architecture/source/dependency guards confirm no QR code, session lifecycle, BKT,
+sequencing, certification, task generation, Yass import, `component_b_generator`, or research wheel.
+
+The API remained UID/GID `10001:10001` with no mounts. PostgreSQL exposed no host port and used only
+the named `upadya-be1-postgres-data` volume. Targeted log and image-history scans returned no token,
+credential, password, raw-JWT, invite-token, Yass, generator, or wheel match. After shutdown, the
+named database volume remained present.
+
+### Errors, causes, and fixes
+
+The local Conda environment lacked the committed PyJWT runtime, so local byte-compilation passed but
+the authoritative import/test run was performed in Docker from `requirements.lock`. The first
+focused Docker run exposed a TestClient harness issue: requests reopened event loops while sharing
+the global async connection pool. Tests now keep each client context open across its request flow.
+An old architecture guard also compared migration `0002` alone with the final twelve-table set; it
+now separately verifies the original eight-table revision and the four-table `0004` revision.
+
+Learner creation initially flushed the ownership link before its referenced learner because the
+models intentionally have no ORM relationship navigation. Explicitly flushing `b_learners` before
+`app_user_learner_links` fixed the foreign-key ordering while keeping both writes, idempotency, and
+audit in one transaction. All corrected focused and complete tests then passed.
+
+### Remaining boundary and exact next task
+
+Invite creation, QR generation/scanning, token resolution/reuse/expiry, membership requests,
+approval/rejection, classroom learner lists, learner classroom lists, and multi-classroom policy
+remain blocked. Learning sessions and all session transitions, questions, opportunities, attempts,
+retries, hints, timing interpretation, BKT, mastery, Guess-Guard, certification, sequencing,
+progress, completion, live-engine integration, Component C, Component 3, research export, pilot,
+production, and synthetic generation remain absent and unauthorized.
+
+Exact next task: conduct a separate closure and security review of this limited profile/classroom
+batch against `component-b-profile-classroom-authorization.json`. Do not authorize or begin invite,
+membership, session, or scientific behavior during that review.

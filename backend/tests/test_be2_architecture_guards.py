@@ -17,6 +17,11 @@ EXPECTED_TABLES = {
     "b_session_events",
     "b_idempotency_records",
     "b_audit_events",
+    "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
+    "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
+}
+BE2_BASE_TABLES = EXPECTED_TABLES - {
+    "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships"
 }
 PROHIBITED_COLUMN_TERMS = {
     "mastery", "bkt", "guess_guard", "certif", "sequenc", "hint", "answer",
@@ -41,6 +46,14 @@ def test_no_new_api_route_or_lifecycle_service() -> None:
         ("/health/live", ("GET",)),
         ("/health/ready", ("GET",)),
         ("/api/v1/me", ("GET",)),
+        ("/api/v1/teacher/profile", ("GET", "POST")),
+        ("/api/v1/learner/profile", ("GET", "POST")),
+        ("/api/v1/classrooms", ("GET", "POST")),
+        ("/api/v1/classrooms/{classroom_id}", ("GET",)),
+        ("/api/v1/teacher/profile", ("GET", "POST")),
+        ("/api/v1/learner/profile", ("GET", "POST")),
+        ("/api/v1/classrooms", ("GET", "POST")),
+        ("/api/v1/classrooms/{classroom_id}", ("GET",)),
     }
     assert not any(Path("app").rglob("*session*service*.py"))
 
@@ -78,7 +91,7 @@ def test_dependency_files_exclude_research_generator() -> None:
 def test_migration_introduces_only_authorized_tables_and_no_triggers_or_seed_data() -> None:
     migration = Path("migrations/versions/20260722_0002_be2_neutral_persistence.py").read_text(encoding="utf-8")
     created = set(re.findall(r'op\.create_table\(\s*"([^"]+)"', migration))
-    assert created == EXPECTED_TABLES
+    assert created == BE2_BASE_TABLES
     lowered = migration.lower()
     assert "create_trigger" not in lowered
     assert "create trigger" not in lowered
@@ -99,3 +112,29 @@ def test_corrective_migration_adds_only_the_two_authorized_integrity_guards() ->
     assert "insert into" not in lowered
     assert "component_b_generator" not in lowered
     assert "yass" not in lowered
+
+
+def test_profile_classroom_migration_and_routes_stay_within_authorization() -> None:
+    migration = Path("migrations/versions/20260722_0004_profile_classroom_foundations.py").read_text(encoding="utf-8")
+    assert set(re.findall(r'op\.create_table\(\s*"([^"]+)"', migration)) == {"teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships"}
+    lowered = migration.lower()
+    assert "learner_profiles" not in lowered
+    assert "bulk_insert" not in lowered
+    assert "component_b_generator" not in lowered
+    assert "yass" not in lowered
+    paths = set(app.openapi()["paths"])
+    assert not any("invite" in path or "membership" in path for path in paths)
+    assert not any("session" in path or "attempt" in path or "hint" in path for path in paths)
+
+
+def test_profile_classroom_migration_and_routes_stay_within_authorization() -> None:
+    migration = Path("migrations/versions/20260722_0004_profile_classroom_foundations.py").read_text(encoding="utf-8")
+    assert set(re.findall(r'op\.create_table\(\s*"([^"]+)"', migration)) == {"teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships"}
+    lowered = migration.lower()
+    assert "learner_profiles" not in lowered
+    assert "bulk_insert" not in lowered
+    assert "component_b_generator" not in lowered
+    assert "yass" not in lowered
+    paths = set(app.openapi()["paths"])
+    assert not any("invite" in path or "membership" in path for path in paths)
+    assert not any("session" in path or "attempt" in path or "hint" in path for path in paths)
