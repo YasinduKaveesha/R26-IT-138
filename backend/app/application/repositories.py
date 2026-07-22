@@ -25,4 +25,3 @@ class IdempotencyRepository(NeutralRepository[ModelT], Protocol[ModelT]):
 
 class AuditRepository(NeutralRepository[ModelT], Protocol[ModelT]):
     """Append/read contract; no update or delete operation is authorized."""
-

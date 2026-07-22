@@ -77,4 +77,3 @@ class IdempotencyRecordRepository(SqlAlchemyNeutralRepository[IdempotencyRecord]
 
 class AuditEventRepository(SqlAlchemyNeutralRepository[AuditEvent]):
     model_type = AuditEvent
-
