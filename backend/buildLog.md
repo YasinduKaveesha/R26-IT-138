@@ -2166,3 +2166,136 @@ Exact next task: obtain the named product, security, privacy/child-safety, acade
 owner decisions recorded in `component-b-be2-next-scope-authorization.json`, then issue a narrower
 machine-readable authorization before implementation. Do not begin implementation from architecture
 proposals alone.
+
+## Teacher, Learner, Classroom and QR Membership Governance Authorization Review
+
+### Agreed product model and authority
+
+This governance-only review records the newly agreed application model of exactly two profile types:
+`LEARNER` and `TEACHER`. Parent, guardian, administrator, school-administrator, supervisor,
+operator, researcher, and every other application role are prohibited. Supabase remains the sole
+authentication provider; the backend stores no password, raw JWT, refresh token, or editable role
+claim. One authenticated account may create one immutable profile type and may not hold both.
+
+The review considered the prior BE2 authorizations and build evidence, backend and frontend plans,
+the Component B application architectures, current stable error contract, persistence and repository
+foundations, migration history through `20260722_0003`, Component B session/response specifications,
+and current shared and Component B registers. The previous
+`BE2_NEXT_SCOPE_NOT_AUTHORIZED` record remains preserved as decision history. The new agreed product
+decisions supersede its ownership and role blockers only for the profile/classroom scope documented
+in `backend/provenance/component-b-profile-classroom-authorization.json`.
+
+No code, model, migration, API, dependency, test, table, session behavior, or scientific logic was
+created or modified during this review.
+
+### Table reuse and persistence decision
+
+Creating both `learner_profiles` and `b_learners` would duplicate the same operational learner.
+Therefore no `learner_profiles` table is authorized. `app_users` is reused and may later be extended
+only with a nullable-during-onboarding, then immutable, `LEARNER`/`TEACHER` profile discriminator.
+`b_learners` remains the learner profile and may be minimally extended with a bounded nonblank name.
+Its existing nullable numeric grade remains non-client-writable and is not the classroom-context
+authority. `app_user_learner_links` remains the one self-ownership link for a LEARNER account in
+this limited scope; it must not encode teacher classroom access.
+
+`teacher_profiles` and `classrooms` are authorized new tables. A teacher profile belongs uniquely to
+one TEACHER account. A classroom belongs to exactly one teacher, carries exactly one `GRADE_2` or
+`GRADE_3`, and may have an optional name/section. Teacher-owned normalized classroom names must be
+unique when present. Classroom transfer, archive, deletion, update, and post-membership grade change
+are not authorized.
+
+`classroom_invites` and `classroom_memberships` are authorized as policy-gated persistence
+foundations only. Invite rows store a unique token hash, never a raw token, and allow future expiry
+and revocation evidence. Membership rows use only `PENDING`, `APPROVED`, and `REJECTED`, link one
+learner and classroom through an invite, and record the owning teacher's decision. Their live
+mutation and retrieval endpoints remain disabled until multi-classroom and invite policies are
+approved.
+
+### Ownership, classroom, grade, and membership decisions
+
+One teacher may own multiple classrooms; one classroom has one teacher and one grade; and one
+classroom may contain multiple approved learners. Teachers may access only owned classrooms and
+minimum learner identity attached through approved memberships. Learners may access only their own
+profile and memberships. UUID possession and editable token metadata never authorize access.
+
+The owning teacher selects `GRADE_2` or `GRADE_3` at classroom creation. An approved learner's
+learning context inherits that classroom grade, and the learner cannot override it. Grade 1,
+Grade 4, and every other grade fail validation. Changing classroom grade after any membership exists
+remains unresolved and fail-closed. Whether one learner may join multiple classrooms, including
+cross-grade behavior, remains unresolved; no product cardinality was invented.
+
+Scanning a valid invite may eventually create only a PENDING membership request. It can never grant
+APPROVED membership. Only the owner of that classroom may change PENDING to APPROVED or REJECTED.
+Duplicate join commands must be idempotent. No membership transition can create a session, alter
+learner grade storage, or expose progress or scientific information.
+
+### QR invite and security rules
+
+A QR code represents a random, unguessable invite token rather than a raw classroom ID. Only a
+safely derived unique hash may be persisted. The raw token is a one-time response value for QR
+construction and must never enter logs, audit data, ordinary canonical-response storage,
+diagnostics, URLs under backend control, or database fields. Invites support revocation and may
+carry expiry; revoked and expired values fail closed. The token exposes no teacher email, learner
+data, database identifier, credential, or application secret.
+
+Token format, entropy construction, cryptographic implementation, expiry duration, and reuse across
+different learners were deliberately not invented. Consequently, live invite issuance, resolution,
+membership request, decision, and retrieval endpoints remain policy-gated and non-executable until
+those decisions and learner multi-classroom behavior are approved.
+
+### Endpoint authorization and privacy boundary
+
+Seven minimal endpoints are authorized for a future bounded implementation batch: create/read own
+teacher profile; create/read own learner profile; and create/list/read teacher-owned classrooms.
+Their exact request fields, response fields, role and ownership checks, stable errors, idempotency,
+audit, privacy rules, and prohibited side effects are recorded in the machine authorization.
+
+The eight invite and membership endpoint candidates are documented but marked
+`POLICY_GATED_NOT_EXECUTABLE`. They must be absent or fail with the stable fail-closed service error
+without mutation. This limited split allows identity and classroom foundations to proceed without
+silently deciding invite reuse, expiry, or learner multi-classroom cardinality.
+
+Live mutations use server-assigned REAL provenance derived from the verified `app_users` actor.
+TEST and SYNTHETIC provenance is restricted to isolated test environments; TEST, SYNTHETIC, and
+IMPORTED provenance is rejected on live paths. Profile tables store only the minimum name and opaque
+IDs. Verified email may be returned from the current authentication contract but is not duplicated
+in profile tables. No name, email, token, or learner identity enters logs or audit payloads. No
+research export or operational-to-research identity join is authorized.
+
+Retention, withdrawal, deletion, account/profile deactivation, profile updates, classroom updates,
+and invite revocation APIs remain unresolved. The limited scope does not authorize pilot or
+production, so these issues remain fail-closed rather than being filled with assumptions.
+
+### Authorized and prohibited scope
+
+The next implementation batch may reuse/extend the three existing identity tables as specified;
+create `teacher_profiles`, `classrooms`, and policy-gated invite/membership tables; and implement only
+the seven explicitly authorized profile/classroom create/read endpoints using existing auth,
+idempotency, audit, REAL provenance, unit-of-work, request-ID, and stable-error foundations. It must
+prove role exclusivity, one-profile ownership, cross-teacher and cross-learner isolation, exact grade
+validation, atomic replay, privacy allow-lists, provenance separation, audit completeness, migration
+reversibility, schema drift absence, and architecture isolation.
+
+Learning-session creation and every session transition remain prohibited. Question generation,
+opportunities, attempts, retries, hints, response-time interpretation, BKT, mastery, Guess-Guard,
+certification, sequencing, progress, completion, Component B live-engine integration, Component C,
+Component 3, research export, synthetic generation, pilot, production, Yass source, and any research
+wheel or generator dependency remain blocked.
+
+### Unresolved decisions and formal authorization
+
+Before invite or membership endpoints can execute, the product owner must approve learner
+multi-classroom and cross-grade behavior plus cross-learner invite reuse; the security owner must
+approve the token and expiry contract; and the privacy/child-safety owner must approve that flow.
+Retention, deletion, withdrawal, and deactivation require their own governance before pilot or
+production. These blockers do not authorize default behavior.
+
+The formal decision is:
+
+`BE2_PROFILE_CLASSROOM_SCOPE_LIMITED_AUTHORIZED`
+
+Exact next task: implement one governance-bound BE2 profile and classroom foundation batch against
+`component-b-profile-classroom-authorization.json`: the specified table reuse/extensions, four new
+tables with invite/membership behavior policy-gated, and only the seven authorized profile/classroom
+create/read endpoints. Do not implement invite or membership endpoints, learning sessions, or
+scientific behavior.
