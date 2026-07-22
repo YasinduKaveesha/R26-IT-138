@@ -1869,3 +1869,87 @@ Exact next task: perform a governance-bound BE2 Limited Batch 1 corrective patch
 failed database invariants and their tests, then repeat this closure review. Do not authorize or
 begin endpoints, executable lifecycle transitions, live learner data, attempts, progress,
 scientific logic, or Component B engine integration.
+
+## BE2 Limited Batch 1 Corrective Patch — Runtime Bundle Eligibility and Immutability
+
+### Scope and implementation
+
+Starting from commit `0aa408da67a208eed4eced204578871ba39570d1`, this corrective patch addresses
+only the two database integrity gaps identified by the preceding closure review. Alembic revision
+`20260722_0003` follows `20260722_0002` and installs two PostgreSQL trigger functions and two
+triggers. It creates no table, column, seed, endpoint, lifecycle service, or scientific behavior.
+
+`enforce_b_session_active_bundle_eligibility` rejects a direct insert or update that would leave an
+`active` session referencing a runtime bundle unless the existing bundle fields are exactly
+`publication_state = 'PUBLISHED'`, `approval_status = 'APPROVED'`, and
+`immutable_after_publication = true`. It also locks the selected bundle row during the check.
+`enforce_b_runtime_bundle_integrity` rejects a checksum change when the old bundle row is both
+published and immutable. The same bundle-side guard prevents publication, approval, or immutability
+changes from making a bundle ineligible while an active session references it. All rejections use
+PostgreSQL check-violation SQLSTATE `23514` and named constraints. No status or eligibility rule was
+invented beyond the authorized existing fields and literals.
+
+Files created:
+
+- `migrations/versions/20260722_0003_bundle_integrity_guards.py`
+- `tests/test_be2_bundle_integrity.py`
+
+File changed:
+
+- `tests/test_be2_architecture_guards.py`
+
+The migration, focused test, and architecture-guard SHA-256 values at verification time were,
+respectively, `6FDA45920C217D2271CDFEF603D6141153C4C5AFC69BFCD24D0943EFB7570F99`,
+`C8DFA12363B55C4A919A98C0A92490E34B2D9745C6B9DF66EAAA69692EE1D2B8`, and
+`0FC562CF825080445BD02D2A3F3A0F4B6903317C93A531758C77DC28A6E8A6F6`.
+
+### Direct-SQL and test evidence
+
+The focused Docker test ran direct SQL through SQLAlchemy rather than repositories or application
+services. It proved that non-active technical-failure persistence remains possible with a draft
+bundle; direct insert of an active session with a draft bundle fails; direct insert with an
+unresolved bundle fails; an eligible published/approved/immutable bundle succeeds; direct update
+from non-active to active with a draft bundle fails; repointing an active session to a draft bundle
+fails; and revoking approval from a bundle referenced by an active session fails without changing
+the original data. A second direct-SQL test proved that a draft mutable checksum can change, an
+unchanged published checksum remains valid, and changing the checksum of a published immutable
+bundle fails while preserving the original checksum.
+
+Focused result: `2 passed in 2.48s`. Complete result: `37 passed, 1 warning in 7.88s`. The warning is
+the previously recorded upstream FastAPI/Starlette TestClient deprecation and is unrelated to the
+patch. `python -m compileall app` passed. Architecture guards verify that revision `0003` contains
+only the exact two functions and triggers, creates no table, contains no seed insert, and introduces
+no Yass or generator reference.
+
+### Docker, migration, metadata, and isolation verification
+
+`docker compose config --quiet`, `docker compose build`, `docker compose up -d`, container status,
+compilation, focused pytest, and full pytest passed. The built API image manifest-list digest was
+`sha256:06c5d48a09cac72097481f83f8291219b57cb99533e823743c814b43c6294007`.
+The API and database were healthy; PostgreSQL 16 remained pinned by digest and exposed only its
+container port. The API remained UID/GID `10001:10001`, had no source mount, and the named
+`upadya-be1-postgres-data` volume remained configured.
+
+Alembic upgrade/current/check, downgrade from `20260722_0003` to `20260722_0002`, and re-upgrade to
+head passed. `alembic check` reported no new operations, final head was `20260722_0003`, and
+`pg_isready` reported accepting connections. PostgreSQL metadata showed exactly
+`trg_b_sessions_active_bundle_eligible` on `b_sessions` and `trg_b_runtime_bundle_integrity` on
+`b_runtime_bundle_records`, backed by the two named functions. The table set remained the authorized
+eight tables plus `alembic_version` and the pre-existing `be1_persistence_check` marker.
+
+Compose inspection confirmed `DATABASE_URL` still uses hostname `db`, PostgreSQL has no host port,
+and the API has no source volume. Image history and service logs showed no added secrets, tokens, or
+Authorization headers. Application logs contained only existing structured health events and
+request IDs. OpenAPI paths remained exactly `/health/live`, `/health/ready`, and `/api/v1/me`.
+Dependency/source guards and container tests confirmed that no Yass source,
+`component_b_generator`, research wheel, or scientific runtime dependency was introduced.
+
+### Limits and next task
+
+This patch does not authorize or implement public endpoints, session lifecycle transitions, real
+learner ingestion, attempts, progress, BKT, sequencing, hints, Component B engine integration,
+Component C/3, pilot, or production behavior. It does not declare BE2 Limited Batch 1 closed.
+
+Exact next task: conduct a separate BE2 Limited Batch 1 closure re-review against the corrected
+database invariants and all original authorization gates. Do not begin any later behavior or phase
+unless that review issues a new formal authorization.

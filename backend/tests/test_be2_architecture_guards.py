@@ -84,3 +84,18 @@ def test_migration_introduces_only_authorized_tables_and_no_triggers_or_seed_dat
     assert "create trigger" not in lowered
     assert "bulk_insert" not in lowered
     assert "op.execute" not in lowered
+
+
+def test_corrective_migration_adds_only_the_two_authorized_integrity_guards() -> None:
+    migration = Path("migrations/versions/20260722_0003_bundle_integrity_guards.py").read_text(
+        encoding="utf-8"
+    )
+    assert not re.findall(r'op\.create_table\(\s*"([^"]+)"', migration)
+    assert "enforce_b_session_active_bundle_eligibility" in migration
+    assert "trg_b_sessions_active_bundle_eligible" in migration
+    assert "enforce_b_runtime_bundle_integrity" in migration
+    assert "trg_b_runtime_bundle_integrity" in migration
+    lowered = migration.lower()
+    assert "insert into" not in lowered
+    assert "component_b_generator" not in lowered
+    assert "yass" not in lowered
