@@ -2061,3 +2061,108 @@ The formal closure decision is:
 Exact next task: obtain a new machine-readable governance authorization defining the next narrowly
 scoped BE2 batch before implementing any endpoint, lifecycle transition, real-user ingestion,
 attempt, progress, scientific field, or Component B live-engine integration.
+
+## Post-BE2 Limited Batch 1 Governance Authorization Review
+
+### Review purpose and sources
+
+This governance-only review followed formal closure of BE2 Limited Batch 1 at corrective commit
+`7a7b03ccbb972b8a3fabe7f6686e6f9d17cbd0f7`, migration head `20260722_0003`, and the verified
+`37 passed, 1 known upstream warning` baseline. It changed no application code, migration, API,
+test, dependency, database model, or scientific logic.
+
+The review considered the existing BE2 machine authorization and build evidence; `backend.md` and
+`frontend.md`; the Component B backend/frontend architecture and Component B architecture; the
+generator specification and proposed learner-response/attempt specification; the Component B
+variable and shared-foundation decision registers; the persistence models, repository contracts,
+and migration history through `20260722_0003`. Its resulting machine record is
+`backend/provenance/component-b-be2-next-scope-authorization.json`.
+
+Architecture documents describe a future target, but they are not by themselves authorization to
+create real child records or execute lifecycle behavior. The proposed response/attempt specification
+is scientific research specification material, remains proposed for approval, and includes synthetic
+behavior that the live backend is prohibited from importing or executing. Shared generator decisions
+do not resolve application ownership, consent, access-control, or lifecycle policy.
+
+### Account, ownership, and learner-profile findings
+
+The verified Supabase subject is the external identity key and is conceptually mapped to
+`app_users`; it must never be used as `learner_id`. However, there is no approved provisioning rule
+for creating or activating that mapping. Account-to-learner cardinality remains explicitly
+unresolved. The sources also contain incompatible role vocabularies: one proposes
+learner/supervisor/operator, while the broader architecture proposes learner/guardian/teacher/
+researcher/admin. No source with sufficient authority selects the application vocabulary or exact
+capabilities.
+
+Consequently, learner create, list, retrieve, update, deactivate, link, and unlink APIs are not
+authorized. Grade remains schema-constrained to nullable 2 or 3, but required grade, assignment
+authority, and grade-change authority are unresolved. No learner-profile response fields are newly
+authorized; names, contacts, birth data, diagnosis, population, subtype, hidden truth, and research
+membership remain prohibited. The existing `/api/v1/me` response remains limited to its already
+implemented `user_id` and verified email contract and is not expanded to roles or learner data.
+
+### Session lifecycle and preparation findings
+
+The seven state strings remain authorized only as schema vocabulary: `starting`, `active`,
+`completing`, `completed`, `abandoned`, `expired`, and `technical_failed`. No start, prepare, resume,
+abandon, expire, complete, recovery, replacement, or other transition is authorized. The existing
+database rule permitting at most one starting or active session per learner remains unchanged; it
+does not authorize creating either state.
+
+Creating a session without selecting a question could be architecturally separable, but it is still
+a lifecycle mutation. Learner ownership, consent, expiry and recovery semantics, the exact response
+contract, and an approved live runtime-bundle resolution path are missing. Learner ID, grade, and a
+bundle ID are therefore not sufficient authority. The first question remains blocked until a
+separately authorized BE3 live-engine integration. Session preparation is treated as a BE2
+lifecycle concern with BE3 prerequisites, not as implicit BE4 authority, and is not authorized now.
+
+### Provenance, privacy, idempotency, and audit findings
+
+REAL records may not yet be created. A future live command must server-assign `source_class=REAL`,
+derive the actor from a verified subject-to-`app_users` mapping, and record request, operation,
+reason, resource, source system, environment, schema revision, and server timestamp. Client-supplied
+provenance must never select REAL. TEST and SYNTHETIC fixtures remain confined to isolated test
+databases; TEST, SYNTHETIC, and IMPORTED source classes must be rejected by any future live path.
+
+The minimum future learner record is an opaque pseudonymous learner ID, governed grade, and neutral
+status. Consent, retention, withdrawal, deletion or irreversible anonymization, identity separation,
+and child-safety ownership require approval before REAL admission. No research export or operational
+identity-to-research join is authorized.
+
+Every future state-changing command must use the existing actor/method/operation/key idempotency
+scope, canonical body fingerprint, atomic response persistence, identical replay, body-mismatch
+conflict, and concurrency protection. Future profile and lifecycle changes require append-only audit
+evidence including actor, request, reason, target, before/after version references, timestamp,
+environment, and required approval evidence. These future requirements do not authorize a command.
+
+### Authorized boundary and still-blocked behavior
+
+No new table, column, endpoint, request field, response field, lifecycle transition, or live mutation
+is authorized. The existing eight application tables and the existing health and `/api/v1/me`
+endpoints remain unchanged. Fail-closed behavior prohibits inferring learner ownership from subject,
+email, UUID possession, or editable token metadata; assigning default grade, role, consent, expiry,
+or bundle; or creating application-user, learner, relationship, or session rows through live requests.
+
+Item opportunities, answer attempts, hints, retries, timing interpretation, BKT, mastery,
+sequencing, Guess-Guard, certification, progress, completion, Component B live-engine integration,
+Yass generator installation, Component C, Component 3, research export, pilot, and production all
+remain blocked.
+
+### Decision and exit requirements
+
+No smallest executable application scope can be stated without inventing policy. Before another
+authorization can be issued, named owners must approve account-to-learner cardinality and
+provisioning, one reconciled role/capability vocabulary, learner profile and grade authority, and
+REAL-data consent/retention/withdrawal/deletion rules. Any proposed session-preparation batch must
+also approve its exact transitions, ownership checks, response fields, idempotency, audit, expiry
+and recovery behavior, and eligible runtime-bundle path. The new machine record enumerates the
+required future tests and exit gates.
+
+The formal decision is:
+
+`BE2_NEXT_SCOPE_NOT_AUTHORIZED`
+
+Exact next task: obtain the named product, security, privacy/child-safety, academic, and governance
+owner decisions recorded in `component-b-be2-next-scope-authorization.json`, then issue a narrower
+machine-readable authorization before implementation. Do not begin implementation from architecture
+proposals alone.
