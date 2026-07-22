@@ -1953,3 +1953,111 @@ Component C/3, pilot, or production behavior. It does not declare BE2 Limited Ba
 Exact next task: conduct a separate BE2 Limited Batch 1 closure re-review against the corrected
 database invariants and all original authorization gates. Do not begin any later behavior or phase
 unless that review issues a new formal authorization.
+
+## BE2 Limited Batch 1 Closure Re-Review — Runtime Bundle Integrity Confirmation
+
+### Repository state and review authority
+
+This re-review began with a clean working tree at corrective commit
+`7a7b03ccbb972b8a3fabe7f6686e6f9d17cbd0f7` (`fix(backend): enforce runtime bundle integrity
+guards`). Local `B_frontend` exactly matched `origin/B_frontend`, confirming the corrective commit
+was present on the remote. The underlying BE2 persistence implementation is commit `c516683`, with
+file-ending normalization in `488dff0`; the first closure review is commit `0aa408d`. The governing
+machine-readable authority remains
+`backend/provenance/component-b-be2-governance-authorization.json`, introduced by commit `74676f8`.
+
+The authorization, revisions `20260722_0002` and `20260722_0003`, direct-SQL integrity tests,
+architecture guards, persistence models, application and SQLAlchemy repository contracts, previous
+closure evidence, and corrective-patch evidence were reviewed. No functionality was implemented or
+modified during this re-review; only this append-only evidence was added.
+
+### Previous blockers and corrective database objects
+
+The previous decision was `BE2_LIMITED_BATCH_1_NOT_CLOSED` because direct SQL could create an active
+session against a draft/unresolved bundle and could change the checksum of a published immutable
+bundle. Revision `20260722_0003` corrects those two failures with database-level enforcement:
+
+- `enforce_b_session_active_bundle_eligibility()` and
+  `trg_b_sessions_active_bundle_eligible` enforce that every inserted or updated `active` session
+  references a bundle whose existing fields are `PUBLISHED`, `APPROVED`, and immutable.
+- `enforce_b_runtime_bundle_integrity()` and `trg_b_runtime_bundle_integrity` prevent checksum
+  changes to a published immutable bundle and prevent a bundle referenced by an active session from
+  being changed into an ineligible state.
+
+PostgreSQL metadata confirmed both functions and both triggers at revision `20260722_0003`. The
+session trigger is `BEFORE INSERT OR UPDATE OF state, runtime_bundle_record_id`; the bundle trigger
+is `BEFORE UPDATE OF manifest_checksum, publication_state, approval_status,
+immutable_after_publication`. Existing foreign keys, checks, uniqueness constraints, and the
+one-starting-or-active-session partial unique index remain in effect. The corrective revision adds
+no table, column, seed, endpoint, service, or scientific field.
+
+### Invariant and direct-SQL confirmation
+
+The focused tests exercise the PostgreSQL guards rather than relying on repository or application
+validation. They confirm that direct insertion of an active session against a draft bundle fails;
+an unresolved bundle fails; a published, approved, immutable bundle succeeds; a pre-existing
+non-active technical-failure record retains its already-authorized behavior; transition to active
+against an ineligible bundle fails; repointing an active session to an ineligible bundle fails; and
+failed writes are rolled back without leaving rejected records. They also confirm that eligibility
+cannot be revoked while an active session references the bundle.
+
+For checksum immutability, a draft mutable checksum change remains allowed, a no-op update of the
+published checksum remains allowed, and a direct-SQL checksum change for a published immutable
+bundle fails. After the failed update, the original checksum remains stored. These results confirm
+that direct SQL cannot bypass either invariant and that enforcement does not introduce executable
+lifecycle behavior.
+
+### Docker, tests, migrations, and schema inspection
+
+`docker compose config`, `docker compose build`, `docker compose up -d`, and `docker compose ps`
+passed. The build used pinned Python `3.11.15-slim-bookworm` and PostgreSQL `16.10-bookworm` image
+digests; the API image manifest-list digest for this review was
+`sha256:b2d617c3a5e0a50fc32e75ef9991d0382aa3359a473d74840f00d63de4a01991`.
+`python -m compileall app` passed. The complete Docker test run collected 37 tests and reported
+`37 passed, 1 warning in 7.90s`; the sole warning is the already-recorded upstream
+FastAPI/Starlette TestClient deprecation. Provenance, idempotency, audit, repositories, rollback,
+architecture guards, and the two focused integrity tests all passed.
+
+Alembic upgrade, current, check, downgrade to `20260722_0002`, and re-upgrade passed. Final current
+revision was `20260722_0003 (head)`, `alembic check` reported `No new upgrade operations detected`,
+and PostgreSQL reported accepting connections. There is no schema drift.
+
+The exact eight authorized application tables remain `app_users`, `b_learners`,
+`app_user_learner_links`, `b_runtime_bundle_records`, `b_sessions`, `b_session_events`,
+`b_idempotency_records`, and `b_audit_events`. PostgreSQL additionally contains only
+infrastructure-owned `alembic_version` and the pre-existing `be1_persistence_check` marker.
+Model/migration inspection and passing exact-schema tests confirm that no unauthorized column or
+additional table was introduced.
+
+### Architecture, isolation, and leakage boundary
+
+OpenAPI still exposes only `/health/live`, `/health/ready`, and `/api/v1/me`. No session or learner
+endpoint, lifecycle transition service, real-user ingestion, attempt, item-opportunity, progress,
+completion, BKT, sequencing, hint, Guess-Guard, certification, task generation, or Component B
+live-engine integration exists. Repository contracts remain neutral add/get/existence operations,
+plus the already-authorized scoped idempotency lookup.
+
+The API ran as UID/GID `10001:10001` and had no mounts. PostgreSQL exposed no host port and retained
+only the named `upadya-be1-postgres-data` volume; after `docker compose down`, volume inspection
+confirmed that the named database volume was preserved. Application-content inspection found no Yass
+source, `component_b_generator`, or wheel. Dependency and architecture guards found no research
+generator dependency or import. Targeted scans of service logs and image history found no token,
+Authorization header, secret, JWT, research-generator, or wheel leakage.
+
+### Remaining risks, closure decision, and next task
+
+The corrective objects close the two technical blockers without widening the authorized scope.
+All policy and scientific matters recorded as unresolved in the authorization remain unresolved and
+fail closed, including learner relationship and grade ownership, lifecycle and expiry semantics,
+attempts and timeouts, completion and safe progress, catalogue approval and response mappings,
+scientific parameters, privacy/retention, formal owner approval, and live-engine activation.
+Closure of this limited persistence foundation does not authorize additional BE2 behavior, a live
+learner flow, pilot, or production.
+
+The formal closure decision is:
+
+`BE2_LIMITED_BATCH_1_CLOSED`
+
+Exact next task: obtain a new machine-readable governance authorization defining the next narrowly
+scoped BE2 batch before implementing any endpoint, lifecycle transition, real-user ingestion,
+attempt, progress, scientific field, or Component B live-engine integration.
