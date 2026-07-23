@@ -2967,3 +2967,320 @@ decision, decision date, approved scope, conditions, and unresolved concerns. Up
 `component-b-profile-classroom-ratification.json` with the real entries once obtained, then re-issue
 the ratification decision. Do not begin invite, QR, membership, session, attempt, progress,
 scientific-engine, pilot, or production implementation before that ratification is granted.
+
+## BE2 Profile/Classroom Ratification — Engineering Continuation Under Deferral to BE6
+
+### Scope
+
+This append-only entry records a project-governance instruction, issued directly by the person
+directing this project in this session, that layers a bounded permission on top of the unresolved
+named-approver ratification recorded above. It does not implement, modify, or authorize any code,
+migration, table, endpoint, or scientific behavior by itself.
+
+### Recorded status
+
+`backend/provenance/component-b-profile-classroom-ratification.json` now additionally records:
+
+```text
+ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6
+```
+
+under a new `engineering_continuation` field. The prior `final_ratification_decision` value,
+`BE2_PROFILE_CLASSROOM_NOT_RATIFIED`, is preserved unchanged as the accurate historical record that no
+named product owner, backend security owner, or privacy and child-safety owner has ratified this batch.
+The new status does not retract, satisfy, or stand in for that unresolved ratification; it is recorded
+as an explicit project-governance instruction, not as a decision by or attributed to any of the three
+named approver roles.
+
+### What this status permits and does not permit
+
+Permitted: continued Version 1 engineering, implementation, and testing of subsequent bounded
+Component B application-layer batches, under the same authorization-then-implementation-then-closure
+discipline already used for the profile/classroom batch.
+
+Not permitted: real-child onboarding, research exports, pilot deployment, or production use. Final
+product, security, privacy, and child-safety sign-off from the three named owners remains required
+before any pilot use and is deferred to the BE6 pre-pilot review gate, not waived.
+
+### Exact next task
+
+Use this status to evaluate and, where warranted, authorize the next bounded Version 1 engineering
+batch (see the Version 1 Classroom Invite and Membership Authorization entry below). Continue to defer
+named-approver ratification of every batch closed under this status until the BE6 pre-pilot review,
+at which point real, attributable decisions from all three named owners are required before any pilot
+or production step.
+
+## Version 1 Classroom Invite and Membership Authorization
+
+### Scope and non-implementation
+
+This append-only entry records the governance authorization for the next bounded Version 1 engineering
+batch: the classroom invitation and membership workflow. No code, migration, table, column, endpoint,
+test, or dependency was implemented or modified during this task. The full machine-readable
+authorization is `backend/provenance/component-b-invite-membership-authorization.json`.
+
+### Governing status and dependency
+
+This authorization is issued under, and depends on,
+`ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6` (see the entry immediately above). It
+permits engineering and testing only. It does not create, satisfy, or shortcut the named-approver
+ratification requirement, which remains deferred to BE6 for both the profile/classroom batch and this
+new batch. It supersedes, for this scope only, the eight `POLICY_GATED_NOT_EXECUTABLE` invite/membership
+endpoint candidates and the `learner_multi_classroom_membership`, `invite_cross_learner_reuse_policy`,
+and `invite_expiry_duration` entries recorded as unresolved in
+`component-b-profile-classroom-authorization.json`, while preserving that document's history unchanged.
+
+### Version 1 product decisions
+
+Nineteen product decisions were supplied and are recorded verbatim in the authorization file's
+`product_decisions_v1`, covering classroom/teacher cardinality, the one-APPROVED-membership-per-learner
+rule, invite reuse across different learners, token cryptography and storage, 24-hour expiry, teacher
+revocation, PENDING-only resolution, ownership-restricted approval/rejection, the exact three membership
+states, idempotent decisions, scoped teacher and learner reads, REAL/TEST provenance separation, and the
+prohibition on storing unnecessary or scientific data.
+
+### Resolved ambiguities
+
+Four points were not fully determined by the literal product decisions and were resolved conservatively,
+recorded in `resolved_ambiguities`:
+
+- A learner may hold multiple concurrent PENDING requests across different classrooms; the
+  one-membership rule is enforced only at approval time, and a later approval attempt on a sibling
+  PENDING request fails with the authorized conflict rather than being auto-mutated.
+- `resolve` is a non-mutating preview (token validation, classroom name/grade only); `requests` is the
+  sole endpoint that creates a PENDING row, satisfying decision 11.
+- Repeated use after a REJECTED outcome returns the existing REJECTED record; no re-request pathway is
+  authorized in this Version 1 batch.
+- Invite-token cryptographic implementation (exact algorithm, library, byte length) is bounded by
+  required properties (CSPRNG, sufficient entropy, one-way hash storage, never logged) but not selected,
+  consistent with the prior authorization's treatment of the same topic; QR image encoding/rendering is
+  explicitly out of scope for this backend authorization.
+
+### Schema reuse and migration authorization
+
+`classroom_invites`, `classrooms`, `teacher_profiles`, `b_learners`, `app_user_learner_links`,
+`b_idempotency_records`, and `b_audit_events` are reused unchanged; no gap was found against the
+Version 1 decisions. `classroom_memberships` is reused with one identified gap: no existing constraint
+enforces "at most one APPROVED membership per learner across all classrooms" at the database level. A
+narrowly scoped migration is authorized to add exactly one PostgreSQL partial unique index —
+`classroom_memberships(learner_id) WHERE state = 'APPROVED'` — chained after `20260722_0004`, mirroring
+the existing `b_sessions` one-active-session-per-learner pattern. No table, column, trigger, or seed data
+is authorized. The application table count is expected to remain twelve after this migration, since an
+index is not a table.
+
+### Concurrency lessons carried forward
+
+The authorization explicitly reuses the root-cause lesson from the profile-provisioning concurrency
+defect found and fixed in the corrective batch (insert-before-lock, and a lock keyed on a value generated
+after the race begins, allow an unhandled integrity error instead of the authorized idempotent outcome).
+It requires: a transaction-scoped advisory lock keyed by `(learner_id, classroom_id)` before the
+existence check and insert in the membership-request endpoint; and a transaction-scoped advisory lock
+keyed by `learner_id` (not only `membership_id`) before the one-APPROVED-membership check and state
+transition in the approval endpoint, so two teachers cannot concurrently approve two different pending
+requests for the same learner.
+
+### Authorized endpoints
+
+Exactly eight endpoints are authorized, each fully specified in the authorization file with permitted
+role, ownership check, exact request/response fields, idempotency scope and behavior, audit requirement,
+privacy restriction, stable error cases, and concurrency requirement:
+
+```text
+POST   /api/v1/classrooms/{classroom_id}/invites
+POST   /api/v1/classroom-invites/resolve
+POST   /api/v1/classroom-memberships/requests
+GET    /api/v1/classrooms/{classroom_id}/membership-requests
+POST   /api/v1/classroom-memberships/{membership_id}/approve
+POST   /api/v1/classroom-memberships/{membership_id}/reject
+GET    /api/v1/classrooms/{classroom_id}/learners
+GET    /api/v1/learner/classrooms
+```
+
+The invite-creation endpoint's idempotent replay response explicitly omits `invite_token` on every
+replay after the first response, since the standard canonical-response-stores-everything idempotency
+pattern used elsewhere would otherwise persist the raw token in `b_idempotency_records.canonical_response`,
+violating decision 8. This is recorded as a required deviation from the default pattern, not left for
+implementation to discover.
+
+### Prohibited behavior (unchanged)
+
+Session creation and every session lifecycle transition, questions, attempts, hints, BKT, mastery,
+Guess-Guard, certification, sequencing, progress, completion, Component B live-engine integration,
+Component C, Component 3, research export, synthetic dataset generation, pilot or production rollout,
+and real-child onboarding all remain explicitly prohibited and unauthorized by this batch.
+
+### Required approvers and ratification status
+
+The same three named owners (product owner, backend security owner, privacy and child-safety owner)
+remain required before pilot or production use of this batch, deferred to the BE6 pre-pilot review under
+`ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6`. This authorization does not obtain or
+simulate their decisions.
+
+### Formal authorization decision
+
+`BE2_INVITE_MEMBERSHIP_SCOPE_AUTHORIZED`.
+
+The Version 1 product decisions are complete and internally consistent once the four ambiguities above
+are resolved as recorded; the existing foundations cover every requirement except one narrowly scoped,
+additive database constraint; every authorized endpoint has a fully specified contract; and the
+concurrency defect class already found once in this project is explicitly guarded against by name in
+this authorization rather than left to be rediscovered.
+
+### Exact next task
+
+Implement the classroom invitation and membership workflow batch against
+`component-b-invite-membership-authorization.json`: the one authorized migration and the eight
+authorized endpoints, with the required replay, mismatch (where applicable), concurrency, and rollback
+tests for every POST, plus the architecture guards listed in `required_tests`. Do not implement QR image
+rendering, learning sessions, or scientific behavior. On completion, conduct a separate closure review
+before any further scope, following the same pattern already used for the profile/classroom batch.
+
+## Classroom Invite and Membership Authorization Correction — Idempotency and Revocation
+
+### Scope and non-implementation
+
+This append-only entry records a narrow governance correction to
+`backend/provenance/component-b-invite-membership-authorization.json`. No code, API, migration, model,
+dependency, or test was implemented or modified during this task. The prior entry immediately above
+(recording the original eight-endpoint `BE2_INVITE_MEMBERSHIP_SCOPE_AUTHORIZED` decision) is preserved
+unchanged; this section records what changed and why, and supersedes only the specific counts and
+identifiers named below.
+
+### Preserved statuses
+
+`ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6` and `BE2_PROFILE_CLASSROOM_NOT_RATIFIED`
+(both in `component-b-profile-classroom-ratification.json`, untouched by this task) and
+`BE2_INVITE_MEMBERSHIP_SCOPE_AUTHORIZED` (in the corrected authorization file) all remain exactly as
+recorded. This correction remains engineering/testing scope only; it does not authorize real-child
+onboarding, pilot, production, or research export.
+
+### Identifier correction
+
+The authorization used two different spellings for the same operation in two places:
+`idempotency_operation_identifiers` incorrectly keyed the invite-creation endpoint as
+`classroom.invite.create`, while the endpoint's own `idempotency.scope` field already correctly used
+`classroom_invite.create`. The map entry is corrected to `classroom_invite.create` everywhere; no other
+operation identifier changed. The corrected file now contains exactly six operation identifiers:
+`classroom_invite.create`, `classroom_invite.resolve`, `classroom_membership.request`,
+`classroom_membership.approve`, `classroom_membership.reject`, and the new `classroom_invite.revoke`.
+
+### Path-based idempotency fingerprint rule
+
+Four commands — invite creation, approve, reject, and the new revoke endpoint — take an empty request
+body and identify their target resource entirely through a path parameter (`classroom_id`,
+`membership_id`, or `classroom_invite_id`). The authorization previously specified only
+`actor_user_id + POST + operation identifier + Idempotency-Key` as the idempotency scope, without stating
+that the canonical request fingerprint must also include the path parameter. Left uncorrected, this would
+have meant that two different classrooms, memberships, or invites, addressed under the same operation and
+the same reused key with an empty body, would fingerprint identically and the second request would be
+misclassified as an identical replay of the first — returning the wrong resource's result instead of the
+authorized stable conflict.
+
+The authorization now defines a standalone `path_based_idempotency_fingerprint_rule` section, and each of
+the four affected endpoints' `idempotency` blocks gained an explicit `canonical_fingerprint` field: the
+fingerprint must be computed over HTTP method, operation identifier, authenticated actor, the normalized
+path parameter, and the canonical body — not the body alone. Reusing the same Idempotency-Key against a
+different classroom_id, membership_id, or classroom_invite_id must return the authorized stable CONFLICT
+and must never replay the first resource's committed response. `resolve` and `requests` are unaffected,
+since their target resource is already carried in the request body (`invite_token`).
+
+### Ninth endpoint: teacher invite revocation
+
+`POST /api/v1/classroom-invites/{classroom_invite_id}/revoke` is newly authorized, fulfilling product
+decision 10 ("a teacher may revoke an invite"), which existed in `product_decisions_v1` but had no
+corresponding endpoint. Contract summary:
+
+- role TEACHER; ownership requires the invite's classroom to belong to the verified teacher;
+  absent/non-owned returns `RESOURCE_NOT_FOUND`;
+- no request body; requires `Idempotency-Key`; operation identifier `classroom_invite.revoke`;
+- response fields: `classroom_invite_id`, `classroom_id`, `revoked_at_utc`, `row_version`, `request_id`;
+- the first valid revocation (not yet revoked, not yet expired) sets `revoked_at_utc` from server time
+  and increments `row_version`; identical replay (same key, same invite) returns the same result;
+- a different-key revoke command against an invite that is already revoked, or against a never-revoked
+  invite whose `expires_at_utc` has already passed, returns the authorized stable `CONFLICT` and does not
+  mutate `revoked_at_utc` — this is a newly resolved ambiguity, recorded in `resolved_ambiguities`: the
+  authorization explicitly does not select allowing post-expiry revocation as a distinct success path in
+  this Version 1 batch, and fails closed instead, consistent with this project's established default;
+- revocation does not delete the invite row and does not mutate any existing `classroom_memberships` row;
+- revoked invites already failed `resolve` and `requests` with `CONFLICT` under the existing authorization
+  and continue to do so unchanged;
+- raw token and token hash are never looked up, returned, logged, or included in the audit payload or
+  idempotency canonical response for this endpoint, since the invite is identified only by
+  `classroom_invite_id`; audit records only actor, `classroom_id`, `classroom_invite_id`, and
+  `revoked_at_utc`;
+- concurrency: concurrent same-key revoke requests must serialize on the same idempotency-scoped advisory
+  lock pattern already required generally, producing exactly one revocation result with no unhandled
+  database integrity error, and this requirement is also recorded in
+  `concurrency_lessons_carried_forward.required_application`.
+
+No new migration is required for this endpoint: it uses the existing `classroom_invites.revoked_at_utc`
+and `row_version` columns, confirmed in a new `migration_authorization.revoke_endpoint_schema_impact`
+field. The one previously authorized partial unique index on `classroom_memberships` remains the only
+schema change authorized for this batch.
+
+### Revised tests
+
+`required_tests` gained explicit coverage for: a path-parameter mismatch test for every path-based POST
+command (invite creation, approve, reject, revoke) proving that key reuse against a different resource
+returns the authorized conflict rather than a replay; invite-revocation success and identical replay;
+different-key revoke against an already-revoked or already-expired invite returning conflict; concurrent
+revocation producing exactly one result; revocation rollback after an injected failure with a successful
+retry; revocation ownership isolation (non-owner `RESOURCE_NOT_FOUND`, learner `FORBIDDEN`); revocation
+not deleting the invite or mutating existing memberships; a revoked invite continuing to fail `resolve`
+and `requests`; and raw token/hash leakage scans extended to cover the revoke endpoint's response, logs,
+errors, audit payloads, and idempotency canonical response. `exit_criteria`,
+`implementation_boundaries.authorized_next_batch`, and `exact_next_task` were updated from eight to nine
+authorized endpoints; `fail_closed_behavior` gained two entries covering revoke-conflict and
+path-parameter-mismatch-conflict cases.
+
+### Unchanged prohibited scope
+
+Session creation and every session lifecycle transition, questions, attempts, hints, BKT, mastery,
+Guess-Guard, certification, sequencing, progress, completion, Component B live-engine integration,
+Component C, Component 3, research export, synthetic dataset generation, pilot or production rollout, and
+real-child onboarding all remain explicitly prohibited and unauthorized, unchanged by this correction.
+
+### Timestamps
+
+The authorization's top-level `recorded_at_utc`, previously the placeholder `2026-07-23T00:00:00Z`
+(never a genuine recorded instant), is corrected to the actual UTC recording time of this correction,
+`2026-07-23T13:11:34Z`. A new `correction_log` array entry records this same timestamp alongside a
+summary of what changed and a pointer to this build-log section, preserving rather than overwriting the
+fact that a prior version existed. No other `recorded_at_utc` field in this file required correction, and
+`component-b-profile-classroom-ratification.json` was not modified by this task.
+
+### Validation
+
+```text
+python -c "import json; json.load(open('provenance/component-b-invite-membership-authorization.json'))"
+-> VALID JSON
+
+Endpoint count: 9
+Endpoints: /api/v1/classrooms/{classroom_id}/invites,
+           /api/v1/classroom-invites/{classroom_invite_id}/revoke,
+           /api/v1/classroom-invites/resolve,
+           /api/v1/classroom-memberships/requests,
+           /api/v1/classrooms/{classroom_id}/membership-requests,
+           /api/v1/classroom-memberships/{membership_id}/approve,
+           /api/v1/classroom-memberships/{membership_id}/reject,
+           /api/v1/classrooms/{classroom_id}/learners,
+           /api/v1/learner/classrooms
+
+Operation identifiers: classroom_invite.create, classroom_invite.resolve,
+                        classroom_membership.request, classroom_membership.approve,
+                        classroom_membership.reject, classroom_invite.revoke
+
+decision: BE2_INVITE_MEMBERSHIP_SCOPE_AUTHORIZED (unchanged)
+```
+
+`git diff --check` was run against the working tree and reported no whitespace errors.
+
+### Exact next implementation task
+
+Implement the classroom invitation and membership workflow batch against the corrected
+`component-b-invite-membership-authorization.json`: the one authorized migration, the nine authorized
+endpoints (including revocation), the `path_based_idempotency_fingerprint_rule` for the four path-based
+POST commands, and the full `required_tests` list including the newly added revocation and
+path-parameter-mismatch coverage. Do not implement invite QR rendering, learning sessions, or scientific
+behavior. On completion, conduct a separate closure review before any further scope, following the same
+pattern already used for the profile/classroom batch.

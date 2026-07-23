@@ -140,5 +140,22 @@
   ],
   "final_ratification_decision": "BE2_PROFILE_CLASSROOM_NOT_RATIFIED",
   "final_ratification_decision_reason": "All engineering, test, and architecture-boundary evidence required for closure is verified and reproducible. However, ratification specifically requires decisions from three named human owners (product owner, backend security owner, privacy and child-safety owner). No such named individual has reviewed or recorded a decision through this session or any other recorded channel. An AI assistant cannot originate, infer, or fabricate those decisions on their behalf without producing a false governance record. The batch therefore remains BE2_PROFILE_CLASSROOM_BATCH_CLOSED at the engineering level but BE2_PROFILE_CLASSROOM_NOT_RATIFIED at the governance level until real named approvers record their decisions.",
-  "exact_next_task": "Obtain actual decisions from the three named owners identified in component-b-profile-classroom-authorization.json (required_approvers.this_limited_scope). Each decision must be recorded by or on explicit documented instruction from that named person, including their name, role, decision, decision date, approved scope, conditions, and unresolved concerns. Update this record with real entries once obtained, then re-issue the ratification decision. Do not begin invite, QR, membership, session, attempt, progress, scientific-engine, pilot, or production implementation before that ratification is granted."
+  "exact_next_task": "Obtain actual decisions from the three named owners identified in component-b-profile-classroom-authorization.json (required_approvers.this_limited_scope). Each decision must be recorded by or on explicit documented instruction from that named person, including their name, role, decision, decision date, approved scope, conditions, and unresolved concerns. Update this record with real entries once obtained, then re-issue the ratification decision. Do not begin invite, QR, membership, session, attempt, progress, scientific-engine, pilot, or production implementation before that ratification is granted.",
+  "engineering_continuation": {
+    "status": "ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6",
+    "recorded_at_utc": "2026-07-23T00:00:00Z",
+    "relationship_to_final_ratification_decision": "This status does not change, retract, or substitute for final_ratification_decision above (BE2_PROFILE_CLASSROOM_NOT_RATIFIED), which remains the accurate record that no named product owner, backend security owner, or privacy and child-safety owner has ratified this batch. It layers a narrower, explicitly scoped permission on top of that unresolved state.",
+    "authority": "An explicit project-governance instruction issued directly in this session by the person directing this project. It is not a decision by, or attributed to, any of the three named approver roles, and is recorded as a project-governance instruction rather than as a named-approver ratification.",
+    "permits": [
+      "Continued Version 1 engineering, implementation, and testing of subsequent bounded Component B application-layer batches (for example, the classroom invitation and membership workflow), following the same authorization-then-implementation-then-closure discipline already used for the profile/classroom batch."
+    ],
+    "does_not_permit": [
+      "Real-child onboarding",
+      "Research exports",
+      "Pilot deployment",
+      "Production use"
+    ],
+    "final_sign_off_requirement": "Product owner, backend security owner, and privacy and child-safety owner ratification remains required before any pilot use. It is deferred to the BE6 pre-pilot review gate, not waived, reduced, or made optional by this status.",
+    "review_gate": "BE6 pre-pilot review"
+  }
 }
