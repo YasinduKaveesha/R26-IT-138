@@ -2702,3 +2702,178 @@ Conduct the separate BE2 profile/classroom closure re-review against
 concurrency, and rollback evidence exists for all three POST commands and the provisioning concurrency
 defect is fixed. Do not authorize or begin invite, membership, session, or scientific behavior during
 that review. This section does not issue the formal closure decision.
+
+## BE2 Profile/Classroom Limited Batch Closure Re-Review
+
+### Review scope and non-modification
+
+This append-only section records the closure re-review of the limited profile/classroom batch against
+`backend/provenance/component-b-profile-classroom-authorization.json`
+(`BE2_PROFILE_CLASSROOM_SCOPE_LIMITED_AUTHORIZED`). No functionality, migration, model, dependency,
+route, or test was modified during this review; it verifies committed state and re-runs the Docker
+gates. All evidence below was reproduced from the pushed commit, not carried forward on trust.
+
+### Commits reviewed
+
+- Implementation commit: `aa037400aca212e24a4b681c9bef768b23f99fce`
+  (`feat(backend): add teacher learner and classroom foundations`).
+- Corrective commit: `2fc9a350840bc51cd70fcb01f59f9994ce352704`
+  (`fix(backend): make profile provisioning concurrency safe`).
+
+Precondition gate: the corrective commit is pushed; local `B_frontend` equals `origin/B_frontend`
+(both `2fc9a350840bc51cd70fcb01f59f9994ce352704`, 0 ahead / 0 behind); the working tree is clean.
+The corrective commit contains exactly four files: the one-line `profile_classroom.py` fix,
+`test_profile_classroom_post_safety.py` (new), `test_be2_architecture_guards.py` (added
+failure-injection guard; collapsed a duplicate guard definition), and this build log's corrective
+evidence section.
+
+### Previous closure blockers
+
+The prior decision was `BE2_PROFILE_CLASSROOM_BATCH_NOT_CLOSED`. Implementation, security, schema,
+migration, ownership, role, grade, provenance, Docker, and API-boundary reviews had passed. Closure
+was blocked only because identical-replay, body-mismatch, concurrency, and injected-failure rollback
+evidence existed for the teacher-profile POST alone, not for the learner-profile or classroom POSTs,
+and no concurrency evidence existed for any POST. Static transaction reasoning was rejected as a
+substitute for those tests.
+
+### Advisory-lock defect and fix (reviewed)
+
+The new concurrency tests proved a real runtime defect: concurrent first-ever profile creation for the
+same new Supabase subject inserted `app_users` before the idempotency advisory lock, and that lock was
+keyed on the freshly generated `user_id`. Two concurrent first submissions therefore computed
+different lock scopes, did not serialize, raced on `uq_app_users_supabase_subject`, and the loser
+returned HTTP 500 `IntegrityError` instead of an idempotent replay — an unhandled integrity leak the
+authorization forbids.
+
+The fix adds one line to `_provision_user`:
+`SELECT pg_advisory_xact_lock(hashtextextended('account.provision:' || <subject>, 0))` before the
+find/insert. The re-review confirms:
+
+- the lock is PostgreSQL transaction-scoped (`pg_advisory_xact_lock`), released automatically on
+  commit or rollback, with no manual unlock and no leaked lock state;
+- the lock key is derived deterministically from the stable authenticated subject, reusing the exact
+  pattern already used by the idempotency lock;
+- the raw subject is a transient SQL bind parameter used only to compute an integer key; it is not
+  logged and is not persisted as lock metadata;
+- the key is per-subject, so different subjects provision concurrently and only the same subject
+  serializes — no global serialization bottleneck;
+- no new public API, endpoint, table, column, or lifecycle behavior was introduced.
+
+### Teacher-profile POST evidence
+
+- Equivalent replay returns HTTP 201 with the same `teacher_profile_id` and identical body.
+- Mismatched replay (same key, different name) returns HTTP 409 with the stable `CONFLICT` envelope
+  and a `request_id`.
+- Concurrent duplicate submission returns `[201, 201]` with one `teacher_profile_id`: one app-user,
+  one teacher profile, one idempotency record, one audit event; both callers receive the authorized
+  replay outcome and the connection stays usable.
+- Injected `_audit` failure returns a safe HTTP 500 `INTERNAL_ERROR` with the request `request_id`;
+  rollback leaves no profile, app-user mutation, idempotency record, or audit event; a retry then
+  succeeds with HTTP 201.
+
+### Learner-profile POST evidence
+
+- Equivalent replay returns HTTP 201 with the same `learner_id` and identical body.
+- Mismatched replay returns HTTP 409 `CONFLICT`.
+- Concurrent duplicate submission yields exactly one `b_learners` row and exactly one owning
+  `app_user_learner_links` row (plus one app-user, one idempotency record, one audit event).
+- REAL provenance is server-assigned across all persisted live rows (`source_class == {"REAL"}`);
+  clients submit no provenance.
+- Injected failure rolls back the learner row, owning link, app-user mutation, idempotency record,
+  and audit event; a retry then succeeds.
+- No `learner_profiles` table exists; `b_learners` remains the single learner profile table.
+
+### Classroom POST evidence
+
+- Equivalent replay returns HTTP 201 with the same `classroom_id` and identical body.
+- The owner (`teacher_profile_id`) is derived server-side and matches the authenticated teacher.
+- Mismatched replay for either a changed name or a changed grade returns HTTP 409 `CONFLICT`.
+- Only `GRADE_2` and `GRADE_3` are accepted; `GRADE_1`, `GRADE_4`, `grade_2`, and `2` return HTTP 422.
+- A learner receives HTTP 403 for classroom creation.
+- Concurrent duplicate submission returns `[201, 201]` with one `classroom_id`: one classroom, one
+  idempotency record, one audit event, and an owned list of one.
+- Injected failure leaves no partial classroom, idempotency, or audit state (the pre-failure baseline
+  is exactly preserved); a retry then succeeds.
+
+### Full and focused test results
+
+- Full Docker suite: `52 passed, 1 warning in 17.22s`.
+- Focused corrective + architecture-guard suite
+  (`tests/test_profile_classroom_post_safety.py tests/test_be2_architecture_guards.py`):
+  `18 passed, 1 warning`.
+- The single warning is the known upstream FastAPI/Starlette `TestClient` httpx deprecation.
+- `python -m compileall app` passed.
+
+### Migration and schema-drift results
+
+- `alembic upgrade head` → `alembic current` = `20260722_0004 (head)`.
+- `alembic check` = `No new upgrade operations detected` (no drift).
+- `alembic downgrade 20260722_0003` succeeded (current `20260722_0003`), and `alembic upgrade head`
+  restored `20260722_0004 (head)`.
+- `pg_isready` = accepting connections.
+
+### API and table inventories
+
+- OpenAPI operations (exactly ten): `GET/POST /api/v1/teacher/profile`,
+  `GET/POST /api/v1/learner/profile`, `GET/POST /api/v1/classrooms`,
+  `GET /api/v1/classrooms/{classroom_id}`, `GET /api/v1/me`, `GET /health/live`, `GET /health/ready`.
+  Seven profile/classroom endpoints; no invite, membership, QR, session, attempt, hint, progress,
+  debug, or injection route.
+- Application tables (exactly twelve): `app_users`, `b_learners`, `app_user_learner_links`,
+  `b_runtime_bundle_records`, `b_sessions`, `b_session_events`, `b_idempotency_records`,
+  `b_audit_events`, `teacher_profiles`, `classrooms`, `classroom_invites`, `classroom_memberships`,
+  restored intact after the downgrade/upgrade cycle. Infrastructure additionally retains
+  `alembic_version` and the pre-existing `be1_persistence_check` marker. No `learner_profiles` table.
+
+### Architecture-boundary result
+
+- Exactly two profile roles remain: LEARNER and TEACHER.
+- No invite, membership, QR, session, attempt, progress, BKT, sequencing, hint, certification, or
+  other scientific behavior exists.
+- Production source contains no failure-injection or debug mechanism: a container-side scan of `app`
+  found no `controlled-test-failure`, `_failing_audit`, `inject_fail`, `force_error`, `force_failure`,
+  or `debug_fail` marker, and the new `test_no_production_failure_injection_or_debug_mechanism` guard
+  enforces this. The failure injection exists only in the test module via an in-process service
+  instance.
+- No `component_b_generator`, Yass, `pilot`, or `cohort` import exists in `app`; no research-wheel
+  dependency exists.
+
+### Docker, isolation, and leakage verification
+
+`docker compose config`, `build`, `up -d`, and `ps` succeeded. The API container ran as UID/GID
+`10001:10001` with no bind mounts (`.Mounts == []`) and host-bound only to `127.0.0.1:8000`.
+PostgreSQL published no host port (`docker compose port db 5432` returned no mapping) and exposed only
+the named `upadya-be1-postgres-data` volume. A targeted API-log scan found no bearer secret,
+`Authorization` header, password, refresh token, `component_b_generator`, Yass, or `.whl` match. After
+`docker compose down`, the named `upadya-be1-postgres-data` volume remained present.
+
+### Remaining blocked behavior
+
+Invite creation, QR generation/resolution, invite reuse/expiry, membership request/approval/rejection,
+classroom learner lists, learner classroom lists, multi-classroom policy, classroom grade change,
+profile/account update/deactivation/deletion, retention/withdrawal, learning sessions and every
+session transition, questions, opportunities, attempts, retries, hints, timing interpretation, BKT,
+mastery, Guess-Guard, certification, sequencing, progress, completion, live-engine integration,
+Component C, Component 3, research export, pilot, and production all remain blocked and unauthorized.
+
+### Formal closure decision
+
+`BE2_PROFILE_CLASSROOM_BATCH_CLOSED`.
+
+The limited profile/classroom batch satisfies the authorization's `exit_criteria` and `required_tests`:
+only the authorized reuse/extensions and four new tables exist; only the seven authorized endpoints
+exist; ownership, cross-account, grade, idempotency, audit, provenance, privacy, replay, mismatch,
+concurrency, rollback, and isolation tests pass; no password, raw JWT, raw invite token, research
+identifier, scientific field, or synthetic record enters live persistence, responses, or logs; and all
+prohibited learning and scientific behavior remains absent. The one production change since the prior
+review is the provisioning concurrency fix, which resolves the only defect the corrective tests
+surfaced and introduces no boundary expansion.
+
+### Exact next governance task
+
+Obtain the named limited-scope approvers recorded in the authorization
+(`product owner`, `backend security owner`, `privacy and child-safety owner`) to ratify this closure,
+then produce a separate governance authorization before any further scope. No invite, QR, membership,
+session, attempt, progress, scientific-engine, pilot, or production behavior is authorized to begin by
+this closure; each remains gated behind its named approvers and unresolved decisions in
+`component-b-profile-classroom-authorization.json`.
