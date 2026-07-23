@@ -2877,3 +2877,93 @@ then produce a separate governance authorization before any further scope. No in
 session, attempt, progress, scientific-engine, pilot, or production behavior is authorized to begin by
 this closure; each remains gated behind its named approvers and unresolved decisions in
 `component-b-profile-classroom-authorization.json`.
+
+## BE2 Profile/Classroom Limited Batch — Named Approver Ratification
+
+### Scope and non-modification
+
+This append-only section records an attempted named-approver ratification pass over the closed
+profile/classroom batch. No code, migration, table, column, endpoint, test, or dependency was
+implemented or modified. This is a governance and documentation review only, against
+`backend/provenance/component-b-profile-classroom-authorization.json`
+(`required_approvers.this_limited_scope`: product owner, backend security owner, privacy and
+child-safety owner).
+
+### Reviewed record
+
+`backend/provenance/component-b-profile-classroom-ratification.json`, created during this pass.
+
+### Pre-review verification
+
+Local `B_frontend` was confirmed to match `origin/B_frontend` at `e579d6cf07d3badde3a984a1a5b4db3bf090464a`
+(`docs(backend): close profile classroom limited batch`) with a clean working tree, immediately
+preceded by corrective commit `2fc9a350840bc51cd70fcb01f59f9994ce352704` and implementation commit
+`aa037400aca212e24a4b681c9bef768b23f99fce`. The closure re-review section above (migration head
+`20260722_0004`, 52-passed full suite, 18-passed focused suite, twelve tables, seven authorized
+endpoints, two roles, non-root API, private PostgreSQL, no leakage) was treated as the verified
+technical baseline for this pass; it was not recomputed from scratch since no code changed since that
+review.
+
+### Checklist re-affirmed at the technical level
+
+Exactly two roles (LEARNER, TEACHER); authenticated-subject ownership for both profile types;
+teacher-profile ownership uniqueness; learner-profile ownership through the single owning
+`app_user_learner_links` row; GRADE_2/GRADE_3-only classroom restriction; server-controlled REAL
+provenance on every live row; classroom ownership isolation (non-owned IDs return
+`RESOURCE_NOT_FOUND`); idempotent replay returning the identical committed response and body-mismatch
+returning stable `CONFLICT`; concurrency-safe provisioning via the subject-scoped transaction advisory
+lock; rollback integrity (entity, app-user mutation, idempotency record, and audit event all absent
+after an injected failure, with a successful retry); audit and privacy boundaries (no password, raw
+JWT, invite token, or scientific field in persistence, responses, or logs); and the continued absence
+of invite, membership, session, and scientific behavior. Each item is `VERIFIED` at the automated,
+technical-conformance level in `component-b-profile-classroom-ratification.json`.
+
+This checklist confirms engineering conformance to the authorization. It is explicitly not treated as
+equivalent to, or a substitute for, the named human governance decisions below.
+
+### Named approver review
+
+No named product owner, backend security owner, or privacy and child-safety owner has reviewed this
+batch or recorded a decision through this session or any other channel available to this review. For
+each of the three required roles, `component-b-profile-classroom-ratification.json` records:
+
+- name: `UNRESOLVED_PLACEHOLDER`;
+- decision: `UNRESOLVED`;
+- decision date: absent;
+- approved scope: absent;
+- conditions: none recorded;
+- unresolved concerns: specific to each role, including (for the privacy and child-safety owner) that
+  retention, withdrawal, and deletion policy remain unresolved per the governing authorization, and
+  that this component processes data about Grade 2/3 children, which this review does not treat as
+  satisfied by automated testing alone;
+- authorization of the closed batch as a foundation for later governance work: not recorded.
+
+An AI assistant conducting this review has no channel to a real product owner, backend security owner,
+or privacy and child-safety owner, and did not receive an explicit, attributable decision from any such
+named person during this task. Inventing a name, date, or decision for any of the three roles would
+create a false governance record rather than document a real one, so no such entry was fabricated.
+
+### Ratification scope statement
+
+No scope is ratified by this pass. This ratification review does not authorize, and does not carry
+forward as authorization for, invite, QR, membership, session, attempt, progress, scientific-engine,
+pilot, or production implementation, regardless of the outcome of any future named-approver review.
+
+### Formal ratification decision
+
+`BE2_PROFILE_CLASSROOM_NOT_RATIFIED`.
+
+The batch remains `BE2_PROFILE_CLASSROOM_BATCH_CLOSED` at the engineering/technical level, established
+by the prior closure re-review. It is `BE2_PROFILE_CLASSROOM_NOT_RATIFIED` at the governance level
+because none of the three required named owners has recorded a real decision.
+
+### Exact next governance task
+
+Obtain an actual, attributable decision from each of the three named owners identified in
+`component-b-profile-classroom-authorization.json` (`required_approvers.this_limited_scope`): product
+owner, backend security owner, and privacy and child-safety owner. Each decision must be recorded by,
+or on the explicit documented instruction of, that named person, and must include their name, role,
+decision, decision date, approved scope, conditions, and unresolved concerns. Update
+`component-b-profile-classroom-ratification.json` with the real entries once obtained, then re-issue
+the ratification decision. Do not begin invite, QR, membership, session, attempt, progress,
+scientific-engine, pilot, or production implementation before that ratification is granted.
