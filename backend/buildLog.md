@@ -3284,3 +3284,378 @@ POST commands, and the full `required_tests` list including the newly added revo
 path-parameter-mismatch coverage. Do not implement invite QR rendering, learning sessions, or scientific
 behavior. On completion, conduct a separate closure review before any further scope, following the same
 pattern already used for the profile/classroom batch.
+
+## BE2 Classroom Invite and Membership Implementation
+
+### Scope and governing authority
+
+This entry records implementation of the authorized Version 1 classroom invitation and membership
+batch against `component-b-invite-membership-authorization.json` and the human-readable classroom
+join-code product clarification given during this task (join code replaces an opaque/QR token; wire
+field names `invite_token`/`classroom_invite` remain governance-frozen). Governing status:
+`ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6` (engineering/testing only — no
+real-child onboarding, pilot, production, or research export). This entry does not issue an engineering
+closure decision; a separate closure review follows, matching the profile/classroom batch's pattern.
+
+### Files created
+
+- `backend/migrations/versions/20260723_0001_classroom_membership_single_approval.py`
+- `backend/app/domain/classroom_membership.py`
+- `backend/app/application/classroom_membership.py`
+- `backend/app/api/routes/classroom_membership.py`
+- `backend/tests/test_classroom_membership.py`
+
+### Files modified
+
+- `backend/app/infrastructure/persistence_models.py` — added the partial unique index to
+  `ClassroomMembership.__table_args__` (SQLAlchemy model mirror of the migration; no new column).
+- `backend/app/infrastructure/repositories.py` — added `ClassroomInviteRepository` and
+  `ClassroomMembershipRepository`.
+- `backend/app/main.py` — registered the new `classroom_membership` router.
+- `backend/tests/test_be2_architecture_guards.py` — expanded the authorized route inventory to
+  nineteen operations, added a dedicated nine-operation invite/membership check, added a
+  no-session/scientific-path guard covering the full current route set, retired the now-superseded
+  blanket "no invite/membership path" assertion (with an explanatory comment; the `session`/`attempt`/
+  `hint` portion of that check is superseded by the new dedicated guard, which covers the same ground
+  unconditionally rather than only at the 0004 migration's historical point in time), and added a guard
+  for the new migration (no table/column change, only the named index, no `classroom_invites` change).
+
+### Migration revision
+
+`20260723_0001_classroom_membership_single_approval`, chained after `20260722_0004`. Adds exactly one
+PostgreSQL partial unique index — `uq_classroom_memberships_one_approved_per_learner` on
+`classroom_memberships(learner_id) WHERE state = 'APPROVED'` — mirroring the existing `b_sessions`
+one-active-session-per-learner pattern. No table, column, or trigger was added or changed; no seed
+data; `classroom_invites` untouched.
+
+### Nine implemented endpoints
+
+```text
+POST   /api/v1/classrooms/{classroom_id}/invites
+POST   /api/v1/classroom-invites/{classroom_invite_id}/revoke
+POST   /api/v1/classroom-invites/resolve
+POST   /api/v1/classroom-memberships/requests
+GET    /api/v1/classrooms/{classroom_id}/membership-requests
+POST   /api/v1/classroom-memberships/{membership_id}/approve
+POST   /api/v1/classroom-memberships/{membership_id}/reject
+GET    /api/v1/classrooms/{classroom_id}/learners
+GET    /api/v1/learner/classrooms
+```
+
+Operation identifiers used for idempotency scoping: `classroom_invite.create`,
+`classroom_invite.resolve`, `classroom_membership.request`, `classroom_membership.approve`,
+`classroom_membership.reject`, `classroom_invite.revoke` — matching the corrected authorization
+exactly, with no `classroom.invite.create`-style variant reintroduced.
+
+### Human-readable join-code design (token-generation and hashing)
+
+Per the mid-task product clarification, the invite secret is a human-readable classroom join code, not
+an opaque token or QR payload:
+
+- alphabet `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (31 symbols; digits `0`/`1` and letters `I`/`L`/`O`
+  excluded as visually ambiguous);
+- 8 characters generated via `secrets.choice` (a CSPRNG), giving `log2(31) * 8 ≈ 39.6` bits of entropy;
+  grouped 4-4 with a hyphen for display (e.g. `M7KP-4X9D`), matching the given example's shape;
+- the canonical (ungrouped, uppercase) form is what gets hashed with SHA-256 into the existing
+  `token_hash` column, unchanged in format (64 lowercase hex characters) and unchanged constraint;
+- normalization (`normalize_join_code`) strips whitespace and hyphens and uppercases before both
+  hashing and idempotency fingerprinting, so matching is case-insensitive and separator-insensitive
+  as required, and a retried resolve/request typed with different casing or spacing is recognized as
+  the same code rather than triggering a spurious idempotency body-mismatch conflict;
+- the plaintext code is present only in the first successful invite-creation HTTP response; the
+  idempotency `canonical_response` persisted for that command excludes it entirely (`invite_token:
+  null, token_already_issued: true`), so it is never reconstructable from a replay or from
+  `b_idempotency_records`; it is never included in audit payloads (only actor, `classroom_id`,
+  `classroom_invite_id`, and timestamps are recorded) and never logged;
+- length/alphabet/grouping are tunable module-level constants; the exact entropy figure is recorded
+  here and in code comments for the deferred BE6 backend security owner review of the invite-token
+  cryptographic contract (`invite_token_cryptographic_contract`, still `SECURITY_DESIGN_REQUIRED` per
+  the authorization). QR image encoding/rendering was not implemented, consistent with both the
+  original authorization and the clarification that a future QR affordance may wrap this same code
+  without a backend redesign, since the wire contract (`invite_token` as a plaintext string) is
+  unchanged either way.
+
+### Idempotency fingerprint design
+
+Two fingerprint shapes are used, per `path_based_idempotency_fingerprint_rule`:
+
+- body-based (`resolve`, `requests`): SHA-256 of the canonical JSON `{"invite_token": <normalized
+  code>}` — a one-way hash, so the code is never persisted even indirectly through the idempotency
+  mechanism, and normalization ensures equivalent-but-differently-typed codes fingerprint identically;
+- path-based (`invites` creation, `approve`, `reject`, `revoke`, all empty-bodied): SHA-256 of the
+  canonical JSON `{"http_method": "POST", "operation_identifier": ..., "actor_user_id": ...,
+  "path_parameter": <classroom_id | membership_id | classroom_invite_id>, "body": {}}`. Reusing the
+  same Idempotency-Key against a different path resource of the same operation now produces a
+  different fingerprint and returns the authorized stable `CONFLICT`, verified by dedicated
+  path-mismatch tests for all four affected endpoints.
+
+### Advisory-lock and row-lock design
+
+- `POST .../classroom-memberships/requests` acquires a transaction-scoped advisory lock keyed by the
+  stable pair `(learner_id, classroom_id)` before checking for an existing `classroom_memberships` row
+  and before inserting, so a concurrent duplicate (same or different key) returns the existing row
+  rather than racing on the `(classroom_id, learner_id)` unique constraint.
+- `POST .../classroom-memberships/{membership_id}/approve` acquires a transaction-scoped advisory lock
+  keyed by the stable `learner_id` (not the membership_id) before checking the one-APPROVED-membership
+  invariant and before transitioning state, so two teachers concurrently approving two different
+  PENDING requests for the same learner cannot both succeed. The target membership row is re-read with
+  `SELECT ... FOR UPDATE` after the lock is acquired — necessary both for row-level serialization and
+  because SQLAlchemy's identity map would otherwise return a stale, pre-lock copy of an already-loaded
+  ORM object rather than a fresh one; the flush is additionally wrapped in a defensive
+  `try/except IntegrityError -> ConflictError` around the partial-unique-index write, satisfying the
+  literal "no unhandled unique-constraint error" requirement even though the advisory lock already
+  prevents the race from reaching that constraint under normal operation.
+- `POST .../classroom-invites/{classroom_invite_id}/revoke` relies on the existing idempotency-scoped
+  advisory lock (actor + operation + key) for same-key concurrency, and additionally re-reads the
+  invite row with `SELECT ... FOR UPDATE` after that lock (and after the idempotency-replay
+  short-circuit) so that a genuinely different-key concurrent or sequential revoke against an
+  already-revoked invite reliably observes the committed state and returns `CONFLICT` rather than a
+  stale, pre-commit view.
+- `POST .../classroom-memberships/{membership_id}/reject` uses the same `FOR UPDATE` re-read for
+  correctness against a different-key already-decided conflict, with no additional advisory lock, per
+  the authorization's "no cross-membership invariant applies to rejection."
+
+### Ownership, privacy, and provenance controls
+
+Every mutating endpoint resolves the actor's role/profile first, then verifies ownership of the target
+resource (classroom, invite, or membership) before any idempotency or business-state check, returning
+`RESOURCE_NOT_FOUND` for absent or non-owned resources to prevent enumeration, and `FORBIDDEN` for the
+wrong role. Learner-facing teacher listings return no email; teacher-facing learner listings return no
+email. `b_learners.grade` is never written by approval (verified directly against the database in
+tests). All live mutations use server-controlled `source_class = REAL` provenance; audit payloads carry
+only actor, resource identifiers, and (for approve/reject) an explicit before/after state pair — never
+tokens, hashes, passwords, or JWTs.
+
+### Test commands and results
+
+```text
+docker compose config                      -> OK
+docker compose build                       -> Image upadya-backend:be1-batch3 Built
+docker compose up -d                       -> db healthy, api started
+docker compose exec api python -m compileall app   -> clean
+docker compose exec api alembic upgrade head       -> 20260722_0004 -> 20260723_0001
+docker compose exec api pytest -q tests/test_classroom_membership.py   -> 29 passed, 1 warning
+docker compose exec api pytest -q                                       -> 84 passed, 1 warning
+```
+
+The single warning is the known upstream FastAPI/Starlette `TestClient` httpx deprecation. The full
+suite grew from 52 (prior state) to 84: 29 new focused tests plus 3 new architecture-guard tests.
+
+One genuine test-design bug was found and fixed during this run (not a service defect): the first
+version of the concurrent cross-classroom approval test reused a learner who already had an approved
+membership from earlier in the same test, so both concurrent approval attempts correctly conflicted
+with that pre-existing approval regardless of timing, rather than exercising the intended race. Fixed
+by using a fresh learner with no prior approval for that specific scenario; after the fix, the
+concurrent race produced the expected `[200, 409]` split with exactly one `APPROVED` row.
+
+### Migration-cycle results
+
+```text
+alembic check (at head)                    -> No new upgrade operations detected
+alembic downgrade 20260722_0004            -> 20260723_0001 -> 20260722_0004
+alembic current                            -> 20260722_0004
+alembic upgrade head                       -> 20260722_0004 -> 20260723_0001
+alembic current                            -> 20260723_0001 (head)
+alembic check (after cycle)                -> No new upgrade operations detected
+pg_isready                                 -> accepting connections
+```
+
+### Architecture-guard results
+
+OpenAPI now contains exactly nineteen operations: the ten pre-existing plus the nine newly authorized.
+`test_openapi_contains_exactly_the_nine_authorized_invite_membership_operations` and
+`test_no_session_question_answer_or_scientific_route_exists` both pass; the latter scans every current
+route for `session`, `attempt`, `hint`, `progress`, `bkt`, `mastery`, `sequenc`, `certif`, and `guess`
+and finds none. `test_invite_membership_migration_adds_only_the_authorized_index` confirms the new
+migration contains no `create_table`, `add_column`, or `drop_column` call, names the authorized index
+and table, and never mentions `classroom_invites`. Direct database inspection confirmed the application
+table count remains twelve (`app_users`, `b_learners`, `app_user_learner_links`,
+`b_runtime_bundle_records`, `b_sessions`, `b_session_events`, `b_idempotency_records`,
+`b_audit_events`, `teacher_profiles`, `classrooms`, `classroom_invites`, `classroom_memberships`) plus
+`alembic_version` and the pre-existing `be1_persistence_check` marker, and that
+`uq_classroom_memberships_one_approved_per_learner` exists alongside the two pre-existing
+`classroom_memberships` indexes.
+
+### Leakage and isolation results
+
+A targeted API-log scan found no join code, `Authorization` header, password, refresh token,
+`component_b_generator`, or Yass match. A container-side scan of `app` found no failure-injection
+marker (`controlled-test-failure`, `_failing_audit`, `force_error`, `force_failure`) and no research
+import (`component_b_generator`, `import yass`, `from yass`). The API ran as UID/GID `10001:10001` with
+no bind mounts; PostgreSQL published no host port. `git diff --check` reported no whitespace errors.
+
+### Unresolved limitations
+
+- The invite-token cryptographic contract (exact alphabet/length/entropy target) remains an
+  implementation-time choice recorded for BE6 backend-security-owner review, not a ratified parameter;
+  the ~39.6-bit entropy figure is the number that review should evaluate.
+- QR image rendering/encoding was not implemented in this batch, consistent with the authorization and
+  the clarification; it remains a future frontend concern layered on the same join code.
+- `learner_multi_classroom_membership` cardinality is implemented exactly as decided (one APPROVED at a
+  time, multiple concurrent PENDING allowed), but the broader unresolved decisions list in
+  `component-b-profile-classroom-ratification.json` (retention/withdrawal/deletion,
+  `classroom_grade_change_after_membership`, `profile_and_account_update_deactivation`) remains
+  unchanged and unaddressed by this batch.
+
+### Confirmation of prohibited scope
+
+No session, question, opportunity, attempt, hint, response-time, BKT, mastery, Guess-Guard,
+certification, sequencing, progress, completion, Component B live-engine, Component C, Component 3,
+research-export, synthetic-dataset, pilot, or production behavior was implemented. No Yass or
+`component_b_generator` import or dependency exists.
+
+### Exact next task
+
+Conduct a separate closure review of this classroom invite and membership batch against
+`component-b-invite-membership-authorization.json`, following the same pattern as the profile/classroom
+closure review: re-verify all evidence above from the pushed commit in a clean Docker run, confirm the
+governance-status dependency (`ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6`) is still
+in effect, and issue a formal engineering-closure decision. This entry does not issue that decision.
+
+---
+
+## BE2 Classroom Invite and Membership — Closure Review
+
+Completed: 2026-07-24 Asia/Colombo (`2026-07-23` UTC)
+Reviewed target: the uncommitted working tree described in the entry above (no new functionality
+added; review-only)
+
+### Method
+
+Independent re-verification, not a re-read of the prior entry's claims: full `git diff` inspection of
+every changed/new file; line-by-line reading of the migration, domain contracts, application service,
+API routes, and test module; a clean Postgres 16.10 container (no volume reuse, published on
+`127.0.0.1:5432`) with dependencies installed fresh (Python 3.13, project deps from
+`requirements.lock` minus the Windows-incompatible `uvloop` entry, which is an optional uvicorn extra
+never exercised by `TestClient`-based tests); `alembic upgrade head` from empty; the full
+downgrade/upgrade cycle with direct `psql` index inspection at each step; `alembic check`; direct
+`psql` table/index enumeration; the focused and full pytest suites; static scans for out-of-scope
+terms and plaintext leakage.
+
+### Scope conformance
+
+`git diff --stat` against the parent commit shows exactly five modified files and five new files, all
+within `backend/app/{domain,application,api/routes,infrastructure}`, `backend/migrations/versions/`,
+`backend/tests/`, and `backend/buildLog.md`. `persistence_models.py` and `repositories.py` diffs
+contain only the one partial-unique-index addition and the two new repository classes respectively;
+`main.py` diff is the one router registration. No file outside the invite/membership surface was
+touched. `git diff --check` reports no whitespace/conflict-marker errors.
+
+### Endpoint and identifier verification
+
+`app.openapi()["paths"]` enumerated directly: exactly the nine authorized routes/methods, no more, no
+fewer. Operation-identifier strings passed to `_idempotency_start` in
+`app/application/classroom_membership.py` read verbatim: `classroom_invite.create`,
+`classroom_invite.resolve`, `classroom_membership.request`, `classroom_membership.approve`,
+`classroom_membership.reject`, `classroom_invite.revoke` — exact match to the frozen list.
+
+### Authorization, privacy, and boundary verification
+
+Every mutating and listing use-case resolves role via `_teacher_context`/`_require_learner` before any
+ownership or state check; ownership is enforced via `get_owned` joins against `Classroom.teacher_profile_id`
+(invites, memberships) so cross-teacher access 404s rather than 403s (no enumeration signal). Learner
+and teacher listing responses (`ClassroomLearnerListItem`, `MembershipRequestListItem`,
+`LearnerMembershipListItem`) carry no email field. Confirmed by direct code read and by passing tests
+asserting `"email" not in entry` on both listing directions and 403/404 boundaries for every
+role/ownership combination.
+
+### Invite and membership behavior verification
+
+Join code: `secrets.choice` over a 31-symbol alphabet excluding `0/O/1/I/L`, 8 characters, SHA-256
+hashed after `normalize_join_code` (strip separators, uppercase) — hash is the only persisted form
+(`token_hash` unique+format-checked column, pre-existing schema, untouched). Plaintext appears only in
+the first `create_invite` HTTP response; the idempotency `canonical_response` stored for replay
+explicitly nulls `invite_token`. `resolve_invite` performs no write to `classroom_memberships` (verified
+by direct row-count assertion in tests and by code read — no `ClassroomMembership` construction on that
+path). 24-hour expiry (`timedelta(hours=24)`) confirmed in code and by a dedicated expiry-delta test.
+Revoke is owner-scoped, sets `revoked_at_utc`, and is unconditionally checked (`revoked_at_utc is not
+None or expires_at_utc <= now`) in resolve and request-membership. Membership request creates `PENDING`
+only; approve/reject require the owning teacher and a `PENDING` starting state; a second request against
+an existing `REJECTED` row returns the existing rejected record rather than creating a new one (no
+re-request path exists in the nine endpoints, matching the Version 1 constraint); multiple concurrent
+`PENDING` rows across different classrooms for one learner are permitted (`uq_classroom_memberships_pair`
+is scoped per classroom+learner, not global); exactly one `APPROVED` row per learner is enforced by
+`uq_classroom_memberships_one_approved_per_learner`, confirmed present via direct `psql` inspection.
+
+### Concurrency verification
+
+`classroom_membership.request` and `.approve` acquire `pg_advisory_xact_lock` keyed on
+`(learner_id, classroom_id)` and `learner_id` respectively before their state-changing reads; `.reject`
+and invite `.revoke` rely on `SELECT ... FOR UPDATE` on the target row, which independently serializes
+any concurrent transaction touching the same row regardless of advisory-lock scope — a valid mechanism,
+not a gap. `approve_membership` wraps its flush in `except IntegrityError -> ConflictError`, the
+documented last-line defense behind the partial unique index. The concurrent cross-classroom approval
+test (`test_approval_second_classroom_conflict_and_concurrent_cross_classroom_approvals`) exercises two
+different teachers approving two different `PENDING` memberships for the same learner via genuine
+thread-level concurrency against a shared `TestClient`, and asserts the `[200, 409]` split with exactly
+one resulting `APPROVED` row — passed.
+
+### Idempotency verification
+
+Idempotency records are scoped at the database level by a `(actor_user_id, http_method,
+operation_identifier, idempotency_key)` unique constraint (pre-existing `b_idempotency_records` schema,
+untouched); the request fingerprint layered on top of that scope covers path parameter and canonical
+body (`path_fingerprint` for the five path-addressed commands) or canonical body alone (`body_fingerprint`
+for the two body-only commands, `resolve`/`request`), which is sufficient because actor/method/operation
+are already structurally enforced by the scope key rather than needing restatement inside the hash.
+Path-resource-mismatch tests (same key, different classroom/membership/invite) confirm a stable `409`
+rather than a false replay, for all five path-addressed operations. No canonical response persisted for
+replay contains a plaintext join code (`create_invite`'s stored response explicitly nulls it); no test or
+code path replays one command's stored response against a different resource.
+
+### Commands run and results
+
+```text
+docker run postgres:16.10-bookworm (fresh, published host port, no volume reuse)
+alembic upgrade head                          -> ...0004 -> 20260723_0001 (clean, no errors)
+alembic current                               -> 20260723_0001 (head)
+alembic downgrade 20260722_0004               -> index dropped (confirmed via psql \d)
+alembic upgrade head                          -> index restored (confirmed via psql \d)
+alembic check                                 -> No new upgrade operations detected
+git diff --check                              -> clean (no output)
+pytest tests/test_classroom_membership.py -v  -> 29 passed, 1 warning
+pytest tests/ -v                              -> 84 passed, 1 warning
+```
+
+The one warning in both runs is the pre-existing, unrelated `StarletteDeprecationWarning` for
+`httpx`-backed `TestClient`, matching the implementation entry's note; not introduced by this batch.
+
+### Database inspection
+
+`psql \dt` on the freshly migrated database: 13 relations total, 12 application tables (`app_users`,
+`app_user_learner_links`, `b_learners`, `b_runtime_bundle_records`, `b_sessions`, `b_session_events`,
+`b_idempotency_records`, `b_audit_events`, `teacher_profiles`, `classrooms`, `classroom_invites`,
+`classroom_memberships`) plus `alembic_version`. (The `be1_persistence_check` connectivity marker
+referenced in the implementation entry is created ad hoc by manual connectivity checks, not by
+migrations or the test suite, and is correctly absent from a freshly created database — its absence here
+is expected, not a discrepancy.) `psql \d classroom_memberships` confirms exactly three indexes: the
+primary key, the pre-existing `uq_classroom_memberships_pair`, and the one new
+`uq_classroom_memberships_one_approved_per_learner` partial unique index — no other new index, table,
+column, or trigger anywhere in the schema.
+
+### Leakage and architecture-boundary scans
+
+Grep of all five new/changed application files for `component_b_generator`, `yass`, `bkt`, `sequenc`,
+`certif`, `component_c`, `component_3`, `research.export`, `pilot`, `production_run` found no real
+match (only an incidental substring hit inside Python's `Sequence` type import, in the migration
+header). `test_be2_architecture_guards.py`'s three new/updated guards
+(`test_openapi_contains_exactly_the_nine_authorized_invite_membership_operations`,
+`test_no_session_question_answer_or_scientific_route_exists`,
+`test_invite_membership_migration_adds_only_the_authorized_index`) all passed as part of the full suite
+run above. No session, item, answer, hint, BKT, mastery, sequencing, certification, progress, Component
+C, Component 3, research-export, pilot, or production behavior was found anywhere in the reviewed diff.
+
+### Non-blocking observation (not a defect requiring action)
+
+`create_invite`'s insert is not wrapped in an `IntegrityError` handler for the pre-existing
+`uq_classroom_invites_token_hash` constraint. At ~39.6 bits of entropy per code this is not a practical
+collision risk at any realistic invite volume, and defended-against concurrency defect was not part of
+the authorized review checklist (which specifically scopes the `IntegrityError`-conversion requirement to
+membership approval). Recorded for awareness only; does not block closure.
+
+### Closure decision
+
+**GO** — closure status identifier: `BE2_INVITE_MEMBERSHIP_BATCH_CLOSED`. No blocking findings. All
+twelve review requirements re-verified independently against a clean database and a clean dependency
+install, not merely re-read from the implementation entry. Nothing was committed by this review; the
+working tree remains exactly as it was at the start (`git status` unchanged before/after).

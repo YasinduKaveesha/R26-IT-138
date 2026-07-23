@@ -292,6 +292,12 @@ class ClassroomMembership(ProvenanceMixin, Base):
         CheckConstraint("state IN ('PENDING', 'APPROVED', 'REJECTED')", name="ck_classroom_memberships_state"),
         CheckConstraint("(state = 'PENDING' AND decided_at_utc IS NULL AND decided_by_user_id IS NULL) OR (state IN ('APPROVED', 'REJECTED') AND decided_at_utc IS NOT NULL AND decided_by_user_id IS NOT NULL)", name="ck_classroom_memberships_decision"),
         CheckConstraint("row_version >= 0", name="ck_classroom_memberships_row_version"),
+        Index(
+            "uq_classroom_memberships_one_approved_per_learner",
+            "learner_id",
+            unique=True,
+            postgresql_where=text("state = 'APPROVED'"),
+        ),
         *ProvenanceMixin.provenance_constraints("classroom_memberships"),
     )
 

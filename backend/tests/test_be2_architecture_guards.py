@@ -37,25 +37,64 @@ def test_exact_authorized_model_table_set_and_no_scientific_columns() -> None:
     assert not {name for name in columns if any(term in name for term in PROHIBITED_COLUMN_TERMS)}
 
 
-def test_no_new_api_route_or_lifecycle_service() -> None:
-    routes = {
+EXPECTED_ROUTES = {
+    ("/health/live", ("GET",)),
+    ("/health/ready", ("GET",)),
+    ("/api/v1/me", ("GET",)),
+    ("/api/v1/teacher/profile", ("GET", "POST")),
+    ("/api/v1/learner/profile", ("GET", "POST")),
+    ("/api/v1/classrooms", ("GET", "POST")),
+    ("/api/v1/classrooms/{classroom_id}", ("GET",)),
+    ("/api/v1/classrooms/{classroom_id}/invites", ("POST",)),
+    ("/api/v1/classroom-invites/{classroom_invite_id}/revoke", ("POST",)),
+    ("/api/v1/classroom-invites/resolve", ("POST",)),
+    ("/api/v1/classroom-memberships/requests", ("POST",)),
+    ("/api/v1/classrooms/{classroom_id}/membership-requests", ("GET",)),
+    ("/api/v1/classroom-memberships/{membership_id}/approve", ("POST",)),
+    ("/api/v1/classroom-memberships/{membership_id}/reject", ("POST",)),
+    ("/api/v1/classrooms/{classroom_id}/learners", ("GET",)),
+    ("/api/v1/learner/classrooms", ("GET",)),
+}
+AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS = {
+    ("/api/v1/classrooms/{classroom_id}/invites", ("POST",)),
+    ("/api/v1/classroom-invites/resolve", ("POST",)),
+    ("/api/v1/classroom-memberships/requests", ("POST",)),
+    ("/api/v1/classrooms/{classroom_id}/membership-requests", ("GET",)),
+    ("/api/v1/classroom-memberships/{membership_id}/approve", ("POST",)),
+    ("/api/v1/classroom-memberships/{membership_id}/reject", ("POST",)),
+    ("/api/v1/classrooms/{classroom_id}/learners", ("GET",)),
+    ("/api/v1/learner/classrooms", ("GET",)),
+    ("/api/v1/classroom-invites/{classroom_invite_id}/revoke", ("POST",)),
+}
+PROHIBITED_SCIENTIFIC_PATH_TERMS = (
+    "session", "attempt", "hint", "progress", "bkt", "mastery", "sequenc", "certif", "guess",
+)
+
+
+def _current_routes() -> set[tuple[str, tuple[str, ...]]]:
+    return {
         (path, tuple(sorted(method.upper() for method in operations)))
         for path, operations in app.openapi()["paths"].items()
     }
-    assert routes == {
-        ("/health/live", ("GET",)),
-        ("/health/ready", ("GET",)),
-        ("/api/v1/me", ("GET",)),
-        ("/api/v1/teacher/profile", ("GET", "POST")),
-        ("/api/v1/learner/profile", ("GET", "POST")),
-        ("/api/v1/classrooms", ("GET", "POST")),
-        ("/api/v1/classrooms/{classroom_id}", ("GET",)),
-        ("/api/v1/teacher/profile", ("GET", "POST")),
-        ("/api/v1/learner/profile", ("GET", "POST")),
-        ("/api/v1/classrooms", ("GET", "POST")),
-        ("/api/v1/classrooms/{classroom_id}", ("GET",)),
-    }
+
+
+def test_no_new_api_route_or_lifecycle_service() -> None:
+    assert _current_routes() == EXPECTED_ROUTES
     assert not any(Path("app").rglob("*session*service*.py"))
+
+
+def test_openapi_contains_exactly_the_nine_authorized_invite_membership_operations() -> None:
+    assert len(AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS) == 9
+    assert AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS <= _current_routes()
+    assert _current_routes() - AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS == {
+        route for route in EXPECTED_ROUTES if route not in AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS
+    }
+
+
+def test_no_session_question_answer_or_scientific_route_exists() -> None:
+    for path, _ in _current_routes():
+        lowered = path.lower()
+        assert not any(term in lowered for term in PROHIBITED_SCIENTIFIC_PATH_TERMS), path
 
 
 def test_no_yass_research_or_scientific_imports() -> None:
@@ -122,9 +161,28 @@ def test_profile_classroom_migration_and_routes_stay_within_authorization() -> N
     assert "bulk_insert" not in lowered
     assert "component_b_generator" not in lowered
     assert "yass" not in lowered
-    paths = set(app.openapi()["paths"])
-    assert not any("invite" in path or "membership" in path for path in paths)
-    assert not any("session" in path or "attempt" in path or "hint" in path for path in paths)
+    # The blanket "no invite/membership path" check from the prior limited batch is
+    # superseded by the now-authorized invite/membership batch; see
+    # test_invite_membership_migration_adds_only_the_authorized_index and
+    # test_openapi_contains_exactly_the_nine_authorized_invite_membership_operations
+    # for the current, narrower boundary checks. Session/scientific paths remain
+    # prohibited unconditionally; see test_no_session_question_answer_or_scientific_route_exists.
+
+
+def test_invite_membership_migration_adds_only_the_authorized_index() -> None:
+    migration = Path("migrations/versions/20260723_0001_classroom_membership_single_approval.py").read_text(encoding="utf-8")
+    assert not re.findall(r'op\.create_table\(\s*"([^"]+)"', migration)
+    assert not re.findall(r'op\.add_column\(', migration)
+    assert not re.findall(r'op\.drop_column\(', migration)
+    assert "uq_classroom_memberships_one_approved_per_learner" in migration
+    assert '"classroom_memberships"' in migration
+    lowered = migration.lower()
+    assert "classroom_invites" not in lowered
+    assert "create_trigger" not in lowered
+    assert "create trigger" not in lowered
+    assert "bulk_insert" not in lowered
+    assert "component_b_generator" not in lowered
+    assert "yass" not in lowered
 
 
 def test_no_production_failure_injection_or_debug_mechanism() -> None:

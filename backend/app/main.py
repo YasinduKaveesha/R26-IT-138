@@ -10,6 +10,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.classroom_membership import router as classroom_membership_router
 from app.api.routes.health import router as health_router
 from app.api.routes.identity import router as identity_router
 from app.api.routes.profile_classroom import router as profile_classroom_router
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
     application.include_router(health_router)
     application.include_router(identity_router)
     application.include_router(profile_classroom_router)
+    application.include_router(classroom_membership_router)
     return application
 
 
