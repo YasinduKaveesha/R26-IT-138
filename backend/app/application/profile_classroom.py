@@ -39,6 +39,7 @@ class ProfileClassroomService:
         return user
 
     async def _provision_user(self, session: AsyncSession, principal: AuthenticatedPrincipal, request_id: str) -> AppUser:
+        await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"), {"scope": f"account.provision:{principal.user_id}"})
         user = await AppUserRepository(session).find_by_subject(principal.user_id)
         if user is not None:
             return user

@@ -127,14 +127,15 @@ def test_profile_classroom_migration_and_routes_stay_within_authorization() -> N
     assert not any("session" in path or "attempt" in path or "hint" in path for path in paths)
 
 
-def test_profile_classroom_migration_and_routes_stay_within_authorization() -> None:
-    migration = Path("migrations/versions/20260722_0004_profile_classroom_foundations.py").read_text(encoding="utf-8")
-    assert set(re.findall(r'op\.create_table\(\s*"([^"]+)"', migration)) == {"teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships"}
-    lowered = migration.lower()
-    assert "learner_profiles" not in lowered
-    assert "bulk_insert" not in lowered
-    assert "component_b_generator" not in lowered
-    assert "yass" not in lowered
+def test_no_production_failure_injection_or_debug_mechanism() -> None:
+    """The corrective batch injects failure only in tests; production code exposes no such hook."""
+    markers = (
+        "controlled-test-failure", "_failing_audit", "inject_fail", "injectfailure",
+        "fail_flag", "failure_flag", "debug_fail", "force_error", "force_failure",
+    )
+    for path in Path("app").rglob("*.py"):
+        lowered = path.read_text(encoding="utf-8").lower()
+        for marker in markers:
+            assert marker not in lowered, (path, marker)
     paths = set(app.openapi()["paths"])
-    assert not any("invite" in path or "membership" in path for path in paths)
-    assert not any("session" in path or "attempt" in path or "hint" in path for path in paths)
+    assert not any("debug" in path or "inject" in path or "/test" in path for path in paths)
