@@ -4863,3 +4863,75 @@ test-only provenance should live in a test-stage-only layer once a multi-stage D
 so the shipped runtime layer doesn't carry test fixtures it doesn't execute against.
 
 **Verdict: GO.** Identifier: `BE3C_PRIVATE_PUBLIC_SPLIT_BATCH_CLOSED`.
+
+## 2026-07-25 — Scientific-gate parameter-authorization draft (`component-b-scientific-parameter-authorization.json`)
+
+Drafted `provenance/component-b-scientific-parameter-authorization.json`, a new
+`SCIENTIFIC_PARAMETER_AUTHORIZATION_DRAFT` record. Read-only against everything under `app/**`,
+`tests/**`, `frontend/**`, migrations, the runtime-bundle loader, `runtime-bundle.schema.json`, and
+every pre-existing provenance JSON; no state-changing git command run; nothing staged or committed.
+
+**Purpose.** The record transcribes, with exact source citations and unmodified status tags, the
+scientific-gate parameter values proposed by the Yass Component B spec
+(`R26-IT-138_Component_B_Empirical_Statistical_Parameters_v1.0.md`,
+`R26-IT-138_Component_B_Item_and_Task_Set_Catalogue_v1.0.md`) and the packaged, population-neutral
+engine config (`bkt/config.py`, `certification.py`, `guess_guard.py`, `sequencing/config.py`). It
+**approves nothing**: every named-approver slot is an explicit `UNRESOLVED_PLACEHOLDER` (mirroring
+`component-b-profile-classroom-ratification.json`'s approver-record pattern), and no status tag was
+upgraded from its source.
+
+**Gate items covered** (cross-checked against `component-b-closure-decisions.json`
+`governance_register`): catalogue approval (with the catalogue's computed SHA-256, see below); all
+four `response_format_mapping_review.mappings` entries (`B-ADD02-COUNT-ON`, `B-CNT06-SKIP-COUNT`,
+`B-PV02-DECOMPOSE-2D`, `B-PV04-DECOMPOSE-3D`) carried forward as `UNRESOLVED`; BKT parameter
+approval (special-cased, see below); certification threshold `theta_B` (spec §6.3, value 0.95,
+`LITERATURE_SUPPORTED · CALIBRATION_PENDING`); Guess-Guard numeric configuration (`q=0.10`,
+`n_min=5`, frozen v1 §14A, `CALIBRATION_PENDING`, plus the FROZEN structural constraints
+`P(G)+P(S)<1` and `P(G)<=0.5`); sequencing weights (0.5/0.3/0.2, `FROZEN` per
+`runtime-bundle.schema.json`'s const, not reopened); attempt limits (`UNRESOLVED`, no live value);
+timeout policy (governed statement carried forward, numeric threshold `UNRESOLVED`); completion
+policy (`UNRESOLVED`); safe-progress policy (`UNRESOLVED`); cold-start policy (`FROZEN` governed
+deferral, `DISABLED`); and owner/academic approval (`UNRESOLVED`, with a `named_approver_slots`
+block for the Component B owner/academic-research approver, the academic/research calibration
+owner, and the product owner with academic/research approval).
+
+**BKT population-gap open decision.** The spec's §6.2.1 table (21 rows = 7 skills × 3 populations,
+every row `ENGINEERING_ASSUMPTION · CALIBRATION_PENDING`) was transcribed in full into the record as
+a labelled `spec_reference_table` ("per-population research priors, non-executable as direct
+TD/MLD/DD rules") and was **not** collapsed into 7 live values. The record separately states the
+live requirement from `bkt/config.py` (`BBKTConfig` needs exactly 7 population-neutral, skill-keyed
+`SkillBKTParams` rows, no production default) and records an explicit open decision: how those 7
+population-neutral live parameterizations are derived is unresolved and requires the named
+academic/calibration owner — no rule (not TD-row adoption, not averaging, nothing) is picked here.
+The record also notes that `bkt/config.py` enforces `P(G)+P(S)<1` and `P(G)<=0.5` in code, so any
+future values must pass those checks.
+
+**Self-verification performed:**
+- `python -c "import json; json.load(open('provenance/component-b-scientific-parameter-authorization.json'))"` — valid JSON.
+- Every `governance_register` item from `component-b-closure-decisions.json` and all 4 response-format mappings appear in the record's `gate_items` array.
+- Every approver slot in `named_approver_slots` is `UNRESOLVED_PLACEHOLDER` — no real name/date/decision was written anywhere.
+- No `authorization_status` was upgraded: values are only `UNRESOLVED` or `FROZEN` (sequencing weights and cold-start policy, both citing the schema const as source). The literal string `APPROVED_FOR_PROVISIONAL_V1_IMPLEMENTATION` appears exactly once, quoted verbatim as a `spec_status_tag` (owner/academic approval item) reproducing the spec document's own header status — its paired `authorization_status` in this record is `UNRESOLVED`.
+- `git status` (read-only) shows only this buildLog append and the new provenance JSON as changes relevant to this batch; nothing under `app/`, `tests/`, `frontend/`, or any migration was touched.
+
+**Catalogue SHA-256:**
+`eaf073da8af155bdb935b7c2abfba04f892bbfecf44522f20f044aeec4b579ac` (computed over
+`Component_B_v1.0/R26-IT-138_Component_B_Item_and_Task_Set_Catalogue_v1.0.md` as read from the
+sibling Yass source tree).
+
+**Spec sections cited:** §0 (status-tag legend), §1 (scope/binding constraints, item-count SF-039
+note), §2 (variable inventory, LATENT_GENERATOR_ONLY), §3 (skill vocabulary), §5.1 (sequencing
+formula), §6.1–§6.4 (BKT constraints, 21-row table, sensitivity ranges, theta_B, guess-guard floor),
+§8.2 (SF-039 population-execution clarification), §14A/§14B (frozen v1 defaults, machine-checkable
+table), §15 (CALIBRATION_PENDING register), §17 (approval block, blank signatures); catalogue §1–§5,
+§10 (sequencing compatibility).
+
+**Discrepancy surfaced, not fixed:** the catalogue document's own header states status
+`PROPOSED FOR APPROVAL`, while `component-b-closure-decisions.json`'s `governance_register` lists the
+catalogue's `current_status` as `PROVISIONAL`. Both are non-approved states and neither conflicts
+with this record's `UNRESOLVED` authorization_status for that item, but the two source documents use
+different vocabulary for the same not-yet-approved state; a future closure review may want to
+reconcile the terminology.
+
+**This batch is not closed.** This entry documents the draft record only. A separate closure review
+decides whether the record is accepted as an accurate transcription; named human sign-off on any
+gate item remains outstanding.
