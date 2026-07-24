@@ -4317,3 +4317,366 @@ scope only — it is not a governance or named-owner ratification, and every `UN
 `CALIBRATION_PENDING` item in `component-b-closure-decisions.json`'s governance register remains
 open exactly as recorded there. No files were modified by this review beyond this log entry; no
 git commit was made.
+
+## BE3b — Domain Ports, Live-Engine Adapter, Runtime-Bundle Validation, Docker-Install Fix (2026-07-25)
+
+Batch scope per BEplan §BE3.1–§BE3.2, `component-b-live-engine-reuse-map.json`, and
+`runtime-bundle.schema.json`: domain ports over the reviewed live-safe capabilities, the concrete
+adapter binding those ports to the vendored `upadya-component-b-live-engine` package, immutable
+runtime-bundle load/validate machinery, and the Docker-install fix carried forward from BE3a's
+disclosed `.dockerignore` limitation. No live learner flow, no real approved scientific
+parameters, no BE4 governance-gate crossing. Read-only git throughout; nothing committed.
+
+### 1. Docker-install fix
+
+- `backend/.dockerignore`: added two narrow negations after the existing blanket `provenance/`
+  and `*.whl` excludes — `!provenance/wheels/upadya_component_b_live_engine-0.1.0+be3.0e86fdc-py3-none-any.whl`
+  and `!provenance/runtime-bundle.schema.json`. Everything else under `provenance/` (baseline
+  manifests, closure decisions, the generator dependency lock, and — critically — the
+  **prohibited full research wheel** `upadya_component_b_generator-...whl`, which sits in the
+  same `provenance/wheels/` directory) stays excluded from the build context. `packaging/`
+  (the source tree used only to build the wheel) also stays excluded; the app installs from the
+  wheel only, never from source.
+- `backend/Dockerfile`: added two `COPY` steps before the `pip install` line — the pinned
+  live-engine wheel (so `pip install --require-hashes -r requirements.lock` can resolve the
+  relative wheel path it already pinned) and `provenance/runtime-bundle.schema.json` (needed by
+  the runtime-bundle loader at import time, not only by tests).
+- `requirements.in` / `requirements.txt` / `requirements.lock`: added `jsonschema==4.25.1` and
+  its resolved transitive dependencies (`attrs==25.4.0`, `jsonschema-specifications==2025.9.1`,
+  `referencing==0.37.0`, `rpds-py==0.30.0`) with `--hash=sha256:...` entries for every published
+  file of each pinned version, fetched from the PyPI JSON API and inserted at the correct
+  alphabetical position to match the existing `requirements.lock` convention. `jsonschema` is a
+  new real runtime dependency (schema validation for the runtime-bundle manifest); nothing else
+  in `requirements.lock` changed.
+- **Proof (not simulated).** `docker compose build api` — full build succeeded; pip installed
+  `upadya-component-b-live-engine-0.1.0+be3.0e86fdc` from the now-resolvable wheel path alongside
+  the rest of the lock, no `--require-hashes` failures. `docker run --rm upadya-backend:be1-batch3
+  python -c "import component_b_generator; from app.infrastructure.live_engine.adapter import
+  LiveEngineAdapter"` — both imports succeeded inside the built image. Then `docker compose up -d
+  db`, waited for the Postgres healthcheck, and ran `docker run --network upadya-be1_default -e
+  DATABASE_URL=... upadya-backend:be1-batch3 python -m pytest -q` against the built image: **153
+  passed, 0 failed** (up from the 35 BE2/BE3a-guard subset re-verified in the BE3a closure
+  review — this run is the complete suite, including the persistence/UoW/session-lifecycle tests
+  that need a real database). `docker compose down` after.
+
+### 2. Domain ports (`app/domain/live_engine/`, `app/domain/runtime_bundle/`)
+
+Added `types.py` (plain `frozen` dataclasses only — no package Pydantic model is imported or
+re-exported anywhere under `app/domain`), `ports.py` (one `Protocol` per reuse-map capability:
+`CataloguePort`, `ActivationPort`, `SequencingPort`, `TaskConstructionPort`, `AnswerPort`,
+`DistractorPort`, `HintPort`, `BktPort`, `GuessGuardPort`, `CertificationPort`,
+`AggregationPort`), and `errors.py` (the stable internal/application error hierarchy:
+`CatalogueUnavailableError`, `UnknownTemplateError`, `TemplateNotActiveError`,
+`TaskConstructionError`, `AnswerRuleUnavailableError`, `DistractorConstructionError`,
+`HintUnavailableError`, all under a `LiveEngineError` base). Separately,
+`app/domain/runtime_bundle/` holds the `RuntimeBundle` dataclass mirroring
+`runtime-bundle.schema.json`'s own property names, the `RuntimeBundleLoaderPort` protocol, and
+its fail-closed error hierarchy (`RuntimeBundleNotFoundError`, `RuntimeBundleValidationError`,
+`RuntimeBundleChecksumMismatchError`, `RuntimeBundleNotApprovedError`).
+
+Domain `ItemTemplate`/`Catalogue` carry a reduced field set versus the package's own
+`ItemTemplate`/`LoadedCatalogue` (no `set_id`/`node_name`/`status_raw`/hint fields at the domain
+layer) — sufficient for every BE3b capability and test; later batches may extend these types as
+new capabilities are wired, without ever reaching for the package's models to do it.
+
+### 3. Adapter (`app/infrastructure/live_engine/adapter.py`)
+
+`LiveEngineAdapter` is the **only file under `app/` that imports `component_b_generator`**
+(enforced by the updated import-boundary tests, §5). It is stateless: every method is a pure
+function of its arguments, re-reading the governed catalogue file at `Catalogue.source_path`
+whenever a package-native `LoadedCatalogue`/`ItemTemplate` object is needed rather than
+hand-reconstructing one from the trimmed domain type — so every package function always receives
+the real, fully-validated loader output, never an approximation of it. No formula is copied or
+rewritten: every method is a direct call into the package's own `catalogue.loader`,
+`generation.activation`, `sequencing.features`/`score`, `generation.task_instances`,
+`answers.rules`/`registry`, `distractors.registry`, `behaviour.hints`, `bkt.update`,
+`bkt.guess_guard`, `bkt.certification`, and `aggregation.session` modules. Package exceptions
+(`CatalogueValidationError`, `UnsupportedTemplateError`, `TaskInstanceValidationError`,
+`HintContentError`, `DistractorGenerationError`, bare `KeyError` for unregistered template ids)
+are translated into the domain error hierarchy at the adapter boundary; nothing package-specific
+propagates past it.
+
+Deterministic task construction (`build_task_instance`) accepts a backend-owned
+`TaskConstructionRequest` carrying a session-pinned `global_seed` rather than a package
+`SeedLineage` — the adapter derives the opportunity's seed lineage internally via the package's
+own `SeedManager`, keeping `seeds`/`SeedLineage` entirely `PRIVATE_ENGINE_INTERNAL` as the reuse
+map requires. Sequencing's weighted-sum score uses the FROZEN 0.50/0.30/0.20 weights pinned
+inside the adapter (`BSequencingConfig` is constructed with those exact values every call); no
+caller can supply a different weight set through the domain port.
+
+### 4. Runtime-bundle load/validate machinery (`app/infrastructure/runtime_bundle/loader.py`)
+
+`RuntimeBundleLoader.load_and_validate(bundle_path, schema_path, *, artifact_paths=None,
+require_approved=True)`:
+
+1. Reads the manifest and schema JSON; a missing file raises `RuntimeBundleNotFoundError`,
+   invalid JSON raises `RuntimeBundleValidationError` — never a partial parse.
+2. Validates the manifest against `runtime-bundle.schema.json` via `jsonschema.validate`
+   (Draft 2020-12, matching the schema's own `$schema`); any missing required field, wrong type,
+   or violated `const`/`enum`/`pattern` raises `RuntimeBundleValidationError` with the failing
+   JSON path in the message.
+3. Verifies the `generator` artifact's declared SHA-256 against the file at its `source_path` —
+   the only artifact the frozen schema itself gives a `source_path` for. `catalogue`/
+   `bkt_configuration`/`certification_configuration`/`guess_guard_configuration`/
+   `safe_progress_policy`/`attempt_policy`/`timeout_policy` are schema-shaped `versionedArtifact`
+   entries with a `checksum` but **no path field** in the frozen schema; the loader additionally
+   verifies any of these the caller supplies a real file for via the optional `artifact_paths`
+   mapping (exercised in tests against the fixture catalogue), and does not fabricate
+   verification against files the schema gives no location for.
+4. Gates on `approval_status`: `require_approved=True` (the default — the readiness/activation
+   path) raises `RuntimeBundleNotApprovedError` for anything other than exactly `"APPROVED"`.
+   **This batch never writes `"APPROVED"` anywhere** — not in the loader, not in any fixture —
+   so every positive-path test below exercises the loader with `require_approved=False`
+   explicitly, and the one test that uses the default proves the gate itself fails closed on an
+   otherwise-valid bundle. Approving a real bundle remains the separate BE4 governance gate.
+
+### 5. Test fixtures (TEST-FIXTURE-ONLY, never the governed catalogue)
+
+- `tests/fixtures/runtime_bundle/test_catalogue.md` — a 7-template, 7-skill markdown catalogue
+  (one already-implemented representative template per skill: `B-CNT01-SEQ-CONTINUE`,
+  `B-NS04-COMPARE-NUMERALS`, `B-PV01-IDENTIFY-TENS-ONES`, `B-ADD04-2D-NO-REGROUP`,
+  `B-SUB04-2D-NO-BORROW`, `B-MUL03-FACTS-2-5-10`, `B-DIV03-DIVIDE-BY-2`), with hint text on two
+  templates and deliberately none on `B-DIV03-DIVIDE-BY-2` to exercise the hint fail-closed path.
+  Verified against the real `load_catalogue` inside an isolated container before being used by
+  any test.
+- `tests/fixtures/runtime_bundle/valid_unapproved_bundle.json` — schema-valid, and its
+  `generator` checksum is the **real** recorded SHA-256 of the pinned live-engine wheel
+  (`faa5760df1f5a3874f38f8103cdaaa88a14b3190216e46ab21765eee65a70c29`, matching
+  `component-b-live-engine-manifest.json`) so the checksum-verification positive path is
+  checking something real, not a fixture-only value. `approval_status` is `CALIBRATION_PENDING`
+  throughout (top level and every sub-artifact) — never `APPROVED`.
+- `tests/fixtures/runtime_bundle/missing_field_bundle.json` — the same manifest with
+  `bkt_configuration` removed, for the missing-required-field defect class.
+- `tests/fixtures/runtime_bundle/bad_checksum_bundle.json` — the same manifest with the
+  `generator` checksum value replaced by 64 `f`s, for the checksum-mismatch defect class.
+
+### 6. Tests added
+
+- `tests/test_be3b_live_engine_adapter.py` — catalogue load/checksum mapping; activation
+  active/inactive/unknown-template; task-instance determinism under fixed provenance (two calls,
+  identical result) and non-determinism under a different `global_seed`; operand/correct-answer
+  internal consistency via the adapter's own `AnswerPort` recomputation; governed hint content
+  and fail-closed missing-hint content; BKT predict/posterior/update boundedness, determinism,
+  and correct-vs-incorrect posterior ordering; Guess-Guard triggered/insufficient-evidence/
+  not-triggered plus certification's dependence on it; sequencing feature computation and the
+  frozen-weight score identity; selection tie-break reporting; session aggregation folding one
+  opportunity into a rollup, and the missed-session-with-opportunities contract violation
+  surfacing as `LiveEngineError`.
+- `tests/test_be3b_runtime_bundle.py` — schema-valid+checksum-correct load under
+  `require_approved=False`; `artifact_paths` checksum verification against the real fixture
+  catalogue (positive) and a substituted wrong file (negative); missing required field; generator
+  checksum mismatch; unapproved status under the default `require_approved=True`; missing
+  manifest file; missing schema file; invalid JSON; wrong type for a required field; and an
+  explicit assertion that no fixture in this batch is ever marked `"APPROVED"`.
+- Updated `tests/test_be3_live_engine_boundary.py`'s
+  `test_app_import_graph_still_does_not_reach_prohibited_modules` (renamed
+  `test_only_the_live_engine_adapter_module_imports_the_package`, plus a new
+  `test_app_import_graph_never_reaches_the_thirteen_prohibited_submodules`): that test's own
+  docstring said "this batch does not wire any application adapter" — BE3b is that next batch, so
+  the over-broad "app/ may never import `component_b_generator` at all" assertion no longer
+  holds. The updated guard instead asserts the top-level package import is confined to exactly
+  `app/infrastructure/live_engine/adapter.py`, and — separately, repo-wide, including inside the
+  adapter itself — that all 13 explicitly-prohibited submodules (`cohort`/*, the six synthetic
+  `behaviour.*` generators, `pipeline`, `pilot`, `runner`, `audits`/* , `generation.item_opportunities`)
+  stay unreachable. Same treatment applied to the older, even-broader BE2 guard
+  `test_no_yass_research_or_scientific_imports` in `tests/test_be2_architecture_guards.py`, which
+  predated BE3a and had the identical whole-package prohibition.
+
+### 7. What this batch deliberately does not do
+
+No new API route. No live question/attempt/hint/BKT-write flow. No persisted opportunity/task
+tables. No real governed catalogue reference (the adapter's `CataloguePort.load` takes an
+explicit path, per BE3.2 step 2, but every call in this batch's tests points at the
+TEST-FIXTURE-ONLY catalogue above — never `R26-IT-138`). No runtime bundle in this batch is ever
+marked `APPROVED`, `activation_date` is `null` throughout, and `publication_state` stays `DRAFT`.
+The private/public opportunity DTO split, the full characterization/privacy suite against the
+real catalogue, and building/approving the real runtime bundle remain explicitly out of scope
+(BE3c and the BE4 governance gate, respectively).
+
+**Status: BE3b engineering continuation, not a closure review.** 153/153 tests pass in the
+Dockerfile-pinned image against a real Postgres, including the full BE2 architecture-guard suite
+and the updated BE3 import-boundary guards. No git commit was made; the working tree remains
+uncommitted for Yasindu's review.
+
+## BE3b Closure Review (separate pass against PROMPT BE3b, the reuse map, and runtime-bundle.schema.json)
+
+Performed from a clean `docker build --no-cache` of `backend/Dockerfile`, plus a fresh Postgres
+16 container for the migration + full test run. Read-only: no git operations, no commits.
+
+1. **Single import point.** `grep -rl component_b_generator app/` returns only
+   `app/infrastructure/live_engine/adapter.py` (the one other hit,
+   `app/domain/live_engine/__init__.py`, is a docstring mention, not an import). Confirmed
+   independently of `test_only_the_live_engine_adapter_module_imports_the_package`, which also
+   passes. `app/domain/**` uses only `dataclass`/`Enum` types in `live_engine/types.py` and
+   `runtime_bundle/types.py` — no import of any `component_b_generator` Pydantic model. The other
+   `pydantic.BaseModel` usages under `app/domain/` (`b_session.py`, `classroom_membership.py`,
+   `principal.py`, `profile_classroom.py`) are backend-owned models unrelated to the vendored
+   package — out of scope for this check and not a boundary violation.
+
+2. **No formula copied.** Read `adapter.py` in full: every port method calls straight through to
+   a package function (`bkt_predict/posterior/update`, `evaluate_guess_guard`, `certify_skill`,
+   `score_candidate`, `build_task_instance`, `aggregate_session`, etc.) and only maps backend
+   dataclasses to package Pydantic/dataclass types and back. The only literal numbers the adapter
+   contributes are the frozen sequencing weights (0.50/0.30/0.20), passed into the package's own
+   `BSequencingConfig`, which does the scoring — no math is reimplemented in the adapter.
+
+3. **Guard completeness — GAP FOUND.** `PROHIBITED_MODULES` in
+   `tests/test_be3_live_engine_boundary.py` includes `cohort`, `cohort.builder`,
+   `behaviour.first_attempt`, `behaviour.latency`, `behaviour.attempt_loop`,
+   `behaviour.initialization/wrong_answers/derivation/seeds/validation`, `pipeline`, `pilot`,
+   `runner`, `audits` (+ `audits.fidelity/leakage/population_neutrality`) — but it does **not**
+   include `component_b_generator.generation.item_opportunities`. The reuse-map/manifest side is
+   internally consistent (`component-b-live-engine-manifest.json` line 146 lists
+   `generation.item_opportunities` under `excluded_by_omission.modules`, and its
+   `prohibited_module_unreachability_check` at line 160 records that unreachability was manually
+   verified at packaging time), but that manual, packaging-time check is not mirrored in the
+   automated `PROHIBITED_MODULES` regression tuple. Confirmed by direct import in the built image
+   (`ModuleNotFoundError: No module named 'component_b_generator.generation.item_opportunities'`)
+   — the module is absent from the current wheel, so there is no live violation today. But
+   because it is missing from `PROHIBITED_MODULES`, neither
+   `test_prohibited_module_is_not_importable_from_the_package` nor
+   `test_app_import_graph_never_reaches_the_thirteen_prohibited_submodules` would catch a future
+   wheel rebuild that reintroduces it (e.g. via `generation/__init__.py` un-trimming). This is the
+   one item in the required list (behaviour.first_attempt/latency/attempt_loop, cohort/*,
+   pipeline, pilot, runner, audits, generation.item_opportunities) not actually present in the
+   guard. Recommend adding it to `PROHIBITED_MODULES` before treating this guard as closed.
+
+4. **Built-image inspection.** `docker build --no-cache` succeeded from `backend/Dockerfile`
+   unmodified. `pip list` in the built image shows exactly one Component-B package,
+   `upadya-component-b-live-engine 0.1.0+be3.0e86fdc`; `import upadya_component_b_generator`
+   (the full research wheel's name) raises `ModuleNotFoundError`, and a repo-wide
+   `find / -iname '*component_b_generator*'` inside the container returns only the single vendored
+   package directory. `.dockerignore`'s `provenance/wheels/*` + explicit
+   `!upadya_component_b_live_engine-...whl` allowlist keeps any other wheel out of the build
+   context. Live-engine functions (`bkt_predict/posterior/update`, `plausibility_floor`) import
+   and run inside the image.
+
+5. **Runtime-bundle loader fail-closed behavior.** Verified in `tests/test_be3b_runtime_bundle.py`
+   and by re-reading `app/infrastructure/runtime_bundle/loader.py`: missing manifest/schema file →
+   `RuntimeBundleNotFoundError`; invalid JSON → `RuntimeBundleValidationError`; missing required
+   field or wrong type → `RuntimeBundleValidationError` (schema-driven); generator checksum
+   mismatch or a caller-supplied `artifact_paths` checksum mismatch →
+   `RuntimeBundleChecksumMismatchError`; any `approval_status != "APPROVED"` under the default
+   `require_approved=True` → `RuntimeBundleNotApprovedError`. Grepped every fixture
+   (`valid_unapproved_bundle.json`, `missing_field_bundle.json`, `bad_checksum_bundle.json`) —
+   every `approval_status` occurrence (top-level and every sub-artifact) is `CALIBRATION_PENDING`
+   or `ENGINEERING_ASSUMPTION`, never `APPROVED`; `test_never_marks_a_bundle_approved_in_this_batch`
+   asserts this directly. The loader has no code path that writes or defaults `approval_status`,
+   so it cannot self-approve.
+
+6. **Full suite in the image.** Built the image with `docker build --no-cache`, ran
+   `alembic upgrade head` against a throwaway `postgres:16-alpine` container (clean, migrations
+   applied without error), then `python -m pytest -q`: **153 passed**, 0 failed. Re-ran
+   `tests/test_be3_live_engine_boundary.py tests/test_be2_architecture_guards.py
+   tests/test_be3b_live_engine_adapter.py tests/test_be3b_runtime_bundle.py` verbosely: 66/66
+   passed, confirming the import-boundary and architecture guards are active and green in the
+   built image, not just locally.
+
+**Verdict: NO-GO — BE3B_ADAPTER_AND_BUNDLE_BATCH_CLOSED.** Items (1), (2), (4), (5), and (6) all
+verify clean. Item (3) fails as specified: `generation.item_opportunities` is required to be part
+of the completed `PROHIBITED_MODULES` guard and is not. This is a narrow, mechanical gap (one
+tuple entry) with no live exploit today — the module doesn't exist in the current wheel — but the
+guard as written does not yet meet the "COMPLETE" bar this review was asked to confirm. Closure
+should be re-requested after `generation.item_opportunities` is added to `PROHIBITED_MODULES` in
+`tests/test_be3_live_engine_boundary.py` (and the suite re-run green in the image).
+
+Docker/Postgres containers, network, and image built for this review were removed after
+verification; nothing was committed.
+
+## 2026-07-25 — Guard-completeness fix (NO-GO item 3 closure)
+
+Added `"component_b_generator.generation.item_opportunities"` to `PROHIBITED_MODULES` in
+`tests/test_be3_live_engine_boundary.py` — the one tuple entry the NO-GO review flagged as
+missing relative to `excluded_by_omission.modules` in
+`backend/provenance/component-b-live-engine-manifest.json`. One-line addition only; no
+adapter/loader change, no behavior change.
+
+Re-verified from a fresh `docker build --no-cache` of `backend/Dockerfile` (image
+`upadya-backend:be3b-fix`), migrations applied via `alembic upgrade head` against a throwaway
+`postgres:16.10-bookworm` container, then the full suite run inside the built image:
+**154 passed** (153 from the prior closure run + 1 new parametrized case for the added module),
+0 failed. Re-ran `tests/test_be3_live_engine_boundary.py tests/test_be2_architecture_guards.py
+tests/test_be3b_live_engine_adapter.py tests/test_be3b_runtime_bundle.py` verbosely: 67/67 passed
+(up from 66/66), confirming both consuming guards —
+`test_prohibited_module_is_not_importable_from_the_package[component_b_generator.generation.item_opportunities]`
+and `test_app_import_graph_never_reaches_the_thirteen_prohibited_submodules` — are green with the
+extended tuple.
+
+Direct confirmation in the built image:
+`importlib.import_module("component_b_generator.generation.item_opportunities")` raises
+`ModuleNotFoundError: No module named 'component_b_generator.generation.item_opportunities'` —
+the newly-guarded module is genuinely absent from the installed wheel, so the guard passes
+because the module is unreachable, not because the test was skipped. The adapter's legitimate
+imports — `component_b_generator.generation.activation`, `.errors`, `.task_instances` — all
+import successfully; none contain the substring `item_opportunities`, so there is no false
+positive from the new guard entry.
+
+Docker/Postgres containers, network, and image built for this fix were removed after
+verification; nothing was committed — working tree remains uncommitted for Yasindu's review.
+
+## BE3b Re-Closure Review (focused re-verification of the guard-gap fix)
+
+Read-only, independent re-run from a fresh `docker build --no-cache` of `backend/Dockerfile`
+(image `upadya-backend:be3b-reclosure`), a throwaway `postgres:16.10-bookworm` container on a
+dedicated bridge network, and `alembic upgrade head` against it (clean, no errors). This pass
+re-confirms only the scope named in the re-closure request; the import boundary, no-formula-copy,
+built-image wheel exclusion, fail-closed loader, and green suite were already independently
+established in the closure review above and are re-checked here only insofar as the full suite
+run and the specific NO-GO item cover them.
+
+1. **`PROHIBITED_MODULES` now includes the missing entry.** Read
+   `tests/test_be3_live_engine_boundary.py` directly: line 41 is
+   `"component_b_generator.generation.item_opportunities"`, appended after the 13 previously-listed
+   entries (cohort/*, 6x behaviour.*, pipeline, pilot, runner, audits + 3 audits submodules). Both
+   consuming guards pick it up:
+   `test_prohibited_module_is_not_importable_from_the_package[component_b_generator.generation.item_opportunities]`
+   and `test_app_import_graph_never_reaches_the_thirteen_prohibited_submodules` both PASSED in the
+   built image (verbose run below).
+
+2. **Built-image `importlib` behavior.** Ran directly inside the built image:
+   `importlib.import_module("component_b_generator.generation.item_opportunities")` raises
+   `ModuleNotFoundError: No module named 'component_b_generator.generation.item_opportunities'` —
+   absent, not skipped. In the same process, the adapter's actual imports —
+   `component_b_generator.generation.activation`, `.errors`, `.task_instances` — all import
+   successfully, confirming the new guard entry does not collide with or block any legitimate
+   adapter import.
+
+3. **Full suite in the image.** `python -m pytest -q` inside the freshly-built image: **154
+   passed**, 0 failed. Targeted verbose re-run of
+   `tests/test_be3_live_engine_boundary.py tests/test_be2_architecture_guards.py
+   tests/test_be3b_live_engine_adapter.py tests/test_be3b_runtime_bundle.py`: **67/67 passed**,
+   including all 18 parametrized cases of
+   `test_prohibited_module_is_not_importable_from_the_package` (the 13 original + the new
+   `generation.item_opportunities` case).
+
+4. **No other BE3b finding regressed.**
+   - **Sole app/ importer.** `grep -rl component_b_generator app/` inside the built image
+     (excluding `__pycache__`) returns only `app/infrastructure/live_engine/adapter.py`;
+     `app/infrastructure/live_engine/__init__.py` and `app/domain/live_engine/__init__.py` are
+     docstring mentions, not imports (read in full — no `import`/`from` statement present).
+   - **No package Pydantic models in `app/domain`.** `grep -rn BaseModel app/domain` finds exactly
+     four backend-owned models (`classroom_membership.py`, `principal.py`, `b_session.py`,
+     `profile_classroom.py`) — none reference `component_b_generator`.
+   - **Image lacks the full research wheel.** `pip list` shows exactly one Component-B package,
+     `upadya-component-b-live-engine 0.1.0+be3.0e86fdc`; `import upadya_component_b_generator`
+     raises `ModuleNotFoundError`; a repo-wide `find / -iname '*component_b_generator*'` returns
+     only the single vendored package under `site-packages`. `.dockerignore` still excludes
+     `provenance/wheels/*` broadly and allowlists back only the pinned live-engine wheel and
+     `provenance/runtime-bundle.schema.json`, keeping the research wheel and the rest of
+     `provenance/` out of the build context.
+   - **Loader still fails closed.** `tests/test_be3b_runtime_bundle.py` (10/10 in the verbose run
+     above) covers missing manifest/schema file, invalid JSON, missing/wrong-type required field,
+     generator and artifact-path checksum mismatch, and default-`require_approved` rejection of
+     any non-`APPROVED` bundle — all still raise the expected typed error in the built image.
+
+Docker/Postgres containers, the dedicated network, and the image built for this re-closure were
+removed after verification (`docker rm -f`, `docker network rm`, `docker rmi`); nothing was
+committed — working tree remains uncommitted for Yasindu's review.
+
+**Verdict: GO — BE3B_ADAPTER_AND_BUNDLE_BATCH_CLOSED.** The sole NO-GO item from the prior closure
+review (missing `generation.item_opportunities` guard entry) is fixed, consumed by both the
+parametrized import test and the app-wide submodule guard, and confirmed live in a real
+`ModuleNotFoundError` from the built image — not a vacuously-passing or skipped test. No other
+BE3b finding regressed: single adapter import point, no formula duplication, no package Pydantic
+models under `app/domain`, no research wheel in the image, fail-closed runtime-bundle loader, and
+154/154 (67/67 targeted) green in a clean `docker build --no-cache` image against real Postgres.

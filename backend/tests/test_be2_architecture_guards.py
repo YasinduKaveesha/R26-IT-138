@@ -140,10 +140,16 @@ def test_b_session_dto_contains_no_scientific_expiry_or_attempt_fields() -> None
 
 
 def test_no_yass_research_or_scientific_imports() -> None:
+    """BE3b wires ``app/infrastructure/live_engine/adapter.py`` to the reviewed
+    ``component_b_generator`` package (see ``tests/test_be3_live_engine_boundary.py`` for the
+    detailed BE3 import-boundary guards). That one file is therefore exempt from the
+    ``component_b_generator`` top-level prohibition here, but not from ``yass``/``pipeline``/
+    ``pilot`` — every other file in ``app/`` stays fully disjoint from all of these roots."""
     prohibited_import_roots = {
         "component_b_generator", "yass", "bkt", "sequencing", "certification",
         "guess_guard", "pipeline", "pilot",
     }
+    allowed_adapter_path = Path("app/infrastructure/live_engine/adapter.py")
     for path in Path("app").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
@@ -152,6 +158,9 @@ def test_no_yass_research_or_scientific_imports() -> None:
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported = {node.module.split(".")[0].lower()}
             else:
+                continue
+            if path == allowed_adapter_path:
+                assert imported.isdisjoint({"yass", "pipeline", "pilot"}), (path, imported)
                 continue
             assert imported.isdisjoint(prohibited_import_roots), (path, imported)
 
