@@ -57,3 +57,7 @@ compose*.yml
 provenance/wheels/*
 !provenance/wheels/upadya_component_b_live_engine-0.1.0+be3.0e86fdc-py3-none-any.whl
 !provenance/runtime-bundle.schema.json
+# BE3c exception: the implemented/deferred template partition provenance is read by the
+# characterization test suite to cross-check the TEST-FIXTURE-ONLY catalogue against the
+# reviewed coverage report. Contains no generator source, no wheel, no research artifacts.
+!provenance/component-b-coverage.json

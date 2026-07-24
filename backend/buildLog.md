@@ -4680,3 +4680,186 @@ parametrized import test and the app-wide submodule guard, and confirmed live in
 BE3b finding regressed: single adapter import point, no formula duplication, no package Pydantic
 models under `app/domain`, no research wheel in the image, fail-closed runtime-bundle loader, and
 154/154 (67/67 targeted) green in a clean `docker build --no-cache` image against real Postgres.
+
+## 2026-07-25 — BE3c: private/public task representation split + characterization/privacy tests
+
+Implements BEplan BE3.3–BE3.4 as one bounded batch on top of the committed BE3b adapter
+(`36fb525`). Fixed TEST-FIXTURE-ONLY provenance only: no live learner flow, no API route, no
+persistence table/migration, no real approved runtime bundle, no crossing the BE4 scientific
+gate. Nothing was committed; the working tree is left uncommitted for Yasindu's review.
+
+**Scope-boundary decision (BE3.3 vs. BE4.1 — recorded per the governance note in this batch's
+task brief).** BEplan BE3.3.1 says "persist a private opportunity/task snapshot"; BEplan BE4.1.1
+says "add private opportunity/task-instance TABLES". Those two lines describe the same
+persistence concern at different levels of commitment. Resolution applied here: this batch
+defines the private and public **in-memory representations** (`PrivateTaskRecord`,
+`PublicTaskPresentation`), the private→public **mapping** (`project_to_public`), and the
+**characterization/privacy tests** proving the split holds — and stops there. It does NOT add an
+opportunity/task-instance database table, a SQLAlchemy model, or an Alembic migration; standing
+up that persistence, wiring it into a session-scoped unit of work, and enforcing "one open
+opportunity per session" is BE4.1 scope and is left for that batch. This keeps BE3's exit gate
+("public DTOs contain no private fields") satisfiable without pre-committing to BE4's storage
+schema before BE4 is actually reached.
+
+**What was added:**
+
+1. `app/domain/live_engine/presentation.py` — `PrivateTaskRecord` (full private snapshot: operands,
+   correct answer, accepted equivalents, distractor candidates + rule ids, applied guard ids,
+   generation/global seed, `SelectionReason`, catalogue version/checksum, bundle version, student
+   id, curriculum node id) and `PublicTaskPresentation` (allow-listed learner-facing DTO:
+   opportunity/instance id, skill, grade, difficulty, representation type, response format,
+   prompt, `presented_choices`). `build_private_task_record` assembles the private record from an
+   adapter `TaskInstance` plus the caller's own request/selection-reason/bundle-version
+   provenance. `project_to_public` builds the public DTO by naming each field it reads from the
+   private record explicitly — never via `dataclasses.asdict`/`replace` on the private object
+   with keys deleted afterward, so a newly added private field cannot leak into the public DTO by
+   omission. `presented_choices` is the sorted union of the correct answer and distractor
+   candidates (needed so the learner can select the right one) but carries no marker of which
+   entry is correct.
+
+2. `app/domain/runtime_bundle/readiness.py` — `assert_catalogue_matches_bundle(bundle, catalogue,
+   catalogue_checksum)`, a pure cross-check the BE3b loader didn't have: it fails closed
+   (`RuntimeBundleValidationError`) the moment the bundle's declared catalogue checksum, catalogue
+   version, required template count, or skill set disagrees with the catalogue an adapter call
+   actually loaded. No partial-match or fallback path — every branch either passes silently or
+   raises.
+
+3. `tests/fixtures/runtime_bundle/test_catalogue.md` extended from 7 to all 36 template ids in
+   `provenance/component-b-coverage.json` (29 implemented + 7 deferred), so the characterization
+   suite can exercise the real implemented/deferred partition instead of one representative per
+   skill. Each implemented template's `grade_scope` was set to reproduce the exact
+   `eligible_grades` declared by its `ItemSampler` in the vendored
+   `component_b_generator.samplers.*` registry (verified by reading each sampler module
+   directly, not by assumption); each deferred template's status is `DEFERRED_CALIBRATION_PENDING`
+   or `DEFERRED_UNDERSPECIFIED` matching its `decision_code` in the coverage report. Extending the
+   fixture changed its SHA-256, so the catalogue checksum in all three runtime-bundle JSON
+   fixtures (`valid_unapproved_bundle.json`, `missing_field_bundle.json`,
+   `bad_checksum_bundle.json`) was updated to the new value — confirmed the *only* difference
+   between `valid_unapproved_bundle.json` and `missing_field_bundle.json` is the deliberately
+   absent `bkt_configuration` block (not the catalogue checksum), and that
+   `bad_checksum_bundle.json`'s deliberately-wrong checksum is still on the `generator` artifact,
+   not `catalogue`. `Dockerfile` and `.dockerignore` were given one new, narrowly-scoped exception
+   to copy `provenance/component-b-coverage.json` (partition provenance only — no generator
+   source, no wheel) into the image so the characterization tests can read it at run time.
+
+4. `tests/test_be3c_characterization.py` — sanity-checks the fixture catalogue actually contains
+   every implemented/deferred id claimed in the coverage report; generates one instance per
+   (implemented template, eligible grade) pair (30 pairs across 29 templates, since
+   `B-ADD02-COUNT-ON` is eligible for both grades) and asserts internal consistency; asserts all 7
+   deferred templates raise `TemplateNotActiveError` at both grades; asserts determinism (repeat
+   build, same fixed request, byte-identical `TaskInstance`); asserts grade 2 never contains
+   multiplication/division in `catalogue.eligible_for(2)` and that `decide_activation` reports
+   every multiplication/division template inactive at grade 2; asserts the canonical sequencing
+   tie-break (skill order, then lexicographic `item_template_id`) picks the same winner regardless
+   of input order or repetition; asserts hint content is the exact catalogue string with matching
+   catalogue checksum/version, and that a template with no authored hint fails closed
+   (`HintUnavailableError`), never a generated fallback.
+
+5. `tests/test_be3c_privacy.py` — an explicit allow-list serialization test asserting
+   `PublicTaskPresentation.to_public_dict()` produces exactly the 9 allowed keys, never
+   `correct_answer`/`allowed_equivalent_answers`, and that the correct answer appears among
+   `presented_choices` without any field marking which one it is; a schema-snapshot scan over the
+   dataclass's own field names (`dataclasses.fields`, independent of the serializer) checked
+   against a forbidden-name set (correct answer, equivalents, answer rules, seeds, BKT params,
+   mastery/posterior/certification fields, selection rationale, distractor provenance, student id,
+   curriculum node id, catalogue/bundle version) plus a recursive value walk of the serialized
+   dict asserting none of those private scalars appear by value either; a structural check that
+   the public dataclass's field set is not a trivial subset produced by copying the private one
+   (only `presented_choices` differs, and it exists on the public side only); and four
+   runtime-bundle readiness tests — the fixture bundle matches the extended catalogue cleanly, and
+   a checksum mismatch, a template-count mismatch, and a version mismatch each raise
+   `RuntimeBundleValidationError` rather than silently proceeding.
+
+**Pre-existing gap found and fixed: the fixture catalogue was never actually committed.**
+`git log -- tests/fixtures/runtime_bundle/test_catalogue.md` shows no history at all — the
+repo-root `.gitignore`'s blanket `*.md` rule (line 29, meant for local-only documentation) was
+silently excluding this file from every commit since it was introduced in BE3b, even though
+`test_be3b_live_engine_adapter.py` and `test_be3b_runtime_bundle.py` both depend on it. It only
+worked in Docker/CI because `.dockerignore` (a separate allowlist) copies the whole `tests/`
+directory regardless of `.gitignore`. Added one narrow exception,
+`!/backend/tests/fixtures/runtime_bundle/test_catalogue.md`, to the root `.gitignore` — this is a
+repository-configuration edit, not a git state-changing command, and no `git add`/`commit` was
+run. Flagging this explicitly: without that exception, extending this fixture for BE3c (or ever
+committing the original BE3b version of it) would have gone in silently untracked.
+
+**Verification.** Built `backend/Dockerfile` (`docker build`, no `--no-cache` needed — no
+image-affecting layer changed except the two new provenance/coverage COPY lines and the
+`.dockerignore` exception). Ran the full suite against a throwaway `postgres:16.10-bookworm`
+container on a dedicated bridge network (`be3c-net`/`be3c-db`), migrations applied via
+`alembic upgrade head` (clean, five revisions, no errors): **176 passed, 0 failed** — the prior
+154 plus 22 new (12 characterization + 10 privacy). A targeted verbose run of
+`test_be3c_characterization.py test_be3c_privacy.py test_be3b_live_engine_adapter.py
+test_be3b_runtime_bundle.py test_be3_live_engine_boundary.py test_be2_architecture_guards.py`:
+89/89 passed, confirming the BE2 architecture guards and BE3a/BE3b import-boundary guards (sole
+`app/` importer of `component_b_generator` remains `app/infrastructure/live_engine/adapter.py`,
+all entries in `PROHIBITED_MODULES` — 18 submodule paths covering the 13 prohibited
+research/synthetic capabilities — unreachable) are still green alongside the new BE3c code. Docker
+containers, the dedicated network, and the built image were removed after verification
+(`docker rm -f`, `docker network rm`, `docker rmi`); no git command beyond read-only inspection
+was run — nothing is staged or committed.
+
+**No closure decision recorded here.** Per this batch's instructions, closure/no-go review is a
+separate follow-up, not part of this entry.
+
+## 2026-07-25 — BE3c closure review: GO (BE3C_PRIVATE_PUBLIC_SPLIT_BATCH_CLOSED)
+
+Independent closure review against BEplan BE3.3–BE3.4, run from a fresh `docker build --no-cache`
+image plus a real throwaway `postgres:16.10-bookworm` container (`be3c-review-net`/`be3c-review-db`,
+disposed of after verification). Read-only git only; nothing staged or committed; this entry is the
+only write made.
+
+**(1) Private/public split.** `app/domain/live_engine/presentation.py` builds
+`PublicTaskPresentation` and its `to_public_dict()` field-by-field from an explicit allow-list —
+never `dataclasses.asdict`/`replace` on `PrivateTaskRecord` with keys deleted after. Confirmed by
+reading `project_to_public` directly (every field is named on the right-hand side, nothing copied
+wholesale) and by `tests/test_be3c_privacy.py`: an allow-list serialization test (exactly the 9
+allowed keys, correct answer/equivalents absent, correct answer present-but-unmarked among
+`presented_choices`), a schema-snapshot scan of `dataclasses.fields(PublicTaskPresentation)` against
+a forbidden-name set (correct answer, equivalents, answer rules, seeds, BKT params, mastery/
+posterior/certification, selection rationale, distractor provenance, student id, curriculum node id,
+catalogue/bundle version) plus a recursive value walk of the serialized dict, and a structural check
+that the public field set isn't a copy-then-delete artifact of the private one. No private field is
+reachable in the public DTO.
+
+**(2) Characterization.** `tests/test_be3c_characterization.py` verified: adapter output matches the
+pinned generator via the vendored package on fixed fixtures; all 29 implemented templates generate
+across all their eligible grades (30 pairs, `B-ADD02-COUNT-ON` counted twice); all 7 deferred
+templates raise `TemplateNotActiveError` at grades 2 and 3; determinism holds (byte-identical
+`TaskInstance` on repeat build under a fixed request); grade 2 never receives multiplication or
+division (`catalogue.eligible_for(2)` and `decide_activation` both checked); the canonical
+skill-order/lexicographic-template-id tie-break is stable regardless of candidate input order or
+repetition; hint text is the exact catalogue string with matching checksum/version provenance, and a
+template with no authored hint fails closed (`HintUnavailableError`), never a generated fallback.
+
+**(3) BE3.3/BE4.1 boundary held.** No new DB table, model, or Alembic migration (`migrations/versions`
+unchanged — no untracked files there; the batch's `readiness.py`/`presentation.py` are pure in-memory
+domain code). No new API route (no `APIRouter`/`@router.*` in `app/domain/live_engine` or
+`app/domain/runtime_bundle`; no live-engine wiring in `app/main.py`/`app/api` router includes). No
+live learner flow.
+
+**(4) Config edits narrow and disclosed.** `git diff` confirms: `.gitignore` adds exactly one
+exception line for `test_catalogue.md` (the pre-existing untracked-fixture gap, disclosed and fixed,
+not new scope creep); `.dockerignore` and `Dockerfile` add exactly one exception/COPY line each for
+`provenance/component-b-coverage.json`. Read that file directly: it is partition/provenance metadata
+only (template ids, implemented/deferred status, grade-activation counts, response-format
+classification) — no correct answers, no BKT/scientific parameters, no secrets. No other undisclosed
+change found in either file.
+
+**(5) Import boundary intact.** `test_only_the_live_engine_adapter_module_imports_the_package` and
+`test_app_import_graph_never_reaches_the_thirteen_prohibited_submodules` both pass; `presentation.py`
+itself has no `component_b_generator` import. `PROHIBITED_MODULES` still lists 18 submodule paths
+covering the 13 prohibited research/synthetic capabilities, all confirmed unreachable.
+
+**(6) Full suite green in the image.** Clean `docker build --no-cache` succeeded; `alembic upgrade
+head` applied all 5 revisions cleanly against the real Postgres container; full suite: **176 passed,
+0 failed**. Targeted re-run of `test_be3c_characterization.py test_be3c_privacy.py
+test_be3b_live_engine_adapter.py test_be3b_runtime_bundle.py test_be3_live_engine_boundary.py
+test_be2_architecture_guards.py`: **89 passed**. Numbers match the BE3c batch entry exactly.
+
+**Non-blocking note.** `provenance/component-b-coverage.json` currently ships in the runtime image
+(via the new `Dockerfile` COPY line) purely so the characterization test suite can read it inside the
+container. It is not used by any non-test runtime code path yet. Worth revisiting whether
+test-only provenance should live in a test-stage-only layer once a multi-stage Dockerfile exists,
+so the shipped runtime layer doesn't carry test fixtures it doesn't execute against.
+
+**Verdict: GO.** Identifier: `BE3C_PRIVATE_PUBLIC_SPLIT_BATCH_CLOSED`.
