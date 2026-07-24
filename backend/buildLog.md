@@ -4087,3 +4087,233 @@ an engineering closure only -- `ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DE
 remains in effect, and named-approver ratification remains deferred to BE6. No commit was
 made; the working tree remains as Yasindu left it, pending their review and commit
 decision.
+
+---
+
+## Phase BE3 — Batch: Minimal Live-Engine Packaging (`upadya-component-b-live-engine`) — NOT A CLOSURE REVIEW
+
+Completed: 2026-07-24 Asia/Colombo
+Build target: `Dev/backend/`
+Scientific source repository: `Yass`, pinned commit `0e86fdcbc0ffcdbda3d37c742e83b1d532910e2b`
+Authorized by: `backend/provenance/component-b-live-engine-reuse-map.json` and
+`component-b-closure-decisions.json` (`generator_packaging_decision.selected_strategy =
+MINIMAL_UPADYA_COMPONENT_B_LIVE_ENGINE_AT_BE3`)
+
+### 1. Scope
+
+Packaging and import-boundary work only. No adapter wiring, no live learner flow, no new
+scientific parameters, no application import. This batch builds and verifies a new, minimal
+wheel distinct from the prohibited full research wheel, and pins it as a backend dependency
+without wiring it into `app/`. No git state-changing command was run; nothing is committed.
+
+### 2. Source verification (before use)
+
+`git diff 0e86fdcbc0ffcdbda3d37c742e83b1d532910e2b -- Implementation_v1.0/component_b_generator
+Implementation_v1.0/models Implementation_v1.0/validators` against the Yass working tree (HEAD
+`648762a60a4590f714418b36dbd286569ee66c5d` at verification time) showed the working tree had
+**drifted** from the pinned commit in exactly one file,
+`component_b_generator/aggregation/session.py` (a later, unpinned change narrowing
+`_response_time_stats`'s standard-deviation handling for fewer than two timed responses).
+Because of this drift, the package was built from the exact pinned-commit blob content via
+`git show 0e86fdcbc0ffcdbda3d37c742e83b1d532910e2b:<path>` for every file, never from the
+mutable working tree. All 45 verbatim files in the built package were independently confirmed
+byte-identical to their pinned-commit blob afterward.
+
+The pre-existing `generator_tracked_source_manifest` value recorded in
+`component-b-closure-decisions.json`/`component-b-baseline.json`
+(`fd4f052e41539434ad4ff6bbb72fa01815ef750ceeb0a6d8ebc6fbc481e07e2c`, 82 tracked files) uses an
+undocumented construction; several plausible reconstructions (repo-relative vs.
+generator-relative paths, forward- vs. back-slash separators, blob vs. working-tree content,
+trailing newline variants) were tried and none reproduced it. Rather than guess further, source
+fidelity was established directly by commit diff and per-file byte comparison (above), which is
+a stronger guarantee than reproducing an opaque hash. This package's own source manifest is
+independently documented (below) with its construction fully specified.
+
+### 3. Reviewed live-safe closure assembled
+
+Location: `backend/packaging/component_b_internal/` (existing stub `pyproject.toml` from an
+earlier BE0 note, corrected here — it previously declared the prohibited research
+distribution's own name/version; that was dead placeholder text, not a real dependency).
+
+45 files copied byte-identical from the pinned commit (verified — see above); 7 files
+deliberately trimmed to remove content that is unreachable/prohibited or simply not part of
+the reviewed capability closure, each with an inline `PACKAGING NOTE` docstring explaining the
+removal:
+
+- `generation/task_instances.py` — kept `build_task_instance`/`generate_task_instances` bodies
+  byte-identical; removed the offline `run_phase_b2a` smoke-path entry point and its unique
+  imports, most importantly `from ..runner import run_phase_b1` — exactly the synthetic
+  dependency the reuse map's note for this capability flagged as needing exclusion.
+- `models/behaviour.py` — kept `ERROR_PATTERNS`/`ErrorPattern`/`HINT_LEVELS`/`_require_skill`/
+  `BOpportunityResponseSummary` byte-identical; removed `AuditOnlyModel`,
+  `BLearnerSkillTruth`, `BAttemptEvent`, `BoundedBetaSpec`, `BoundedNormalSpec`,
+  `BTruthInitializationConfig`, `BInitialLearnerSkillTruth`, `LognormalLatencySpec`,
+  `BFirstAttemptBehaviourConfig`, `BAttemptLoopConfig`, `BOpportunityAttemptResult` — the
+  hidden-truth and synthetic-behaviour-generation classes explicitly named in the reuse map's
+  `explicitly_prohibited_from_application` list. Verified none of the retained symbols
+  reference any removed class.
+- `models/__init__.py`, `behaviour/__init__.py`, `bkt/__init__.py`, `generation/__init__.py`,
+  `sequencing/__init__.py` — each pinned-source `__init__.py` eagerly imports at least one
+  prohibited or out-of-closure sibling module at package-import time (e.g.
+  `behaviour/__init__.py` imports `.attempt_loop`/`.first_attempt`/`.latency`;
+  `generation/__init__.py` imports `.item_opportunities`, which imports
+  `..cohort.builder.CohortMember`). Replaced with empty re-export surfaces; no module in the
+  reviewed closure does a bare `from ..<package> import X`, so nothing depends on the removed
+  re-exports.
+
+Excluded entirely by omission (files never copied into the package, so they are unreachable by
+`ModuleNotFoundError`, not merely unimported): `cohort/*`, `behaviour/first_attempt.py`,
+`behaviour/latency.py`, `behaviour/attempt_loop.py`, `behaviour/initialization.py`,
+`behaviour/wrong_answers.py`, `behaviour/derivation.py`, `behaviour/seeds.py`,
+`behaviour/validation.py`, `pipeline.py`, `pilot.py`, `runner.py`, `audits/*`,
+`generation/item_opportunities.py`, `generation/coverage.py`, `sequencing/eligibility.py`,
+`sequencing/select_item.py`, `bkt/orchestrator.py`, `config/*`, `adapters/*`, `validators/*`.
+
+### 4. Package identity and build
+
+- Distribution: `upadya-component-b-live-engine`, version `0.1.0+be3.0e86fdc` (distinct name
+  and version from the prohibited research distribution `upadya-component-b-generator`, per
+  `closure-decisions.json`'s `versioning_method`).
+- Dependencies: `pydantic==2.13.4`, `PyYAML==6.0.3` only (the reviewed closure does not use
+  numpy/pandas/scikit-learn/jsonschema, unlike the full research wheel).
+- Built with `python -m build --wheel --no-isolation` (`setuptools==80.10.2`,
+  `wheel==0.46.3`) in an isolated Python 3.11.15 venv.
+- Wheel: `upadya_component_b_live_engine-0.1.0+be3.0e86fdc-py3-none-any.whl`
+  SHA-256 `faa5760df1f5a3874f38f8103cdaaa88a14b3190216e46ab21765eee65a70c29`, placed at
+  `backend/provenance/wheels/` alongside the existing (still-present, still-prohibited-for-
+  runtime) full research wheel.
+- Package source manifest: SHA-256 of `'<package-relative-posix-path>\t<sha256-of-file-bytes>\n'`
+  lines sorted by path, over all 52 `*.py` files in
+  `backend/packaging/component_b_internal/` — `4321ebfdb7041a62be8620e857736db4146ae9eb27e78dffd1fd52f44664315f`.
+  Full construction, both checksums, and per-file inclusion/exclusion/trim rationale are
+  recorded in `backend/provenance/component-b-live-engine-manifest.json`.
+
+### 5. Verification (isolated Python 3.11.15 venv, `pydantic`+`PyYAML` only)
+
+- All function/class names listed against the 11 capabilities in
+  `component-b-live-engine-reuse-map.json` import successfully from the installed wheel.
+- `importlib.import_module` raises `ModuleNotFoundError` for `component_b_generator.cohort`,
+  `.cohort.builder`, `.behaviour.first_attempt`, `.behaviour.latency`,
+  `.behaviour.attempt_loop`, `.pipeline`, `.pilot`, `.runner`, `.audits` (and its submodules),
+  `.generation.item_opportunities`.
+- `AuditOnlyModel`/`BLearnerSkillTruth`/`BAttemptEvent`/etc. are absent from
+  `component_b_generator.models.behaviour` in the installed wheel.
+- `bkt_predict`/`bkt_posterior`/`bkt_update` returned byte-identical output across two calls
+  with identical fixed inputs in the same process (determinism smoke test).
+
+### 6. Dependency pin (no adapter wiring)
+
+`requirements.in`, `requirements.lock` (with `--hash=sha256:...`), and `requirements.txt` each
+gained one line: `./provenance/wheels/upadya_component_b_live_engine-0.1.0+be3.0e86fdc-py3-none-any.whl`.
+No file under `app/` imports the package or any of its modules. `backend/.dockerignore`
+currently excludes `provenance/`, `packaging/`, and `*.whl` from the Docker build context, so
+an actual `docker build` cannot yet install this pin — that gap, plus any Dockerfile `COPY`
+change, is explicitly left for BE3b (adapter wiring), not touched here.
+
+### 7. Tests added and existing guards re-run
+
+New: `tests/test_be3_live_engine_boundary.py` —
+`test_prohibited_module_is_not_importable_from_the_package` (parametrized over all 13 excluded
+modules from the reuse map's exclusion list), `test_thirteen_prohibited_capabilities_are_unreachable`,
+`test_no_dataset_generation_or_experiment_runner_entry_point_in_package`,
+`test_app_import_graph_still_does_not_reach_prohibited_modules` (unchanged BE2-style guard,
+reconfirmed against `app/` with the new package installed), `test_bkt_update_is_deterministic_under_fixed_provenance`,
+`test_guess_guard_is_deterministic_under_fixed_provenance`. Uses `pytest.importorskip` so it
+skips cleanly wherever the package is not installed.
+
+Re-run in the same isolated venv: `tests/test_be2_architecture_guards.py` (all 13, including
+`test_dependency_files_exclude_research_generator`, which still passes — the new pin's text
+contains neither `component-b-generator`/`component_b_generator` nor `yass`) and
+`tests/test_be3_live_engine_boundary.py` — **35 passed, 0 failed**
+(`pytest -q tests/test_be3_live_engine_boundary.py tests/test_be2_architecture_guards.py`).
+`pytest -q --collect-only` across the full `tests/` tree collected all 122 tests with no import
+errors (the DB-backed test modules were not executed — no local PostgreSQL instance — but
+collection alone confirms this batch introduced no import-time regression anywhere).
+
+### 8. Recorded checksums (as requested)
+
+- Wheel SHA-256: `faa5760df1f5a3874f38f8103cdaaa88a14b3190216e46ab21765eee65a70c29`
+- Package source manifest SHA-256: `4321ebfdb7041a62be8620e857736db4146ae9eb27e78dffd1fd52f44664315f`
+- Pinned source commit: `0e86fdcbc0ffcdbda3d37c742e83b1d532910e2b`
+
+### 9. Limitations and next task
+
+This is packaging + import-boundary work only — **not a closure review** and not a governance
+ratification. Unresolved: whether the trimmed-file boundary choices above (especially the
+`models/behaviour.py` split and the five emptied `__init__.py` files) match what a named
+Component B owner would approve; the Docker build-context gap in §6; and all governance-register
+items already `UNRESOLVED`/`CALIBRATION_PENDING` in `component-b-closure-decisions.json` remain
+exactly as they were. Next task is BE3b: a named-owner review of this packaging batch, followed
+(only if approved) by adapter wiring, `.dockerignore`/Dockerfile updates to actually install the
+pin in the image, and the first real application import. No commit was made; the working tree
+remains as Yasindu left it, pending their review and commit decision.
+
+## BE3a closure review — independent re-verification (2026-07-24)
+
+Separate closure review of the minimal live-engine package against PROMPT BE3a,
+`component-b-live-engine-reuse-map.json`, and the `generator_packaging_decision` in
+`component-b-closure-decisions.json`. Read-only git; nothing committed. `.claude/settings.json`
+treated as out of scope for this batch. Re-verification performed independently from a clean
+isolated environment, not by re-reading the prior batch's own claims.
+
+**Environment.** `docker run` against `python:3.11.15-slim-bookworm@sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba`
+— the exact base image digest pinned in `backend/Dockerfile` — with the `backend/` tree copied
+into a writable `/workspace` inside the container (a read-only bind mount plus `pip install`
+was used only to avoid touching the host). `pip install --require-hashes --no-deps -r
+requirements.lock` installed cleanly, including the live-engine wheel via its recorded hash.
+
+**(1) Wheel identity — PASS.** `sha256sum` on both files in `backend/provenance/wheels/`:
+live-engine wheel = `faa5760df1f5a3874f38f8103cdaaa88a14b3190216e46ab21765eee65a70c29`, exactly
+matching `component-b-live-engine-manifest.json:package.wheel_sha256` and the hash pinned in
+`requirements.lock`. Full research wheel = `12b5ba5b7e8a70785a3e2b49e5c07bc8f89cc677c268ea509907f8f6d517e750`,
+matching `component-b-closure-decisions.json:full_wheel_artifact.sha256`. The two digests are
+distinct.
+
+**(2) Every packaged file — PASS.** Listed all 52 `*.py` files actually present under
+`backend/packaging/component_b_internal` (matches `package_source_manifest.file_count`).
+Confirmed against the pinned Yass commit `0e86fdcbc0ffcdbda3d37c742e83b1d532910e2b` (verified
+reachable in the local Yass clone via `git cat-file -e`):
+- All 45 files listed as verbatim were diffed with `diff <(git show <commit>:Implementation_v1.0/<path>) <packaged file>` — zero differences on every file.
+- All 7 trimmed files (`generation/task_instances.py`, `models/behaviour.py`, `models/__init__.py`, `behaviour/__init__.py`, `bkt/__init__.py`, `generation/__init__.py`, `sequencing/__init__.py`) were diffed line-by-line against the same pinned blobs. In every case the only changes are: added packaging-note docstrings, removed imports/re-exports of prohibited symbols (`run_phase_b2a`, `..runner.run_phase_b1`, the `AuditOnlyModel`/hidden-truth/synthetic-behaviour classes, `.cohort`, `.item_opportunities`, `.eligibility`, `.select_item`, `.orchestrator`, and their transitive `__init__.py` re-exports), and removal of the now-unused stdlib/pydantic imports those deletions made dead. Every retained function/class body (`build_task_instance`, `generate_task_instances`, `BOpportunityResponseSummary`, `ERROR_PATTERNS`, `ErrorPattern`, `HINT_LEVELS`, `_require_skill`) is untouched — no line inside a retained body differs from the pinned blob. No mathematical formula was altered.
+- Independently recomputed `package_source_manifest.sha256` from the packaged tree using the documented algorithm: `4321ebfdb7041a62be8620e857736db4146ae9eb27e78dffd1fd52f44664315f`, file_count 52 — both match the manifest exactly.
+
+**(3) 13 prohibited-module unreachability — PASS.** Inside the isolated container, attempted
+`importlib.import_module` on 22 module paths covering all 13 reuse-map exclusion items —
+`cohort`/`cohort.builder`, all 6 `behaviour.*` synthetic submodules, `pipeline`, `pilot`,
+`runner`, `audits` + 3 submodules, `generation.item_opportunities`, `sequencing.eligibility`,
+`sequencing.select_item`, `bkt.orchestrator`, and the standalone `validators` package — every
+one raised `ModuleNotFoundError`. `component_b_generator.models.behaviour` was imported and
+checked for the 11 hidden-truth/synthetic classes named in the reuse map: none present. Then
+ran `pytest tests/test_be3_live_engine_boundary.py tests/test_be2_architecture_guards.py` in
+the same container — **35 passed, 0 failed**, including the app-import-graph guard
+(`test_app_import_graph_still_does_not_reach_prohibited_modules`) and the BE2
+`test_no_yass_research_or_scientific_imports` / `test_dependency_files_exclude_research_generator` guards.
+
+**(4) Full research wheel not an app dependency — PASS.** `requirements.in`/`requirements.txt`/`requirements.lock`
+reference only the live-engine wheel path; grepped all three for the research wheel's
+distribution name — no match. Grepped `app/**/*.py` for `component_b|cohort|pipeline|pilot|generator`
+— the only two hits are a `"generator": "not_checked"` health-check status string
+(`app/api/routes/health.py`) and a docstring mention of "synthetic-generator fields" being
+excluded (`app/infrastructure/persistence_models.py`); neither is an import. Confirmed all 11
+reuse-map capability symbols import successfully from the installed wheel in isolation.
+
+**(5) BE2 guards + BE3 boundary tests — PASS.** See (3): 35/35 passed in the isolated,
+Dockerfile-pinned Python 3.11.15 environment.
+
+**(6) `.dockerignore` limitation — confirmed, carry-forward, not a blocker.** Read
+`backend/.dockerignore`: it excludes `provenance/`, `packaging/`, and `*.whl` from the `docker
+build` context. This is real and independently reproducible — a `docker build` of
+`backend/Dockerfile` today cannot resolve the `./provenance/wheels/...whl` path in
+`requirements.lock`. It does not affect this review because verification was performed by
+copying the tree into a container rather than through `docker build`, which is what the
+prompt's "clean isolated Python 3.11 env" calls for; the app image build path is explicitly
+BE3b scope per `generator_packaging_decision`, not this batch.
+
+**Verdict: GO — `BE3A_LIVE_ENGINE_PACKAGE_BATCH_CLOSED`.** All five re-verifiable technical
+gates pass under independent, from-scratch checking (not a re-read of the prior batch's own
+claims); the one disclosed limitation is confirmed real and is correctly scoped as a BE3b
+carry-forward rather than a defect in this batch. This closes the *packaging and import-boundary*
+scope only — it is not a governance or named-owner ratification, and every `UNRESOLVED`/
+`CALIBRATION_PENDING` item in `component-b-closure-decisions.json`'s governance register remains
+open exactly as recorded there. No files were modified by this review beyond this log entry; no
+git commit was made.
