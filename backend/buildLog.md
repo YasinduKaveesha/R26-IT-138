@@ -3659,3 +3659,55 @@ membership approval). Recorded for awareness only; does not block closure.
 twelve review requirements re-verified independently against a clean database and a clean dependency
 install, not merely re-read from the implementation entry. Nothing was committed by this review; the
 working tree remains exactly as it was at the start (`git status` unchanged before/after).
+
+
+## BE2 Classroom Invite and Membership — Join-Code Ratification and Closure Observation Record
+
+### Scope and nature of this entry
+
+This is a **governance record-keeping reconciliation only**. It changes no code, schema, migration,
+endpoint, or test, and it does not alter the closed batch: the BE2 Classroom Invite and Membership
+implementation remains exactly as reviewed and closed at commit `3e13106` (`close BE2 invite and
+classroom membership batch`), now pushed to `origin/B_frontend`. It records two items surfaced during
+the supervisor baseline and the closure review that were, until now, captured only in this build log
+and in code comments rather than in the frozen authorization contract. The corresponding machine-
+readable record is the second entry appended to `correction_log` in
+`backend/provenance/component-b-invite-membership-authorization.json`.
+
+### Item 1 — Human-readable join-code clarification ratified into the contract
+
+The `component-b-invite-membership-authorization.json` contract, in its crypto `resolved_ambiguities`
+entry, still framed the invite secret as an "opaque raw token string". The implemented and closed
+behavior instead uses a **human-readable classroom join code**, per a mid-batch product clarification:
+
+- uppercase 31-symbol visually-unambiguous alphabet `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (excludes
+  `0`/`O`/`1`/`I`/`L`);
+- 8 characters generated with a CSPRNG (`secrets.choice`), approximately `log2(31) * 8 = 39.6` bits of
+  entropy, grouped 4-4 for display (for example `M7KP-4X9D`);
+- normalized case-insensitively and separator-insensitively before both hashing and idempotency
+  fingerprinting, and SHA-256-hashed into the existing 64-lowercase-hex `token_hash` column.
+
+The appended contract correction records that this clarification **supersedes the "opaque raw token
+string" phrasing for wire-display purposes only**. The wire field names `invite_token` and the
+`classroom_invite` resource identity remain governance-frozen; the one-way-hash storage, never-logged,
+and 24h-expiry-plus-teacher-revocation properties are unchanged. The approximately 39.6-bit entropy
+figure is the specific value the deferred **BE6** `invite_token_cryptographic_contract` review (still
+`SECURITY_DESIGN_REQUIRED`) must evaluate for a short, human-typeable, revocable, 24-hour code.
+
+### Item 2 — Closure non-blocking observation carried forward to BE6
+
+The closure review recorded one non-blocking observation, restated here for the BE6 backend-security-
+owner review: `create_invite`'s insert is not wrapped in an `IntegrityError` handler for the
+pre-existing `uq_classroom_invites_token_hash` unique constraint. At approximately 39.6 bits this is not
+a practical collision risk at realistic invite volumes, and it is explicitly outside this batch's
+authorized `IntegrityError`-to-`ConflictError` conversion scope, which is limited to membership approval
+behind the partial unique index. Recorded for awareness; it was not, and is not, a blocker.
+
+### Unchanged statuses
+
+This reconciliation is **not** a named-approver ratification. The prior decision
+`BE2_INVITE_MEMBERSHIP_SCOPE_AUTHORIZED`, the closure decision `BE2_INVITE_MEMBERSHIP_BATCH_CLOSED`, and
+the governing `ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6` /
+`BE2_PROFILE_CLASSROOM_NOT_RATIFIED` statuses all remain in effect and unchanged. Product owner, backend
+security owner, and privacy and child-safety owner ratification remains deferred to the BE6 pre-pilot
+review; this entry does not create, satisfy, or shortcut that requirement.
