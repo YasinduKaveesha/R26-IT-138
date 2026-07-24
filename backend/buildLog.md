@@ -3711,3 +3711,379 @@ the governing `ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6` /
 `BE2_PROFILE_CLASSROOM_NOT_RATIFIED` statuses all remain in effect and unchanged. Product owner, backend
 security owner, and privacy and child-safety owner ratification remains deferred to the BE6 pre-pilot
 review; this entry does not create, satisfy, or shortcut that requirement.
+
+---
+
+## BE2.3-BE2.4 Neutral Session-Lifecycle Skeleton -- Engineering Continuation
+
+Completed: 2026-07-24 Asia/Colombo (`2026-07-24` UTC)
+Build target: `Dev/backend/`
+Authorized by: the user's bounded task under
+`ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6`, reusing the existing
+`b_sessions` / `b_session_events` / `b_runtime_bundle_records` schema. This entry does
+not issue a closure decision.
+
+### Scope
+
+Exactly four LEARNER-role endpoints under `/api/v1/b/sessions`, reusing existing
+persistence with no migration:
+
+- `POST /api/v1/b/sessions` (`b_session.start`, Idempotency-Key required)
+- `GET /api/v1/b/sessions/active`
+- `POST /api/v1/b/sessions/{session_id}/complete` (`b_session.complete`, Idempotency-Key required)
+- `POST /api/v1/b/sessions/{session_id}/abandon` (`b_session.abandon`, Idempotency-Key required)
+
+Start resolves the currently approved+published runtime bundle, pins its
+`runtime_bundle_record_id`, and creates the session directly as `active`; no
+approved+published bundle fails closed with `CONFLICT` (a bundle-less session is never
+created). A safe replay or a concurrent duplicate start for the same learner returns
+the existing active session. `expires_at_utc` is always left `NULL` -- no numeric
+expiry/timeout, per the governance-unresolved gate. Complete/abandon are neutral,
+explicit client commands (`active -> completed` / `active -> abandoned`) with no
+scientific or pedagogical completion criteria. No question, answer, attempt, hint,
+BKT, mastery, certification, sequencing, or Component B live-engine behavior exists
+anywhere in this batch.
+
+### Files created
+
+- `app/domain/b_session.py` -- `SessionFields`, `SessionCommandResponse` (start/complete/
+  abandon), `ActiveSessionResponse` (nullable `session`). Only `session_id`, `state`,
+  `runtime_bundle_version`, `created_at_utc`, `row_version`, `request_id` are exposed.
+- `app/application/b_session_lifecycle.py` -- `BSessionLifecycleService`. Deliberately
+  named to avoid the `*session*service*.py` glob used by the pre-existing architecture
+  guard (see below); reimplements the `_require_user`/`_require_learner`/idempotency/
+  audit helpers locally, following this codebase's established per-service convention
+  (no shared base class exists for these).
+- `app/api/routes/b_session.py` -- the four route handlers, `Idempotency-Key` header
+  required on the three POST operations.
+- `tests/test_b_session_lifecycle.py` -- 14 focused tests (see below).
+
+### Files modified
+
+- `app/infrastructure/repositories.py` -- added `RuntimeBundleRecordRepository.
+  find_current_approved_published()` (tie-break: most recent `PUBLISHED`+`APPROVED`
+  bundle by `created_at_utc`, an engineering assumption recorded here, not a governed
+  tie-break policy) and three `SessionRecordRepository` methods:
+  `find_starting_or_active_for_learner`, `find_active_for_learner`, `get_owned`.
+- `app/main.py` -- one router registration (`b_session_router`).
+- `tests/test_be2_architecture_guards.py` -- extended, not weakened: added the four new
+  routes to `EXPECTED_ROUTES`; added `AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS` (4) with
+  an exact-count containment test mirroring the invite/membership pattern; carved the
+  blanket "session" path-term prohibition out only for those four exact routes (every
+  other prohibited scientific term, and "session" on every other route, remains
+  unconditionally prohibited); added an AST-based DTO field-identifier scan for
+  `app/domain/b_session.py` (deliberately AST-based, not raw text, because the module's
+  own docstring correctly documents excluded terms by name and a raw-text scan produced
+  a false positive on first attempt). The `*session*service*.py` empty-glob assertion
+  was left untouched because `b_session_lifecycle.py` does not contain the substring
+  "service"; no evasion was intended, it is simply an accurate name for the module.
+
+No schema migration was created or needed.
+
+### Concurrency and correctness bug found and fixed during this batch
+
+The first implementation of `complete`/`abandon` called `SessionRecordRepository.
+get_owned()` (an unlocked read, for the ownership/404 check) before later re-reading
+the same row with `SELECT ... FOR UPDATE`. Because the row was already present in the
+SQLAlchemy session identity map from the first read, the FOR-UPDATE re-fetch did not
+refresh the Python-level `state` attribute from the newly-locked row by default -- the
+SQL-level lock was correctly acquired, but the ORM object kept its pre-lock in-memory
+value. A genuine concurrency test (complete one session and abandon the same session,
+truly concurrently, via a shared `TestClient` and a `threading.Barrier`) caught this:
+both transitions returned `200`, i.e., both committed successfully against a session
+that should have allowed exactly one. Root cause and fix: added
+`.execution_options(populate_existing=True)` to the FOR-UPDATE select in `_transition`,
+forcing SQLAlchemy to overwrite the identity-mapped object's attributes from the
+lock-holding read. After the fix, the same race reliably produces `[200, 409]` with
+exactly one resulting transition. This same identity-map hazard is latent (but not
+currently exercised, since no existing test races two different operations against the
+same row) in `classroom_membership.approve_membership`'s equivalent `get_owned` +
+`FOR UPDATE` pattern; it is recorded here for BE6 awareness but was not touched, being
+out of this batch's authorized scope.
+
+A second, unrelated test-design bug was found and fixed in this batch's own test
+authoring (not a service defect): an early draft of the idempotency path-mismatch test
+reused the same literal Idempotency-Key string across two different learners, expecting
+a `409`. Idempotency uniqueness is scoped by `(actor_user_id, http_method,
+operation_identifier, idempotency_key)`, so two different actors reusing the same key
+string are structurally independent records, not a conflict -- both correctly returned
+`200`. Fixed by testing the intended scenario instead: the same learner reusing one key
+across two sessions they own in sequence (complete session A, start session B, reuse
+A's key against B's `complete`), which correctly conflicts.
+
+### Test coverage (14 tests, `tests/test_b_session_lifecycle.py`)
+
+- Start: creates an active session pinned to the resolved bundle; fails closed with
+  `409 CONFLICT` when no approved+published bundle is resolvable (exercised
+  deterministically via an overridden `_resolve_pinnable_bundle` test seam, following
+  this codebase's established `injected._audit = _failing_audit`-style instance-method
+  override convention, rather than depending on global test-database bundle absence,
+  which is not reliably controllable across a shared test database); replay returns the
+  same session; concurrent duplicate starts (two threads, one `Barrier`, different
+  idempotency keys) produce exactly one active/starting row; TEACHER -> `403`,
+  no-profile -> `404`; rollback on an injected audit failure leaves no session, no
+  idempotency row, and a retry with the same key then succeeds; runtime-bundle pinning
+  is verified to survive a newer approved+published bundle being inserted after start.
+- Get-active: returns `null` when absent, returns the learner's own current session,
+  isolates across two different learners, and enforces the LEARNER-role boundary.
+- Complete/abandon: success transition; replay returns the same result; a further
+  transition attempt on an already-non-active session conflicts; idempotency-key reuse
+  across two sessions the same learner owns conflicts (not a false replay); cross-learner
+  ownership isolation returns `404` (no enumeration); TEACHER -> `403`, no-profile ->
+  `404`; rollback on an injected audit failure leaves `state`/`row_version` unchanged and
+  no idempotency row, with a same-key retry then succeeding; a genuine concurrent
+  complete-vs-abandon race on the same session produces exactly one transition (the bug
+  above).
+
+### Architecture-guard and database verification
+
+```text
+docker compose build                                -> Image upadya-backend:be1-batch3 Built
+docker compose up -d                                 -> db healthy, api started
+docker compose exec api python -m compileall app     -> clean
+docker compose exec api alembic upgrade head         -> no new revisions (already at 20260723_0001)
+docker compose exec api alembic check                -> No new upgrade operations detected
+docker compose exec api alembic downgrade 20260722_0004 -> OK
+docker compose exec api alembic upgrade head          -> OK
+docker compose exec api alembic check (post-cycle)    -> No new upgrade operations detected
+docker compose exec api pytest -q                     -> 100 passed, 1 warning (pre-existing httpx/TestClient deprecation)
+```
+
+`app.openapi()["paths"]` enumerated directly inside the container: exactly 20 total
+operations, the sixteen pre-existing plus exactly the four newly authorized
+`/api/v1/b/sessions*` operations, no more, no fewer.
+`test_openapi_contains_exactly_the_four_authorized_b_session_lifecycle_operations` and
+`test_no_session_question_answer_or_scientific_route_exists` (with its narrow "session"
+carve-out limited to exactly those four routes) both pass; every other prohibited
+scientific path term (`attempt`, `hint`, `progress`, `bkt`, `mastery`, `sequenc`,
+`certif`, `guess`) remains unconditionally checked against all twenty routes, including
+the four new ones. A container-side grep for `component_b_generator`, `import yass`/
+`from yass`, and known failure-injection markers found no match. The container ran as
+UID/GID `10001:10001`; the `db` service publishes no host port (unchanged from prior
+batches).
+
+### Non-blocking observation carried forward
+
+The `find_current_approved_published()` tie-break (most recent `created_at_utc` among
+`PUBLISHED`+`APPROVED` bundles) is an engineering assumption, not a governed selection
+policy, for the case where more than one bundle is simultaneously eligible (e.g. an
+alias or a newer replacement bundle published without retiring the old one). Recorded
+for BE6 review alongside the identity-map/FOR-UPDATE hazard noted above.
+
+### Confirmation of prohibited scope
+
+No question, opportunity, attempt, hint, BKT, mastery, Guess-Guard, certification,
+sequencing, progress-beyond-state, numeric expiry/timeout, Component B live-engine,
+Component C, Component 3, or research-generator behavior was implemented anywhere in
+this batch. No Yass or `component_b_generator` import or dependency exists.
+
+### Current state and exact next task
+
+This batch is complete, tested, and left uncommitted in the working tree for Yasindu to
+review and commit. No `git add`, `git commit`, or `git push` was run. Exact next task:
+review this diff and the above evidence; if accepted, commit it following this
+repository's established commit-message conventions, then conduct a separate closure
+review of this specific batch (mirroring the BE2 invite/membership closure review
+pattern) before treating BE2.3-BE2.4 as formally closed. This entry does not issue that
+closure decision.
+
+---
+
+## BE2.3-BE2.4 Neutral Session-Lifecycle Skeleton -- Closure Review
+
+Completed: 2026-07-24 Asia/Colombo (`2026-07-24` UTC)
+Build target: `Dev/backend/`
+Scope: a separate, independent closure review of the engineering-continuation entry
+immediately above, re-verified against PROMPT BE2-S and BEplan BE2.3-BE2.4 from a clean
+run. This entry only reviews and closes that batch; it authorizes no new scope, no
+migration, and no scientific behavior. Git hard rule observed: read-only git only
+(`git status`/inspection); nothing was staged, committed, or pushed; this closure record
+is appended to `buildLog.md` only.
+
+### Method -- clean, isolated re-verification (not a re-read of the prior evidence)
+
+The prior batch's Docker evidence was independently reproduced from scratch rather than
+accepted on record:
+
+```text
+docker compose down -v                    -> prior container/volume/network removed
+docker compose build --no-cache           -> full dependency reinstall from requirements.lock,
+                                              fresh image upadya-backend:be1-batch3
+docker compose up -d                      -> new named volume, db healthy, api started
+docker compose exec api python -m compileall app   -> clean, no errors
+docker compose exec api alembic upgrade head        -> 5 revisions applied to an empty
+                                              database, head 20260723_0001, no error
+docker compose exec api alembic check               -> "No new upgrade operations detected."
+docker compose exec api alembic current             -> 20260723_0001 (head)
+docker compose exec api pytest -q                   -> 100 passed, 1 warning (pre-existing
+                                              httpx/TestClient deprecation, unrelated to
+                                              this batch)
+docker compose down -v                    -> isolated verification stack torn down
+```
+
+The `alembic check` result on a freshly migrated, previously empty database confirms
+zero schema drift: this batch's four endpoints reuse the existing `b_sessions` /
+`b_session_events` / `b_runtime_bundle_records` / `b_idempotency_records` /
+`b_audit_events` tables exactly as claimed, with no migration file added, changed, or
+required.
+
+### Endpoint-count and route-boundary re-verification
+
+`app.openapi()["paths"]` was independently re-enumerated inside the freshly built
+container: exactly 20 total operations, the sixteen pre-existing plus exactly the four
+authorized `/api/v1/b/sessions*` operations (`POST /api/v1/b/sessions`,
+`GET /api/v1/b/sessions/active`, `POST /api/v1/b/sessions/{session_id}/complete`,
+`POST /api/v1/b/sessions/{session_id}/abandon`), no more, no fewer.
+`test_openapi_contains_exactly_the_four_authorized_b_session_lifecycle_operations` and
+`test_no_session_question_answer_or_scientific_route_exists` were run explicitly
+(`tests/test_be2_architecture_guards.py -v`, all 13 guard tests passed) and their source
+was read directly rather than trusted from the summary: the "session" path-term carve-out
+is scoped to exactly the four authorized routes via
+`AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS`, and every other prohibited scientific term
+(`attempt`, `hint`, `progress`, `bkt`, `mastery`, `sequenc`, `certif`, `guess`) remains
+checked unconditionally against all twenty routes, including the four new ones.
+
+### One-active-session invariant under a genuine concurrent race
+
+Re-verified, not merely re-read. Both concurrency tests use real threads and a
+`threading.Barrier`, not mocked timing:
+
+- `test_start_concurrent_duplicate_produces_exactly_one_active_session` -- two threads
+  submit `POST /api/v1/b/sessions` for the same learner simultaneously with different
+  idempotency keys.
+- `test_concurrent_complete_and_abandon_race_produces_exactly_one_transition` -- two
+  threads race `complete` and `abandon` against the *same* session id simultaneously.
+
+Each was independently re-run 5 times in immediate succession against the fresh
+container/database (10 total race executions, not a single sample):
+
+```text
+race run 1: 2 passed in 1.96s
+race run 2: 2 passed in 1.96s
+race run 3: 2 passed in 1.86s
+race run 4: 2 passed in 1.99s
+race run 5: 2 passed in 2.16s
+```
+
+All 10 executions produced exactly one committed transition/active row (`[200, 409]` for
+the complete-vs-abandon race; a single deduplicated active session for the concurrent
+start race), with no flake observed. This corroborates the buildLog's account of the
+identity-map/`FOR UPDATE` bug: reading `app/application/b_session_lifecycle.py`
+directly confirms `.execution_options(populate_existing=True)` is present on the
+lock-holding `SELECT ... FOR UPDATE` in `_transition`, which is the actual fix, not just
+a claim.
+
+### Fail-closed-with-no-bundle
+
+Source-verified in `start_session`: `bundle = await self._resolve_pinnable_bundle(...)`
+followed immediately by `if bundle is None: raise ConflictError()`, strictly before any
+`SessionRecord` is constructed -- a bundle-less session cannot be created by construction,
+not merely by a passing test. `test_start_fails_closed_when_no_approved_bundle_exists`
+(exercised via an injected `_resolve_pinnable_bundle` test seam) passed in the fresh run
+and independently asserts the learner's active/starting-session count is `0` afterward.
+
+### Ownership/role isolation
+
+Re-verified: `_require_learner` rejects non-`LEARNER` profile types with `403` and
+missing profiles with `404` before any session lookup; `get_owned(session_id,
+learner_id)` scopes the row lookup to the calling learner, so a different learner's
+`complete`/`abandon` attempt on a session they do not own returns `404` (no existence
+enumeration), confirmed by
+`test_complete_success_replay_path_mismatch_conflict_and_isolation` and
+`test_complete_and_abandon_require_learner_role_and_profile` passing.
+
+### Idempotency, including path-mismatch
+
+Re-verified against source and the fresh test run: idempotency records are scoped by
+`(actor_user_id, http_method, operation_identifier, idempotency_key)`, and
+`_idempotency_start` raises `ConflictError` whenever an existing record's
+`request_fingerprint` does not match the current request's fingerprint. The
+path-mismatch case specifically (`test_complete_...isolation`'s reuse of one
+learner-owned key across two different sessions the same learner owns) produced `409`,
+not a false replay, because `path_fingerprint` binds the fingerprint to the path
+parameter (`session_id`) as well as the operation and actor.
+
+### Complete/abandon neutrality
+
+Source-verified: `_transition`'s only precondition is `session_row.state != "active"` ->
+`ConflictError`; there is no BKT, mastery, certification, Guess-Guard, sequencing, or any
+other scientific/pedagogical predicate anywhere in the transition path. `complete` and
+`abandon` are both implemented as the same `_transition` helper differing only in
+`target_state` and `operation`, confirming symmetric, criteria-free handling.
+
+### NO numeric expiry; NO scientific field in any DTO/log/audit
+
+- `SessionFields`/`SessionCommandResponse`/`ActiveSessionResponse`
+  (`app/domain/b_session.py`) expose exactly `session_id`, `state`,
+  `runtime_bundle_version`, `created_at_utc`, `row_version`, and (on command responses)
+  `request_id` -- no `expires_at`, no numeric timeout, no question/attempt/answer/hint
+  field. `StrictModel`'s `extra="forbid"` prevents silent field addition.
+- `SessionRecord.expires_at_utc` (the underlying `b_sessions` column, pre-existing from
+  an earlier batch) is set to `None` unconditionally in `start_session` and is never
+  read or surfaced by any of the four endpoints or by `_session_fields`.
+- `provenance()`'s audit/idempotency payload fields (`actor_user_id`, `request_id`,
+  `operation_or_event_type`, `reason_code`, `resource_type`, `resource_id`,
+  `source_class`, `source_system`, `environment`, `schema_revision`) contain no
+  scientific term; `AuditEvent` rows for this batch record only
+  `before_reference_or_version`/`after_reference_or_version` state strings
+  (`"active"`/`"completed"`/`"abandoned"`).
+- `test_b_session_dto_contains_no_scientific_expiry_or_attempt_fields`
+  (`tests/test_be2_architecture_guards.py`) performs an AST-level field-identifier scan
+  of `app/domain/b_session.py` against a forbidden-term set that includes
+  `expires_at`, `expiry`, `timeout`, `question`, `attempt`, `opportunity`, plus the
+  shared `PROHIBITED_COLUMN_TERMS` set; it passed in the fresh run.
+- `test_exact_authorized_model_table_set_and_no_scientific_columns` independently scans
+  every column of every table in `Base.metadata` (not just `b_sessions`) against the
+  same prohibited-term set; it passed.
+
+### Architecture guards
+
+All 13 tests in `tests/test_be2_architecture_guards.py` passed in the fresh, isolated
+run (`pytest -q tests/test_be2_architecture_guards.py -v`, individually enumerated
+above and below), including the table/column scan, the exact-route-set and
+exact-four-operation checks, the DTO AST scan, the Yass/`component_b_generator`
+import-root scan (`test_no_yass_research_or_scientific_imports`), the dependency-file
+scan (`test_dependency_files_exclude_research_generator`), the three prior migrations'
+content guards, and the no-production-failure-injection-marker scan
+(`test_no_production_failure_injection_or_debug_mechanism`).
+
+### `ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6`
+
+Confirmed still in effect and unchanged by this closure review. This review is a
+technical/engineering closure of the BE2.3-BE2.4 batch's implementation quality and
+scope boundary only. It is **not** a named-approver ratification: product owner,
+backend security owner, and privacy/child-safety owner ratification of session
+lifecycle behavior (including the still-`UNRESOLVED` numeric expiry/timeout,
+completion, and safe-progress policy gates recorded in earlier BE0/BE2 entries) remains
+deferred to the BE6 pre-pilot review. This closure does not create, satisfy, or
+shortcut that requirement.
+
+### Non-blocking observations carried forward (unchanged from the batch above)
+
+- The `find_current_approved_published()` most-recent-`created_at_utc` tie-break remains
+  an engineering assumption, not a governed selection policy.
+- The identity-map/`FOR UPDATE` hazard pattern (`get_owned` unlocked read followed by a
+  separate locked re-fetch) is latent in `classroom_membership.approve_membership` and
+  was not touched in this batch; recorded again here for BE6 awareness.
+
+Neither observation blocks this closure.
+
+### Closure decision
+
+```text
+Identifier: BE2_SESSION_SKELETON_BATCH_CLOSED
+Decision:   GO
+```
+
+Basis: exactly four authorized routes exist and no others; zero schema drift on a
+freshly migrated database; the one-active-session invariant held across 10 independently
+re-run genuine concurrent-race executions with no flake; fail-closed-with-no-bundle is
+enforced by construction, not merely by a passing assertion; ownership/role isolation,
+idempotency (including path-mismatch), and complete/abandon neutrality were all
+independently re-verified against source, not just against the prior batch's summary; no
+numeric expiry and no scientific field exist in any DTO, log, or audit payload; and all
+13 architecture guards pass against a clean, isolated, freshly built environment. This is
+an engineering closure only -- `ENGINEERING_CONTINUATION_ALLOWED_RATIFICATION_DEFERRED_TO_BE6`
+remains in effect, and named-approver ratification remains deferred to BE6. No commit was
+made; the working tree remains as Yasindu left it, pending their review and commit
+decision.

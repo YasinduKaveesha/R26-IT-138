@@ -54,6 +54,10 @@ EXPECTED_ROUTES = {
     ("/api/v1/classroom-memberships/{membership_id}/reject", ("POST",)),
     ("/api/v1/classrooms/{classroom_id}/learners", ("GET",)),
     ("/api/v1/learner/classrooms", ("GET",)),
+    ("/api/v1/b/sessions", ("POST",)),
+    ("/api/v1/b/sessions/active", ("GET",)),
+    ("/api/v1/b/sessions/{session_id}/complete", ("POST",)),
+    ("/api/v1/b/sessions/{session_id}/abandon", ("POST",)),
 }
 AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS = {
     ("/api/v1/classrooms/{classroom_id}/invites", ("POST",)),
@@ -65,6 +69,12 @@ AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS = {
     ("/api/v1/classrooms/{classroom_id}/learners", ("GET",)),
     ("/api/v1/learner/classrooms", ("GET",)),
     ("/api/v1/classroom-invites/{classroom_invite_id}/revoke", ("POST",)),
+}
+AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS = {
+    ("/api/v1/b/sessions", ("POST",)),
+    ("/api/v1/b/sessions/active", ("GET",)),
+    ("/api/v1/b/sessions/{session_id}/complete", ("POST",)),
+    ("/api/v1/b/sessions/{session_id}/abandon", ("POST",)),
 }
 PROHIBITED_SCIENTIFIC_PATH_TERMS = (
     "session", "attempt", "hint", "progress", "bkt", "mastery", "sequenc", "certif", "guess",
@@ -92,9 +102,41 @@ def test_openapi_contains_exactly_the_nine_authorized_invite_membership_operatio
 
 
 def test_no_session_question_answer_or_scientific_route_exists() -> None:
-    for path, _ in _current_routes():
+    """The blanket "session" path prohibition is carved out only for the four
+    authorized BE2.3-BE2.4 neutral session-lifecycle routes; every other prohibited
+    scientific term remains prohibited unconditionally, including on those four
+    routes themselves."""
+    for route in _current_routes():
+        path, _ = route
         lowered = path.lower()
-        assert not any(term in lowered for term in PROHIBITED_SCIENTIFIC_PATH_TERMS), path
+        terms = PROHIBITED_SCIENTIFIC_PATH_TERMS
+        if route in AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS:
+            terms = tuple(term for term in terms if term != "session")
+        assert not any(term in lowered for term in terms), path
+
+
+def test_openapi_contains_exactly_the_four_authorized_b_session_lifecycle_operations() -> None:
+    assert len(AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS) == 4
+    assert AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS <= _current_routes()
+    non_session_routes = {route for route in EXPECTED_ROUTES if route not in AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS}
+    assert _current_routes() - AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS == non_session_routes
+
+
+def test_b_session_dto_contains_no_scientific_expiry_or_attempt_fields() -> None:
+    """Scans actual DTO field identifiers only (via AST), not prose/docstrings, since
+    this module's docstring legitimately documents excluded terms by name."""
+    tree = ast.parse(Path("app/domain/b_session.py").read_text(encoding="utf-8"))
+    field_names = {
+        node.target.id.lower()
+        for class_def in ast.walk(tree)
+        if isinstance(class_def, ast.ClassDef)
+        for node in class_def.body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    }
+    forbidden = PROHIBITED_COLUMN_TERMS | {
+        "expires_at", "expiry", "timeout", "question", "attempt", "opportunity",
+    }
+    assert not {name for name in field_names if any(term in name for term in forbidden)}
 
 
 def test_no_yass_research_or_scientific_imports() -> None:

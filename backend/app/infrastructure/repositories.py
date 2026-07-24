@@ -54,9 +54,52 @@ class AppUserLearnerLinkRepository(SqlAlchemyNeutralRepository[AppUserLearnerLin
 class RuntimeBundleRecordRepository(SqlAlchemyNeutralRepository[RuntimeBundleRecord]):
     model_type = RuntimeBundleRecord
 
+    async def find_current_approved_published(self) -> RuntimeBundleRecord | None:
+        """Resolve the bundle to pin a newly started session to.
+
+        Tie-break is the most recently created PUBLISHED+APPROVED bundle. Multiple
+        simultaneously eligible bundles are not expected in practice; the exact
+        selection policy for that case is an engineering assumption, not a governed
+        decision.
+        """
+        statement = (
+            select(RuntimeBundleRecord)
+            .where(
+                RuntimeBundleRecord.publication_state == "PUBLISHED",
+                RuntimeBundleRecord.approval_status == "APPROVED",
+            )
+            .order_by(RuntimeBundleRecord.created_at_utc.desc(), RuntimeBundleRecord.runtime_bundle_record_id.desc())
+            .limit(1)
+        )
+        return await self.session.scalar(statement)
+
 
 class SessionRecordRepository(SqlAlchemyNeutralRepository[SessionRecord]):
     model_type = SessionRecord
+
+    async def find_starting_or_active_for_learner(self, learner_id: UUID) -> SessionRecord | None:
+        return await self.session.scalar(
+            select(SessionRecord).where(
+                SessionRecord.learner_id == learner_id,
+                SessionRecord.state.in_(("starting", "active")),
+            )
+        )
+
+    async def find_active_for_learner(self, learner_id: UUID) -> SessionRecord | None:
+        return await self.session.scalar(
+            select(SessionRecord).where(
+                SessionRecord.learner_id == learner_id,
+                SessionRecord.state == "active",
+            )
+        )
+
+    async def get_owned(self, session_id: UUID, learner_id: UUID) -> SessionRecord | None:
+        return await self.session.scalar(
+            select(SessionRecord).where(
+                SessionRecord.session_id == session_id,
+                SessionRecord.learner_id == learner_id,
+            )
+        )
 
 
 class SessionEventRepository(SqlAlchemyNeutralRepository[SessionEvent]):
