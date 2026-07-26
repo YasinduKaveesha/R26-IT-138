@@ -4964,3 +4964,29 @@ amendment (project supervisor + Component B owner); (b) live values/pilot await 
 sign-off as an `APPROVED` bundle; (c) production awaits calibration + validation. No tier is cleared by
 this documentation entry. "BE4 live learning flow" remains in
 `component-b-closure-decisions.json` `exit_gate.blocked_scope`.
+
+## 2026-07-26 — BE4 engineering-only amendment proposal (§44) drafted
+
+Created `backend/provenance/component-b-be4-engineering-amendment.json`, a
+`BE4_ENGINEERING_AMENDMENT_PROPOSAL` record transcribing the §44 narrow amendment from
+`Upadya/Component_B_Scientific_Gate_Decision_Pack_v1.0.md` (SG-16, conclusion C) for real named-owner
+review. The record proposes — but does not adopt — authorizing BE4 engineering (batches BE4a–f) solely
+against isolated TEST-provenance DRAFT runtime bundles that can never be published or selected as a live
+alias, with no real-learner, pilot, production, or scientific-effectiveness/validation authorization.
+
+**Adopts nothing.** All three `named_approver_slots` (`project_supervisor`, `component_b_owner`,
+`academic_owner_acknowledgement`) are `UNRESOLVED_PLACEHOLDER` with `decision: UNRESOLVED` and
+`decision_date: null`; Yasindu's name was not entered in any slot. Real, dated sign-off by the named
+project supervisor and Component B owner remains outstanding before tier (a) unblocks.
+
+**GATE-B unaffected.** The full scientific gate (SG-01…SG-15 — BKT parameters, θ_B, guess-guard
+numerics, attempt/timeout/completion/safe-progress policy, and named scientific sign-off) is untouched;
+the record's `does_not_clear` and `does_not_authorize` fields state this explicitly. `blocked_scope` in
+`component-b-closure-decisions.json` was **not** modified — the new record only proposes a narrow,
+explicit carve-out layered on top of it, per `relationship_to_blocked_scope`.
+
+**Scope / integrity.** No code, migration, other provenance JSON, the runtime-bundle schema/loader,
+`BEplan.md`, or `Component_B_Build_Plan.md` was modified; no earlier buildLog entry was edited or
+reordered; no state-changing git command was run. This batch is not closed and this amendment is not
+adopted — a separate closure review decides acceptance of the draft, and real named sign-off remains
+outstanding.
