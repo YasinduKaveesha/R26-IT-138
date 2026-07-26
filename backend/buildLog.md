@@ -4935,3 +4935,32 @@ reconcile the terminology.
 **This batch is not closed.** This entry documents the draft record only. A separate closure review
 decides whether the record is accepted as an accurate transcription; named human sign-off on any
 gate item remains outstanding.
+
+## 2026-07-26 — BE4 sequencing plan recorded (documentation)
+
+Created `Component_B_BE4_Sequencing_Plan.md` at the `Dev/` repo root — supervisor sequencing guidance
+that decomposes the monolithic `PROMPT BE4` (`Component_B_Build_Plan.md`) and `BEplan.md §9` into six
+individually-closeable batches (BE4a–f), each mapped to the exact `LiveEngineAdapter` methods it reuses
+and the closure identifier it targets. Added a narrow `.gitignore` negation
+(`!/Component_B_BE4_Sequencing_Plan.md`) so the tracked doc is not swept by the repo's `*.md` ignore
+rule (same precedent as the BE3b/BE3c `test_catalogue.md` exception).
+
+**Scope / integrity.** This entry and the new doc **override no governed document** — `BEplan.md §9` and
+`Component_B_Build_Plan.md` `PROMPT BE4`/`CLOSURE BE4` remain canonical — and **authorize no
+implementation**. No code, migration, provenance JSON, or earlier buildLog entry was modified; no
+state-changing git command was run; nothing was staged or committed. buildLog remains append-only.
+
+**Design captured.** BE4 reuses the vendored live-safe engine solely through `LiveEngineAdapter`
+(the sole `app/` importer of `component_b_generator`); it copies/rewrites no formula and must not reach
+the 13 prohibited synthetic/dataset modules (`component-b-live-engine-reuse-map.json`). Yasindu's
+"same characters" requirement is recorded as **deterministic parity**, proven by pinning the
+adapter-driven task-construction sweep against the characterization anchor
+(`component-b-characterization.json`: `global_seed=20260716`, 54 items,
+`private_output_sha256=b1d8cb3388ac7e47dd353af68210b24debf3d49791f40a6447ad57f74641926c`, byte-identical
+across Python 3.10.20 / 3.11.15).
+
+**Still gated (three-tier).** (a) BE4 engineering on TEST-provenance DRAFT bundles awaits the §44 narrow
+amendment (project supervisor + Component B owner); (b) live values/pilot await full SG-01…SG-15 named
+sign-off as an `APPROVED` bundle; (c) production awaits calibration + validation. No tier is cleared by
+this documentation entry. "BE4 live learning flow" remains in
+`component-b-closure-decisions.json` `exit_gate.blocked_scope`.

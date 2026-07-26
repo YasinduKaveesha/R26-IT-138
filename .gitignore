@@ -32,6 +32,8 @@ Thumbs.db
 !/frontend/README.md
 !/backend/buildLog.md
 !/backend/packaging/component_b_internal/IMPORT_POLICY.md
+# Supervisor BE4 sequencing guidance (tracked documentation, not a README).
+!/Component_B_BE4_Sequencing_Plan.md
 
 # BE0 provenance evidence is intentionally version-controlled.
 !/backend/provenance/
