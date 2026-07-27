@@ -41,6 +41,8 @@ EXPECTED_TABLES = {
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
     # BE4a (BEplan §9 BE4.1) — private opportunity/task-instance/presentation-token tables.
     "b_item_opportunities", "b_task_instances", "b_presentation_tokens",
+    # BE4b (BEplan §9 BE4.2) — private per-learner, per-skill BKT state.
+    "b_learner_skill_states",
 }
 COMMON_COLUMNS = {
     "created_at_utc", "updated_at_utc", "actor_user_id", "system_actor", "request_id",

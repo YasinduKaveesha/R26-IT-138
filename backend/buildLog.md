@@ -5153,3 +5153,124 @@ were removed after the run; nothing was left running.
 uncommitted files (plus this buildLog entry); no table, column, route, or provenance file was added or
 touched; no state-changing git command was run. Not a closure — `BE4A_OPPORTUNITY_PERSISTENCE_BATCH_CLOSED`
 is still a separate review decision.
+
+## 2026-07-28 — BE4b: adaptive next-question selection (BEplan §9 BE4.2) — persistence only
+
+Authorized by `component-b-be4-engineering-continuation-instruction.json` (commit 49819c1), built on
+committed BE4a (commit `d8909a2`). TEST-provenance DRAFT bundles only, local dev/CI, no
+real-child/pilot/production, no GATE-B scientific value. Every scientific step goes through
+`LiveEngineAdapter` — no formula copied or reimplemented.
+
+**Files added.** `backend/app/application/opportunity_selection.py` — `select_candidate`/`build_task`
+(pure, side-effect-free: candidate build → hard gates (`decide_activation`) → features/score
+(`compute_features`/`score_candidate`, the adapter's own pinned 0.50/0.30/0.20 weights) → select
+(`select_target`) → construct (`build_task_instance`)) and `OpportunitySelectionService` (the
+persisting orchestration: resolve session bundle → load/init seven skill states → select → open
+opportunity (BE4a, reused) → build task → persist task instance + token (BE4a, reused) → return the
+BE4a safe DTO). `backend/migrations/versions/20260727_0002_be4b_learner_skill_states.py` — one new
+PRIVATE table, `b_learner_skill_states` (learner×skill P(L) + observation_count; BE4b reads/initializes
+only, BE4c owns updates). `backend/tests/test_be4b_adaptive_selection.py` (10 tests).
+
+**Files changed.** `backend/app/api/routes/b_session.py` (+1 route:
+`POST /api/v1/b/sessions/{session_id}/opportunities`); `backend/app/domain/b_opportunity.py`
+(+`OpportunityPresentationResponse`/`OpportunityPresentationFields`, an explicit field-by-field pydantic
+mirror of BE4a's `PresentedOpportunity`, never `**to_public_dict()`); `backend/app/infrastructure/
+persistence_models.py` / `repositories.py` (new table's model + repository, plus two additive,
+non-breaking extensions to BE4a's `ItemOpportunityRepository`: `count_for_session`); `backend/tests/
+test_be2_architecture_guards.py` / `test_be2_persistence.py` (table allow-list extended by name; new
+route added to `EXPECTED_ROUTES` + a narrow `AUTHORIZED_B_OPPORTUNITY_SELECTION_OPERATIONS` carve-out
+of the "session" path term, exactly mirroring the four existing lifecycle routes' carve-out — every
+other prohibited scientific path term, and every other prohibited column term, stays blocked
+unconditionally including on the new route/table).
+
+**Adapter methods used (no reimplementation).** `load`/`checksum`, `decide_activation`,
+`supported_template_ids`, `compute_features`, `score_candidate`, `select_target`,
+`build_task_instance` — the exact BE4b row from `Component_B_BE4_Sequencing_Plan.md`. `rank_candidates`
+was not needed: `select_target` alone performs ranking + the canonical deterministic tie-break given a
+scored-candidate list.
+
+**Hard gates.** Grade eligibility, implementation support, and catalogue availability are enforced
+entirely by `adapter.decide_activation` per template; deferred/unsupported templates never enter the
+scored-candidate list (never generated, not merely rejected after construction). Verified directly
+against the catalogue (`test_grade_2_never_activates_multiplication_or_division`,
+`test_grade_3_exposes_all_seven_skills`, `test_deferred_template_never_activates_for_any_grade`) and
+end-to-end through the real service for a Grade 2 learner.
+
+**Frozen weights + determinism.** `test_selection_uses_the_frozen_0_50_0_30_0_20_weights` asserts the
+real `SelectionReason.score` returned by the adapter path equals `0.50*mastery_gap +
+0.30*prerequisite_readiness + 0.20*spacing_due` — reading the weights from the adapter's own output, not
+a locally declared copy. `select_candidate`/`build_task` are pure (no DB access); calling each twice
+with identical arguments in `test_selection_is_deterministic_under_fixed_identity` produces
+dataclass-equal (`==`) `SelectionResult`/`TaskInstance` output — a direct step toward the BE4f parity
+test.
+
+**Fail-closed.** A session pinned to a `RuntimeBundleRecord` whose `bundle_version` isn't the one known
+engineering TEST fixture refuses with `ConflictError` (no fabricated fallback). The DB-level
+one-OPEN-opportunity-per-session index (BE4a) is exercised through the real selection flow: a second
+`select_next_opportunity` call for a session that already has an OPEN opportunity fails closed
+(`test_one_open_opportunity_per_session_rejects_a_second_select`).
+
+**Privacy.** The public response (`OpportunityPresentationResponse`) is built through BE4a's
+`project_task_instance_to_presentation` allow-list projection, then mapped field-by-field (not
+`**dict`) into the pydantic response shape; `test_public_selection_response_contains_no_private_fields`
+asserts the real end-to-end response contains none of the private task-instance fields nor any
+selection-rationale field (`mastery_gap`, `score`, `tie_break_basis`, `p_l`, etc.). No custom logging was
+added anywhere in this batch; the existing structured-logging pipeline never serializes request/response
+bodies.
+
+**Known engineering-only limitations, explicitly documented in the module docstring (not silently
+assumed):**
+1. **Bundle-artifact bridge.** No governed mechanism yet resolves a session's pinned
+   `RuntimeBundleRecord.bundle_version` to an actual manifest/catalogue file path, and this batch may
+   not touch `provenance/`. `_ENGINEERING_TEST_BUNDLES` maps exactly the one known BE3b TEST-provenance
+   DRAFT fixture (`tests/fixtures/runtime_bundle/valid_unapproved_bundle.json` +
+   `tests/fixtures/runtime_bundle/test_catalogue.md`, reused — not duplicated); every other
+   `bundle_version` fails closed. Must not survive into a governed production selection path.
+2. **BKT config.** A fixed, population-neutral, `TEST_FIXTURE_ONLY` `BktConfig` (mirroring
+   `tests/test_be3b_live_engine_adapter.py`'s own fixture exactly), never the population-conditioned
+   research table in `provenance/component-b-scientific-parameter-authorization.json` — that table is
+   keyed by `population` (TD/MLD/DD), architecturally prohibited anywhere near live BKT.
+3. **Seed lineage coordinates.** `scheduled_session_number`/`b_session_index` are fixed engineering
+   placeholders (`1`) — no curriculum-scheduling system exists yet. `global_seed` is derived
+   deterministically from the session's own `session_id` via SHA-256 rather than adding a new
+   `b_sessions` column, keeping BE2's already-committed session schema untouched.
+4. **Package ID format.** The vendored package's `GeneratedItemOpportunity.item_opportunity_id`
+   validator requires `^STU-[0-9]{4}-B[0-9]{3}-I[0-9]{3}$` — an internal-only, opaque format
+   requirement discovered while writing the determinism test (a raw UUID string fails this
+   validation). `package_item_opportunity_id` derives a conforming, deterministic value from the real
+   learner UUID; real uniqueness is still enforced at the DB level by `ItemOpportunityRecord`'s UUID
+   primary key, not by this formatted string.
+
+**Import-boundary regression caught and fixed during this batch.** An initial version imported
+`LiveEngineAdapter` at module scope in `opportunity_selection.py`. Because `app/api/routes/b_session.py`
+imports that module, and `app.main` imports every route module at startup, this made
+`component_b_generator` transitively required just to import `app.main` — breaking every test that
+uses the FastAPI app (health, auth, classroom, session-lifecycle, ...) on any host without the vendored
+wheel installed (discovered when a plain `import app.main` failed on this session's Python 3.13 sanity
+venv). Fixed by making the `LiveEngineAdapter` import lazy (inside
+`OpportunitySelectionService.select_next_opportunity`, with a `TYPE_CHECKING`-only import for the type
+hint) so only *invoking* the new route requires the package, matching the same "engineers without the
+vendored wheel can still run everything else" property BE3b/BE3c already relied on. Confirmed via
+`test_only_the_live_engine_adapter_module_imports_the_package` and
+`test_no_yass_research_or_scientific_imports` staying green (both check import-statement root names via
+AST, unaffected by module- vs. function-scope), and by a direct `import app.main` check succeeding
+without the package installed.
+
+**Migration cycle.** `alembic downgrade 20260727_0001` then `alembic upgrade head` verified clean
+(table presence/absence asserted via `sqlalchemy.inspect`); `alembic check` reports "No new upgrade
+operations detected" — zero drift against the ORM models.
+
+**Tests + typecheck.** Ran under the project's own `Dockerfile` (Python 3.11.15, vendored wheel via
+`requirements.lock --require-hashes`, built `--no-cache`) against an ephemeral Postgres 16.10 container.
+`pytest tests/test_be3_live_engine_boundary.py -v`: **24 passed, 0 skipped**.
+`pytest tests/test_be4b_adaptive_selection.py -v`: **10 passed**. Full suite `pytest -q`: **192 passed,
+0 skipped, 0 failed** (up from 182 after the BE4a closure review — +10 new BE4b tests, nothing else
+changed). No mypy/pyright config exists in this repo; none run (consistent with prior batches). All
+Docker resources (image, container, network) were removed after the run.
+
+**Scope / integrity.** Only files under `Dev/backend/` changed (`git status --porcelain` confirms);
+nothing under `frontend/`, `provenance/`, `BEplan.md`, or `Component_B_Build_Plan.md` was touched; no
+earlier buildLog entry was edited; no state-changing git command was run — everything is left
+uncommitted for Yasindu. Exactly one new public route was added, learner-scoped and authenticated; no
+select/attempt/hint/complete endpoint beyond it. This batch is not closed — a separate review decides
+`BE4B_ADAPTIVE_SELECTION_BATCH_CLOSED`.

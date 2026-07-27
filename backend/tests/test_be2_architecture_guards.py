@@ -21,10 +21,13 @@ EXPECTED_TABLES = {
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
     # BE4a (BEplan §9 BE4.1) — private opportunity/task-instance/presentation-token tables.
     "b_item_opportunities", "b_task_instances", "b_presentation_tokens",
+    # BE4b (BEplan §9 BE4.2) — private per-learner, per-skill BKT state.
+    "b_learner_skill_states",
 }
 BE2_BASE_TABLES = EXPECTED_TABLES - {
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
     "b_item_opportunities", "b_task_instances", "b_presentation_tokens",
+    "b_learner_skill_states",
 }
 PROHIBITED_COLUMN_TERMS = {
     "mastery", "bkt", "guess_guard", "certif", "sequenc", "hint", "answer",
@@ -92,6 +95,8 @@ EXPECTED_ROUTES = {
     ("/api/v1/b/sessions/active", ("GET",)),
     ("/api/v1/b/sessions/{session_id}/complete", ("POST",)),
     ("/api/v1/b/sessions/{session_id}/abandon", ("POST",)),
+    # BE4b (BEplan §9 BE4.2) — the one authorized adaptive-selection route.
+    ("/api/v1/b/sessions/{session_id}/opportunities", ("POST",)),
 }
 AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS = {
     ("/api/v1/classrooms/{classroom_id}/invites", ("POST",)),
@@ -109,6 +114,9 @@ AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS = {
     ("/api/v1/b/sessions/active", ("GET",)),
     ("/api/v1/b/sessions/{session_id}/complete", ("POST",)),
     ("/api/v1/b/sessions/{session_id}/abandon", ("POST",)),
+}
+AUTHORIZED_B_OPPORTUNITY_SELECTION_OPERATIONS = {
+    ("/api/v1/b/sessions/{session_id}/opportunities", ("POST",)),
 }
 PROHIBITED_SCIENTIFIC_PATH_TERMS = (
     "session", "attempt", "hint", "progress", "bkt", "mastery", "sequenc", "certif", "guess",
@@ -137,14 +145,16 @@ def test_openapi_contains_exactly_the_nine_authorized_invite_membership_operatio
 
 def test_no_session_question_answer_or_scientific_route_exists() -> None:
     """The blanket "session" path prohibition is carved out only for the four
-    authorized BE2.3-BE2.4 neutral session-lifecycle routes; every other prohibited
-    scientific term remains prohibited unconditionally, including on those four
-    routes themselves."""
+    authorized BE2.3-BE2.4 neutral session-lifecycle routes plus the one BE4b adaptive-
+    selection route (BEplan §9 BE4.2); every other prohibited scientific term remains
+    prohibited unconditionally, including on those routes themselves — in particular the
+    selection route must never contain "attempt", "hint", "progress", "bkt", "mastery",
+    "sequenc", "certif", or "guess"."""
     for route in _current_routes():
         path, _ = route
         lowered = path.lower()
         terms = PROHIBITED_SCIENTIFIC_PATH_TERMS
-        if route in AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS:
+        if route in AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS or route in AUTHORIZED_B_OPPORTUNITY_SELECTION_OPERATIONS:
             terms = tuple(term for term in terms if term != "session")
         assert not any(term in lowered for term in terms), path
 

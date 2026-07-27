@@ -3,14 +3,14 @@
 from typing import Generic, TypeVar
 from uuid import UUID
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence_models import (
     AppUser, AppUserLearnerLink, AuditEvent, Base, Classroom, ClassroomInvite,
     ClassroomMembership, IdempotencyRecord, ItemOpportunityRecord, Learner,
-    PresentationTokenRecord, RuntimeBundleRecord, SessionEvent, SessionRecord,
-    TaskInstanceRecord, TeacherProfile,
+    LearnerSkillStateRecord, PresentationTokenRecord, RuntimeBundleRecord,
+    SessionEvent, SessionRecord, TaskInstanceRecord, TeacherProfile,
 )
 
 
@@ -239,6 +239,11 @@ class ItemOpportunityRepository(SqlAlchemyNeutralRepository[ItemOpportunityRecor
             )
         )
 
+    async def count_for_session(self, session_id: UUID) -> int:
+        return await self.session.scalar(
+            select(func.count()).select_from(ItemOpportunityRecord).where(ItemOpportunityRecord.session_id == session_id)
+        )
+
 
 class TaskInstanceRepository(SqlAlchemyNeutralRepository[TaskInstanceRecord]):
     model_type = TaskInstanceRecord
@@ -256,3 +261,13 @@ class PresentationTokenRepository(SqlAlchemyNeutralRepository[PresentationTokenR
         return await self.session.scalar(
             select(PresentationTokenRecord).where(PresentationTokenRecord.token_hash == token_hash)
         )
+
+
+class LearnerSkillStateRepository(SqlAlchemyNeutralRepository[LearnerSkillStateRecord]):
+    model_type = LearnerSkillStateRecord
+
+    async def list_for_learner(self, learner_id: UUID) -> list[LearnerSkillStateRecord]:
+        result = await self.session.scalars(
+            select(LearnerSkillStateRecord).where(LearnerSkillStateRecord.learner_id == learner_id)
+        )
+        return list(result)

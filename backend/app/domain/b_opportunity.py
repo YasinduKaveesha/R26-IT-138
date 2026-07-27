@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Mapping
 
+from app.domain.b_session import StrictModel
+
 
 if TYPE_CHECKING:
     from app.infrastructure.persistence_models import TaskInstanceRecord
@@ -104,4 +106,45 @@ def project_task_instance_to_presentation(
         presented_choices=tuple(task_instance.presented_choices),
         presentation_token=presentation_token,
         server_timeout_deadline_utc=server_timeout_deadline_utc,
+    )
+
+
+class OpportunityPresentationFields(StrictModel):
+    """BE4b (BEplan §9 BE4.2) public response shape — an explicit, field-by-field mirror of
+    ``PresentedOpportunity`` (never ``**PresentedOpportunity.to_public_dict()``), so the FastAPI
+    response schema and the safe-DTO allow-list are two independently-written descriptions of the
+    same safe field set rather than one generated from the other."""
+
+    item_opportunity_id: str
+    item_instance_id: str
+    skill_id: str
+    grade: int
+    difficulty_level: str
+    representation_type: str
+    response_format: str
+    prompt: Mapping[str, object]
+    presented_choices: tuple[str, ...]
+    presentation_token: str
+    server_timeout_deadline_utc: datetime
+
+
+class OpportunityPresentationResponse(OpportunityPresentationFields):
+    request_id: str
+
+
+def opportunity_presentation_fields(presented: PresentedOpportunity) -> OpportunityPresentationFields:
+    """Explicit field-by-field mapping from the safe dataclass to the safe pydantic response
+    shape — see the allow-list discipline note on ``OpportunityPresentationFields``."""
+    return OpportunityPresentationFields(
+        item_opportunity_id=presented.item_opportunity_id,
+        item_instance_id=presented.item_instance_id,
+        skill_id=presented.skill_id,
+        grade=presented.grade,
+        difficulty_level=presented.difficulty_level,
+        representation_type=presented.representation_type,
+        response_format=presented.response_format,
+        prompt=presented.prompt,
+        presented_choices=presented.presented_choices,
+        presentation_token=presented.presentation_token,
+        server_timeout_deadline_utc=presented.server_timeout_deadline_utc,
     )

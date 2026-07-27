@@ -15,6 +15,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -421,6 +422,29 @@ class PresentationTokenRecord(ProvenanceMixin, Base):
     )
     issued_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class LearnerSkillStateRecord(ProvenanceMixin, Base):
+    """BE4b (BEplan §9 BE4.2): one row per (learner, skill) — the current P(L) mastery estimate
+    and observation count. PRIVATE table. BE4b only reads and initializes (from the pinned
+    bundle's TEST-fixture P(L0) priors); BE4c owns updates after the first real attempt. No
+    cross-skill transfer: every row is independent."""
+
+    __tablename__ = "b_learner_skill_states"
+    __table_args__ = (
+        UniqueConstraint("learner_id", "skill_id", name="uq_b_learner_skill_states_pair"),
+        CheckConstraint("p_l >= 0.0 AND p_l <= 1.0", name="ck_b_learner_skill_states_p_l_bounded"),
+        CheckConstraint("observation_count >= 0", name="ck_b_learner_skill_states_observation_count"),
+        *ProvenanceMixin.provenance_constraints("b_learner_skill_states"),
+    )
+
+    learner_skill_state_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    learner_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False
+    )
+    skill_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    p_l: Mapped[float] = mapped_column(Float, nullable=False)
+    observation_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
 
 AUTHORIZED_TABLES = frozenset(Base.metadata.tables)
