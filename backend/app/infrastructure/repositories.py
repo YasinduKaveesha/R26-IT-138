@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence_models import (
     AppUser, AppUserLearnerLink, AuditEvent, Base, Classroom, ClassroomInvite,
-    ClassroomMembership, IdempotencyRecord, Learner, RuntimeBundleRecord,
-    SessionEvent, SessionRecord, TeacherProfile,
+    ClassroomMembership, IdempotencyRecord, ItemOpportunityRecord, Learner,
+    PresentationTokenRecord, RuntimeBundleRecord, SessionEvent, SessionRecord,
+    TaskInstanceRecord, TeacherProfile,
 )
 
 
@@ -217,3 +218,41 @@ class ClassroomMembershipRepository(SqlAlchemyNeutralRepository[ClassroomMembers
         )
         result = await self.session.execute(statement)
         return list(result.all())
+
+
+class ItemOpportunityRepository(SqlAlchemyNeutralRepository[ItemOpportunityRecord]):
+    model_type = ItemOpportunityRecord
+
+    async def find_open_for_session(self, session_id: UUID) -> ItemOpportunityRecord | None:
+        return await self.session.scalar(
+            select(ItemOpportunityRecord).where(
+                ItemOpportunityRecord.session_id == session_id,
+                ItemOpportunityRecord.state == "OPEN",
+            )
+        )
+
+    async def get_owned(self, item_opportunity_id: UUID, learner_id: UUID) -> ItemOpportunityRecord | None:
+        return await self.session.scalar(
+            select(ItemOpportunityRecord).where(
+                ItemOpportunityRecord.item_opportunity_id == item_opportunity_id,
+                ItemOpportunityRecord.learner_id == learner_id,
+            )
+        )
+
+
+class TaskInstanceRepository(SqlAlchemyNeutralRepository[TaskInstanceRecord]):
+    model_type = TaskInstanceRecord
+
+    async def find_by_opportunity(self, item_opportunity_id: UUID) -> TaskInstanceRecord | None:
+        return await self.session.scalar(
+            select(TaskInstanceRecord).where(TaskInstanceRecord.item_opportunity_id == item_opportunity_id)
+        )
+
+
+class PresentationTokenRepository(SqlAlchemyNeutralRepository[PresentationTokenRecord]):
+    model_type = PresentationTokenRecord
+
+    async def find_by_token_hash(self, token_hash: str) -> PresentationTokenRecord | None:
+        return await self.session.scalar(
+            select(PresentationTokenRecord).where(PresentationTokenRecord.token_hash == token_hash)
+        )

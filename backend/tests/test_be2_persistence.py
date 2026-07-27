@@ -39,6 +39,8 @@ EXPECTED_TABLES = {
     "b_sessions", "b_session_events", "b_idempotency_records", "b_audit_events",
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
+    # BE4a (BEplan §9 BE4.1) — private opportunity/task-instance/presentation-token tables.
+    "b_item_opportunities", "b_task_instances", "b_presentation_tokens",
 }
 COMMON_COLUMNS = {
     "created_at_utc", "updated_at_utc", "actor_user_id", "system_actor", "request_id",

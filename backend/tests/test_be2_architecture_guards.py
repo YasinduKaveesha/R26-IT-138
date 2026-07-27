@@ -19,22 +19,56 @@ EXPECTED_TABLES = {
     "b_audit_events",
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
+    # BE4a (BEplan §9 BE4.1) — private opportunity/task-instance/presentation-token tables.
+    "b_item_opportunities", "b_task_instances", "b_presentation_tokens",
 }
 BE2_BASE_TABLES = EXPECTED_TABLES - {
-    "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships"
+    "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
+    "b_item_opportunities", "b_task_instances", "b_presentation_tokens",
 }
 PROHIBITED_COLUMN_TERMS = {
     "mastery", "bkt", "guess_guard", "certif", "sequenc", "hint", "answer",
     "correct", "error_class", "population", "dd_subtype", "true_mastery",
     "simulated", "latency", "off_day", "random_effect", "experiment",
 }
+# "answer" and "correct" stay in the blanket prohibition above (blocked everywhere by default).
+# BEplan §9 BE4.1 authorizes exactly two PRIVATE columns to carry them — behind the BE3c
+# private/public split (never read by any public-DTO projection; see
+# ``app.domain.b_opportunity.project_task_instance_to_presentation``) — and only those two cells
+# are exempted, via this explicit, minimal allow-list rather than a global term removal.
+AUTHORIZED_ANSWER_BEARING_COLUMNS = {
+    ("b_task_instances", "correct_answer"),
+    ("b_task_instances", "allowed_equivalent_answers"),
+}
 
 
 def test_exact_authorized_model_table_set_and_no_scientific_columns() -> None:
     assert AUTHORIZED_TABLES == EXPECTED_TABLES
     assert set(Base.metadata.tables) == EXPECTED_TABLES
-    columns = {column.name.lower() for table in Base.metadata.tables.values() for column in table.columns}
-    assert not {name for name in columns if any(term in name for term in PROHIBITED_COLUMN_TERMS)}
+
+    # The allow-list itself must not be stale: both authorized columns must actually exist on
+    # b_task_instances, and no other table may have an answer/correct-bearing column at all.
+    table_columns = {
+        table.name: {column.name for column in table.columns} for table in Base.metadata.tables.values()
+    }
+    for table_name, column_name in AUTHORIZED_ANSWER_BEARING_COLUMNS:
+        assert column_name in table_columns.get(table_name, set()), (table_name, column_name)
+    answer_bearing = {
+        (table.name, column.name)
+        for table in Base.metadata.tables.values()
+        for column in table.columns
+        if any(term in column.name.lower() for term in ("answer", "correct"))
+    }
+    assert answer_bearing == AUTHORIZED_ANSWER_BEARING_COLUMNS
+
+    offenders = {
+        (table.name, column.name)
+        for table in Base.metadata.tables.values()
+        for column in table.columns
+        if any(term in column.name.lower() for term in PROHIBITED_COLUMN_TERMS)
+        and (table.name, column.name) not in AUTHORIZED_ANSWER_BEARING_COLUMNS
+    }
+    assert not offenders, offenders
 
 
 EXPECTED_ROUTES = {

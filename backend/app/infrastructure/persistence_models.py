@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -310,6 +311,116 @@ class ClassroomMembership(ProvenanceMixin, Base):
     decided_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decided_by_user_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("app_users.user_id", ondelete="RESTRICT"), nullable=True)
     row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
+class ItemOpportunityRecord(ProvenanceMixin, Base):
+    """BE4a (BEplan §9 BE4.1): one live-loop opportunity per row. PRIVATE table — the
+    ``selection_provenance`` column never appears in any public DTO or log; see
+    ``app.domain.b_opportunity``."""
+
+    __tablename__ = "b_item_opportunities"
+    __table_args__ = (
+        CheckConstraint("state IN ('OPEN', 'CLOSED')", name="ck_b_item_opportunities_state"),
+        CheckConstraint("row_version >= 0", name="ck_b_item_opportunities_row_version"),
+        CheckConstraint(
+            "timeout_deadline_utc > created_at_utc", name="ck_b_item_opportunities_timeout_after_created"
+        ),
+        Index(
+            "uq_b_item_opportunities_one_open_per_session",
+            "session_id",
+            unique=True,
+            postgresql_where=text("state = 'OPEN'"),
+        ),
+        *ProvenanceMixin.provenance_constraints("b_item_opportunities"),
+    )
+
+    item_opportunity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_sessions.session_id", ondelete="RESTRICT"), nullable=False
+    )
+    learner_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False
+    )
+    skill_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    item_template_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    opportunity_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    presented_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    timeout_deadline_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    selection_provenance: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
+class TaskInstanceRecord(ProvenanceMixin, Base):
+    """BE4a (BEplan §9 BE4.1): the constructed task for one opportunity, split into a SAFE
+    presentation subset (prompt/presented_choices — computed once at creation using the same
+    allow-list logic as BE3c's ``project_to_public``) and PRIVATE columns that never leave this
+    table. This batch creates the schema only; BE4b populates rows via the adapter."""
+
+    __tablename__ = "b_task_instances"
+    __table_args__ = (
+        UniqueConstraint("item_opportunity_id", name="uq_b_task_instances_opportunity"),
+        CheckConstraint("grade IN (2, 3)", name="ck_b_task_instances_grade"),
+        *ProvenanceMixin.provenance_constraints("b_task_instances"),
+    )
+
+    task_instance_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    item_opportunity_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_item_opportunities.item_opportunity_id", ondelete="RESTRICT"), nullable=False
+    )
+    item_template_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    skill_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    grade: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    difficulty_level: Mapped[str] = mapped_column(String(64), nullable=False)
+    representation_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    response_format: Mapped[str] = mapped_column(String(64), nullable=False)
+    # SAFE presentation subset (BE3c allow-list) — the only columns a public DTO may read.
+    prompt: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    presented_choices: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+    # PRIVATE — never read by any public-DTO projection or structured log.
+    correct_answer: Mapped[str] = mapped_column(String(255), nullable=False)
+    allowed_equivalent_answers: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+    distractor_candidates: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+    distractor_rule_ids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+    generated_operands: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    generation_seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    applied_guard_ids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+    catalogue_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    catalogue_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class PresentationTokenRecord(ProvenanceMixin, Base):
+    """BE4a (BEplan §9 BE4.1): an opaque, short-lived presentation token bound to
+    (session, opportunity, learner, runtime bundle). Only the SHA-256 hash of the token is
+    stored, matching the ``classroom_invites.token_hash`` convention — the raw token is returned
+    to the caller exactly once, at issuance."""
+
+    __tablename__ = "b_presentation_tokens"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_b_presentation_tokens_token_hash"),
+        CheckConstraint("token_hash ~ '^[0-9a-f]{64}$'", name="ck_b_presentation_tokens_token_hash"),
+        CheckConstraint("expires_at_utc > issued_at_utc", name="ck_b_presentation_tokens_expiry"),
+        *ProvenanceMixin.provenance_constraints("b_presentation_tokens"),
+    )
+
+    presentation_token_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_sessions.session_id", ondelete="RESTRICT"), nullable=False
+    )
+    item_opportunity_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_item_opportunities.item_opportunity_id", ondelete="RESTRICT"), nullable=False
+    )
+    learner_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False
+    )
+    runtime_bundle_record_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("b_runtime_bundle_records.runtime_bundle_record_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    issued_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 AUTHORIZED_TABLES = frozenset(Base.metadata.tables)

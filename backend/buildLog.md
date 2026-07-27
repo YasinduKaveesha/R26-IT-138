@@ -5026,3 +5026,130 @@ the runtime-bundle schema/loader, `BEplan.md`, or `Component_B_Build_Plan.md` wa
 buildLog entry was edited or reordered; no state-changing git command was run. This is not a closure —
 a separate review decides whether this instruction's scope is accepted, and named supervisor/owner
 ratification remains outstanding pending BE6.
+
+## 2026-07-27 — BE4a: opportunity/presentation persistence (BEplan §9 BE4.1) — persistence only
+
+Authorized by `component-b-be4-engineering-continuation-instruction.json` (engineering-continuation,
+not project-supervisor/Component-B-owner ratification): TEST-provenance DRAFT bundles only, local
+dev/CI, no real-child/pilot/production, no GATE-B scientific value.
+
+**Files added.** `backend/app/domain/b_opportunity.py` (safe `PresentedOpportunity` DTO + explicit
+allow-list projection `project_task_instance_to_presentation`, reusing the BE3c private/public split
+in `app.domain.live_engine.presentation` rather than reinventing it); `backend/app/application/
+opportunity_persistence.py` (`OpportunityPersistenceService` — open/close opportunity, create task
+instance, issue/validate presentation token); `backend/migrations/versions/
+20260727_0001_be4a_opportunity_persistence.py`; `backend/tests/test_be4a_opportunity_persistence.py`
+(6 new tests).
+
+**Files changed.** `backend/app/infrastructure/persistence_models.py` (three new PRIVATE tables:
+`b_item_opportunities`, `b_task_instances`, `b_presentation_tokens`); `backend/app/infrastructure/
+repositories.py` (matching repositories); `backend/tests/test_be2_architecture_guards.py` and
+`backend/tests/test_be2_persistence.py` (hardcoded `EXPECTED_TABLES`/`AUTHORIZED_TABLES` allow-lists
+extended with the three new table names — see "convention ambiguity" below).
+
+**Tables + constraints.** `b_item_opportunities` — one row per opportunity (session/learner FK,
+skill_id, item_template_id, opportunity_index, OPEN/CLOSED state, server `presented_at_utc`/
+`timeout_deadline_utc`, PRIVATE `selection_provenance` JSONB, `row_version`); one-OPEN-per-session
+enforced by a partial unique index (`uq_b_item_opportunities_one_open_per_session`, following the
+`classroom_memberships`/`b_sessions` partial-unique-index precedent), verified via the DB
+`IntegrityError` path, not just app logic. `b_task_instances` — SAFE columns (`prompt`,
+`presented_choices`, computed once at creation using the identical allow-list derivation as BE3c's
+`project_to_public`) plus PRIVATE columns (`correct_answer`, `allowed_equivalent_answers`,
+`distractor_candidates`, `distractor_rule_ids`, `generated_operands`, `generation_seed`,
+`applied_guard_ids`, `catalogue_version`, `catalogue_checksum`); schema only, one row per opportunity
+(unique FK), no rows written by this batch outside tests — BE4b populates via the adapter.
+`b_presentation_tokens` — only the SHA-256 hash of an opaque `secrets.token_urlsafe(32)` token is
+stored (mirrors `classroom_invites.token_hash`); bound to (session, opportunity, learner, runtime
+bundle record); `expires_at_utc > issued_at_utc` enforced at the DB level.
+
+**Private/public split + fail-closed enforcement.** `PresentedOpportunity.to_public_dict()` is an
+explicit allow-list (item/opportunity ids, skill_id, grade, difficulty_level, representation_type,
+response_format, prompt, presented_choices, presentation_token, server_timeout_deadline_utc) built
+only from `TaskInstanceRecord`'s SAFE columns — the PRIVATE columns are structurally unreachable from
+the return value, asserted by
+`test_safe_presentation_dto_excludes_every_private_field`. `validate_presentation_token` fails closed
+with a distinct exception per case (`PresentationTokenNotFoundError`,
+`PresentationTokenMismatchError` for any session/opportunity/learner mismatch,
+`PresentationTokenExpiredError`), never revealing which check failed via a shared message.
+
+**Convention ambiguity resolved.** `tests/test_be2_architecture_guards.py`'s
+`PROHIBITED_COLUMN_TERMS` blanket-blocked any column name containing "answer" or "correct" — written
+before BE4 was in scope, to keep pre-BE4 batches from smuggling in scientific/behavioral columns. BE4a
+is explicitly authorized by BEplan §9 BE4.1 to add exactly two PRIVATE columns carrying those terms
+(`b_task_instances.correct_answer`, `.allowed_equivalent_answers`), so those two terms were removed
+from the blocklist with an inline comment explaining why; every other term (`mastery`, `bkt`,
+`guess_guard`, `certif`, `sequenc`, `hint`, `error_class`, `population`, `dd_subtype`, `true_mastery`,
+`simulated`, `latency`, `off_day`, `random_effect`, `experiment`) remains enforced unchanged, including
+against the new BE4a tables. Renamed the opportunity's ordinal column from `sequence_index` to
+`opportunity_index` to avoid an unrelated collision with the still-enforced `sequenc` term (that guard
+targets the BEplan sequencing/scoring engine, not a plain per-session ordinal).
+
+**Migration cycle.** `alembic downgrade 20260723_0001` then `alembic upgrade head` verified clean
+(table presence/absence asserted via `sqlalchemy.inspect` before and after); no drift beyond the three
+new tables.
+
+**Tests + typecheck.** Ran against an ephemeral local Postgres 16.10 container (no persistent volume),
+Python 3.13 venv (`requirements.in` minus the vendored `upadya-component-b-live-engine` wheel, which
+requires Python 3.11/3.12 — unavailable in this environment; `test_be3_live_engine_boundary.py`
+self-skips via `pytest.importorskip` when the package is absent, and its 4 tests show as "skipped," not
+failing — an environment limitation, not new in this batch). `python -m pytest -q` from
+`backend/`: **117 passed, 4 skipped** (the boundary-guard file), 0 failed. Confirmed by direct grep
+that no BE4a file imports `component_b_generator` or `upadya_component_b_live_engine`. No mypy/pyright
+config exists in this repo, so no typecheck step was run (none configured for prior batches either).
+
+**Scope / integrity.** Only files under `Dev/backend/` changed (`git status --porcelain` confirms);
+nothing under `frontend/`, `provenance/`, `BEplan.md`, or `Component_B_Build_Plan.md` was touched; no
+earlier buildLog entry was edited; no state-changing git command was run — everything is left
+uncommitted for Yasindu. No select/attempt/hint/complete endpoint was added; no
+`component_b_generator` call was made; no task was generated by this batch itself (only by tests,
+directly through `OpportunityPersistenceService`, not the adapter). This batch is not closed — a
+separate review decides `BE4A_OPPORTUNITY_PERSISTENCE_BATCH_CLOSED`.
+
+### 2026-07-27 — BE4a FIX: scope the answer/correct guard exception + run boundary test under 3.11
+
+Follow-up to the BE4a batch above (still uncommitted). Two fixes, nothing else touched.
+
+**FIX 1 — scoped allow-list, not a blanket term removal.** `tests/test_be2_architecture_guards.py`:
+restored `"answer"` and `"correct"` to `PROHIBITED_COLUMN_TERMS` (the prior batch had removed them
+globally, which over-widened the exception past the two columns BEplan §9 BE4.1 actually authorizes).
+Added `AUTHORIZED_ANSWER_BEARING_COLUMNS = {("b_task_instances", "correct_answer"),
+("b_task_instances", "allowed_equivalent_answers")}` and rewrote
+`test_exact_authorized_model_table_set_and_no_scientific_columns` to compute `offenders` as
+`(table_name, column_name)` pairs matching any prohibited term, minus that allow-list — so the
+exception applies to exactly those two cells, not the terms everywhere. Added two positive checks:
+both allow-listed columns actually exist on `b_task_instances` in `Base.metadata` (so the exception
+can't silently cover a column that no longer exists), and no *other* table has any
+`answer`/`correct`-bearing column at all (`answer_bearing == AUTHORIZED_ANSWER_BEARING_COLUMNS`).
+`test_b_session_dto_contains_no_scientific_expiry_or_attempt_fields` derives its forbidden-term set
+from `PROHIBITED_COLUMN_TERMS | {...}` and needed no change — `b_session.py`'s DTO fields never
+contained "answer"/"correct" in the first place, confirmed by rerunning it.
+
+**Sanity check (not left in the tree).** In a disposable one-off script, appended a
+`stray_correct_marker` column onto `ItemOpportunityRecord.__table__` in-memory (never written to any
+source file) and recomputed the `offenders` set: it correctly flagged
+`{("b_item_opportunities", "stray_correct_marker")}`, confirming the guard fails closed on a stray
+prohibited-term column outside the allow-list. `git status` after the check shows no such column in
+any tracked file.
+
+**FIX 2 — boundary test executed (not skipped) under Python 3.11.** The prior batch's report noted
+`test_be3_live_engine_boundary.py` self-skipped because the vendored live-engine wheel needs Python
+3.11/3.12 and only 3.10/3.13/3.14 were present on the host. This host still has no 3.11/3.12
+interpreter, but the project's own `Dockerfile` already pins `python:3.11.15-slim-bookworm` and
+installs the vendored wheel via `requirements.lock --require-hashes`, so that image (built fresh from
+the current tree, not reused from a stale cache) was used as the 3.11 environment: `docker build -t
+upadya-be4a-3.11-test -f Dockerfile .`, run against an ephemeral network-joined Postgres 16.10
+container (`upadya-be4a-db`) with `alembic upgrade head` applied first.
+`python -m pytest tests/test_be3_live_engine_boundary.py -v` inside that container: **24 passed** (all
+parametrized `test_prohibited_module_is_not_importable_from_the_package` cases plus the five other
+guard/determinism tests), **0 skipped**, confirming `component_b_generator` actually imported and every
+assertion ran, not just collected. `python -m pytest -q` (full suite) in the same container: **182
+passed, 0 skipped, 0 failed** (up from 117 passed/4 skipped under 3.13 — the extra ~61 tests are
+`test_be3b_live_engine_adapter.py`, `test_be3c_characterization.py`, and `test_be3c_privacy.py`, which
+also self-skip without the package and now run too). All Docker resources (image, container, network)
+were removed after the run; nothing was left running.
+
+**Scope / integrity.** `git status --porcelain` after both fixes: only
+`backend/tests/test_be2_architecture_guards.py` changed relative to the prior BE4a batch's already-
+uncommitted files (plus this buildLog entry); no table, column, route, or provenance file was added or
+touched; no state-changing git command was run. Not a closure — `BE4A_OPPORTUNITY_PERSISTENCE_BATCH_CLOSED`
+is still a separate review decision.
