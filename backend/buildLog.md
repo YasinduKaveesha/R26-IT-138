@@ -4990,3 +4990,39 @@ explicit carve-out layered on top of it, per `relationship_to_blocked_scope`.
 reordered; no state-changing git command was run. This batch is not closed and this amendment is not
 adopted — a separate closure review decides acceptance of the draft, and real named sign-off remains
 outstanding.
+
+## 2026-07-26 — BE4 engineering-continuation instruction (project-director)
+
+Created `backend/provenance/component-b-be4-engineering-continuation-instruction.json`, a
+`BE4_ENGINEERING_CONTINUATION_INSTRUCTION` record. It authorizes Component B **BE4a-f engineering**
+(per `Component_B_BE4_Sequencing_Plan.md`) to proceed now, but **only** against isolated TEST-provenance
+DRAFT runtime bundles, in local development/CI, under the same bounded-batch + separate-closure
+discipline used since BE1.
+
+**Who issued it, and in what capacity.** The instruction is issued by **Yasindu Kularathne**, recorded
+as "the person directing this project (this session)" — explicitly **not** a project-supervisor decision
+and **not** the named Component B owner ratification. `is_named_approver_ratification: false`.
+
+**Identity discrepancy surfaced.** The Component B owner of record in the governing documents
+(`component-b-be4-engineering-amendment.json`, `component-b-profile-classroom-ratification.json`) is
+"Dhananjani G.A.U. (IT22224316)", which differs from the instructing party, Yasindu Kularathne. This
+relationship is recorded as **UNRECONCILED**. Full named Component B owner ratification still requires
+reconciling this identity; it is not resolved by this record.
+
+**Relationship to the §44 amendment.** This instruction does **not** adopt
+`component-b-be4-engineering-amendment.json`. That amendment's `named_approver_slots`
+(project_supervisor, component_b_owner, academic_owner_acknowledgement) remain `UNRESOLVED_PLACEHOLDER`.
+Named project-supervisor ratification and named Component B owner ratification (with the identity above
+reconciled) are both **deferred to the BE6 pre-pilot review gate**, per the same
+`engineering_continuation` precedent used in `component-b-profile-classroom-ratification.json`.
+
+**GATE-B unaffected.** This record clears no scientific value and no GATE-B item (SG-01…SG-15); it
+authorizes no real-child data, pilot, production, research export, or effectiveness/mastery/validation
+claim; it does not touch `component-b-closure-decisions.json` `exit_gate.blocked_scope`, which still
+lists "BE4 live learning flow", pilot, and production unchanged.
+
+**Scope / integrity.** No code, migration, the §44 amendment record, `component-b-closure-decisions.json`,
+the runtime-bundle schema/loader, `BEplan.md`, or `Component_B_Build_Plan.md` was modified; no earlier
+buildLog entry was edited or reordered; no state-changing git command was run. This is not a closure —
+a separate review decides whether this instruction's scope is accepted, and named supervisor/owner
+ratification remains outstanding pending BE6.
