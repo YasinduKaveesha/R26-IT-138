@@ -447,4 +447,80 @@ class LearnerSkillStateRecord(ProvenanceMixin, Base):
     observation_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
 
+class AttemptRecord(ProvenanceMixin, Base):
+    """BE4c (BEplan §9 BE4.3): one row per submitted attempt or governed timeout event on an
+    opportunity. PRIVATE table. ``attempt_index`` is derived server-side under a row lock on the
+    parent opportunity and is unique per opportunity. ``submitted_value`` is the learner's raw
+    submission (never the accepted-answer set); ``response_matched`` is the server-computed
+    outcome for ``RESPONSE`` events only (``NULL`` for ``TIMEOUT``). ``client_elapsed_ms`` is
+    telemetry only — never used for correctness or BKT."""
+
+    __tablename__ = "b_attempts"
+    __table_args__ = (
+        UniqueConstraint("item_opportunity_id", "attempt_index", name="uq_b_attempts_opportunity_index"),
+        CheckConstraint("event_kind IN ('RESPONSE', 'TIMEOUT')", name="ck_b_attempts_event_kind"),
+        CheckConstraint("attempt_index >= 1", name="ck_b_attempts_attempt_index_positive"),
+        CheckConstraint(
+            "(event_kind = 'RESPONSE' AND response_matched IS NOT NULL AND submitted_value IS NOT NULL) "
+            "OR (event_kind = 'TIMEOUT' AND response_matched IS NULL AND submitted_value IS NULL)",
+            name="ck_b_attempts_response_matched_consistency",
+        ),
+        CheckConstraint("client_elapsed_ms IS NULL OR client_elapsed_ms >= 0", name="ck_b_attempts_client_elapsed_ms_nonnegative"),
+        *ProvenanceMixin.provenance_constraints("b_attempts"),
+    )
+
+    attempt_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    item_opportunity_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_item_opportunities.item_opportunity_id", ondelete="RESTRICT"), nullable=False
+    )
+    learner_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False
+    )
+    attempt_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    submitted_value: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    response_matched: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    client_elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    server_submitted_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SkillStateTransitionRecord(ProvenanceMixin, Base):
+    """BE4c (BEplan §9 BE4.4): the immutable first-attempt-only BKT observation + mastery
+    transition. PRIVATE table. ``uq_b_skill_state_transitions_opportunity`` is simultaneously the
+    DB-level claim on the unique first-attempt observation for an opportunity and the transition
+    row itself — a concurrent second claim for the same opportunity fails this unique index. No
+    application code path ever updates or deletes a row in this table."""
+
+    __tablename__ = "b_skill_state_transitions"
+    __table_args__ = (
+        UniqueConstraint("item_opportunity_id", name="uq_b_skill_state_transitions_opportunity"),
+        UniqueConstraint("attempt_id", name="uq_b_skill_state_transitions_attempt"),
+        CheckConstraint("p_l_before >= 0.0 AND p_l_before <= 1.0", name="ck_b_skill_state_transitions_p_l_before_bounded"),
+        CheckConstraint(
+            "predicted_probability >= 0.0 AND predicted_probability <= 1.0",
+            name="ck_b_skill_state_transitions_predicted_probability_bounded",
+        ),
+        CheckConstraint("posterior_p_l >= 0.0 AND posterior_p_l <= 1.0", name="ck_b_skill_state_transitions_posterior_p_l_bounded"),
+        CheckConstraint("p_l_after >= 0.0 AND p_l_after <= 1.0", name="ck_b_skill_state_transitions_p_l_after_bounded"),
+        *ProvenanceMixin.provenance_constraints("b_skill_state_transitions"),
+    )
+
+    skill_state_transition_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    learner_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False
+    )
+    skill_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    item_opportunity_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_item_opportunities.item_opportunity_id", ondelete="RESTRICT"), nullable=False
+    )
+    attempt_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_attempts.attempt_id", ondelete="RESTRICT"), nullable=False
+    )
+    response_matched: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    p_l_before: Mapped[float] = mapped_column(Float, nullable=False)
+    predicted_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    posterior_p_l: Mapped[float] = mapped_column(Float, nullable=False)
+    p_l_after: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 AUTHORIZED_TABLES = frozenset(Base.metadata.tables)

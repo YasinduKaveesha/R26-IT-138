@@ -7,10 +7,10 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence_models import (
-    AppUser, AppUserLearnerLink, AuditEvent, Base, Classroom, ClassroomInvite,
+    AppUser, AppUserLearnerLink, AttemptRecord, AuditEvent, Base, Classroom, ClassroomInvite,
     ClassroomMembership, IdempotencyRecord, ItemOpportunityRecord, Learner,
     LearnerSkillStateRecord, PresentationTokenRecord, RuntimeBundleRecord,
-    SessionEvent, SessionRecord, TaskInstanceRecord, TeacherProfile,
+    SessionEvent, SessionRecord, SkillStateTransitionRecord, TaskInstanceRecord, TeacherProfile,
 )
 
 
@@ -244,6 +244,16 @@ class ItemOpportunityRepository(SqlAlchemyNeutralRepository[ItemOpportunityRecor
             select(func.count()).select_from(ItemOpportunityRecord).where(ItemOpportunityRecord.session_id == session_id)
         )
 
+    async def get_for_update(self, item_opportunity_id: UUID) -> ItemOpportunityRecord | None:
+        """Row-locks the opportunity so attempt-index derivation and the OPEN-state check are
+        race-free under concurrent submissions (BEplan §9 BE4.3 step 4)."""
+        return await self.session.scalar(
+            select(ItemOpportunityRecord)
+            .where(ItemOpportunityRecord.item_opportunity_id == item_opportunity_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
 
 class TaskInstanceRepository(SqlAlchemyNeutralRepository[TaskInstanceRecord]):
     model_type = TaskInstanceRecord
@@ -271,3 +281,37 @@ class LearnerSkillStateRepository(SqlAlchemyNeutralRepository[LearnerSkillStateR
             select(LearnerSkillStateRecord).where(LearnerSkillStateRecord.learner_id == learner_id)
         )
         return list(result)
+
+    async def get_for_update(self, learner_id: UUID, skill_id: str) -> LearnerSkillStateRecord | None:
+        """``populate_existing=True`` is required: BE4b's selection step may already have loaded
+        this row into the session identity map earlier in the same request; without it SQLAlchemy
+        would keep those stale pre-lock attributes instead of refreshing from this FOR UPDATE
+        read (the same identity-map staleness hazard BE4c's spec calls out from the
+        approve_membership carry-forward)."""
+        return await self.session.scalar(
+            select(LearnerSkillStateRecord)
+            .where(LearnerSkillStateRecord.learner_id == learner_id, LearnerSkillStateRecord.skill_id == skill_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
+
+class AttemptRepository(SqlAlchemyNeutralRepository[AttemptRecord]):
+    model_type = AttemptRecord
+
+    async def count_for_opportunity(self, item_opportunity_id: UUID) -> int:
+        return await self.session.scalar(
+            select(func.count()).select_from(AttemptRecord).where(AttemptRecord.item_opportunity_id == item_opportunity_id)
+        )
+
+
+class SkillStateTransitionRepository(SqlAlchemyNeutralRepository[SkillStateTransitionRecord]):
+    """No update/delete method is defined here by design — transitions are immutable (BEplan
+    §9 BE4.4)."""
+
+    model_type = SkillStateTransitionRecord
+
+    async def find_by_opportunity(self, item_opportunity_id: UUID) -> SkillStateTransitionRecord | None:
+        return await self.session.scalar(
+            select(SkillStateTransitionRecord).where(SkillStateTransitionRecord.item_opportunity_id == item_opportunity_id)
+        )

@@ -5274,3 +5274,49 @@ earlier buildLog entry was edited; no state-changing git command was run — eve
 uncommitted for Yasindu. Exactly one new public route was added, learner-scoped and authenticated; no
 select/attempt/hint/complete endpoint beyond it. This batch is not closed — a separate review decides
 `BE4B_ADAPTIVE_SELECTION_BATCH_CLOSED`.
+
+## 2026-07-28 — BE4c: attempt submission + first-attempt-only atomic BKT (BEplan §9 BE4.3 + BE4.4)
+
+Implements the learner attempt submission and the first-attempt-only atomic BKT update, authorized by
+the BE4 engineering-continuation instruction (TEST-provenance DRAFT only; no real-child/pilot/production;
+no GATE-B value). New: `app/domain/b_attempt.py` (strict request/response contracts),
+`app/application/attempt_submission.py` (`AttemptSubmissionService`),
+`migrations/versions/20260728_0001_be4c_attempts_and_transitions.py` (`b_attempts`,
+`b_skill_state_transitions`), `tests/test_be4c_attempt_submission.py`. Changed: `persistence_models.py`
+(`AttemptRecord`, `SkillStateTransitionRecord`), `repositories.py` (attempt/transition repos +
+`get_for_update` with `populate_existing=True`), `app/core/errors.py` (`TechnicalFailureError`, 503),
+`app/api/routes/b_session.py` (one new route), and the two architecture-guard tests (allow-lists
+extended by name for the two tables + one route, same narrow pattern as BE4b).
+
+**Route:** `POST /api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/responses` — neutral
+path (no prohibited scientific term); the `session` carve-out is extended to it only, every other
+prohibited path term still enforced.
+
+**Scientific integrity.** All correctness (`answers_equivalent`/`normalize_answer`) and BKT
+(`predict`/`posterior`/`update`) run through the `LiveEngineAdapter` (lazy, function-scope import); no
+formula reimplemented. The pinned BKT config is the shared `TEST_FIXTURE_ONLY`
+`opportunity_selection._ENGINEERING_BKT_CONFIG`, never a GATE-B/population-conditioned value.
+First-attempt-only is gated by `attempt_index == 1 and event_kind == "RESPONSE"` and enforced at the DB
+level by the unique index `uq_b_skill_state_transitions_opportunity` (the single first-attempt claim +
+the immutable transition row). Concurrency is serialized by a `FOR UPDATE` lock on the opportunity row
+before the server derives `attempt_index`; the skill-state re-read uses `populate_existing=True` (the
+`approve_membership` identity-map staleness carry-forward). Attempt insert + transition insert +
+skill-state update commit together in one unit of work; any pre-commit or commit-time failure rolls back
+all of it and surfaces `TechnicalFailureError`, never a partial BKT observation. Replay reuses
+`b_idempotency_records` (same key → original canonical response, no second write). An expired
+`timeout_deadline_utc` records a `TIMEOUT` event with no correctness/BKT evaluation. Correctness is
+server-side only; `AttemptResponse` (StrictModel) returns `response_matched` (bool) + state — never the
+correct answer, accepted set, or scientific params; client elapsed time is stored as telemetry only.
+
+**Verification (independent closure, Python 3.11 Docker + real Postgres):** first-attempt-only,
+8-way concurrency (single transition; direct-ORM unique-index bypass confirmed the DB backstop),
+atomic rollback (commit-time and pre-flush injection → zero rows), replay + same-key-different-body
+conflict, server-side equivalence normalization, HTTP privacy scan (no answer/param leakage),
+oversized/extra-field/missing-key 422s, migration downgrade→re-upgrade + drift clean;
+`test_be3_live_engine_boundary.py` 24 passed/0 skipped, full suite 201 passed. Independent closure
+verdict: GO — `BE4C_ATTEMPT_AND_BKT_BATCH_CLOSED`.
+
+**Note (audit transparency).** This buildLog entry was appended by the supervisor after the closure
+review found the implementing batch had not actually written its buildLog entry (the file had no
+uncommitted change). No earlier entry was edited; no state-changing git command was run; the batch is
+left uncommitted for Yasindu.

@@ -43,6 +43,8 @@ EXPECTED_TABLES = {
     "b_item_opportunities", "b_task_instances", "b_presentation_tokens",
     # BE4b (BEplan §9 BE4.2) — private per-learner, per-skill BKT state.
     "b_learner_skill_states",
+    # BE4c (BEplan §9 BE4.3 + BE4.4) — private attempt events + immutable BKT transitions.
+    "b_attempts", "b_skill_state_transitions",
 }
 COMMON_COLUMNS = {
     "created_at_utc", "updated_at_utc", "actor_user_id", "system_actor", "request_id",
