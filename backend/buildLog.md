@@ -5320,3 +5320,69 @@ verdict: GO — `BE4C_ATTEMPT_AND_BKT_BATCH_CLOSED`.
 review found the implementing batch had not actually written its buildLog entry (the file had no
 uncommitted change). No earlier entry was edited; no state-changing git command was run; the batch is
 left uncommitted for Yasindu.
+
+---
+
+## 2026-07-28 — BE4d: governed hints (BEplan §9 BE4.5)
+
+Implements the governed L1/L2/L3 hint-request flow, authorized by the same BE4 engineering-
+continuation instruction (TEST-provenance DRAFT only; no real-child/pilot/production; no GATE-B
+value). Builds on BE4a/BE4b/BE4c. New: `app/domain/b_hint.py` (strict `HintRequestResponse`
+contract), `app/application/hint_request.py` (`HintRequestService`),
+`migrations/versions/20260728_0002_be4d_hint_events.py` (`b_hint_events`),
+`tests/test_be4d_hint_events.py`. Changed: `persistence_models.py` (`HintEventRecord`),
+`repositories.py` (`HintEventRepository`), `app/api/routes/b_session.py` (one new route),
+`tests/test_be2_architecture_guards.py` and `tests/test_be2_persistence.py` (allow-lists extended
+by name for the one table + one route, same narrow pattern as BE4b/BE4c).
+
+**Route:** `POST /api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/assists` —
+neutral path; "hint" (a prohibited scientific path term) never appears in it. The `session`
+carve-out is extended to it only; every other prohibited path term (`attempt`, `hint`, `progress`,
+`bkt`, `mastery`, `sequenc`, `certif`, `guess`) is still enforced on this route, same as the
+selection/attempt-submission routes.
+
+**Scientific integrity.** The only hint source is `LiveEngineAdapter.get_hint` (lazy, function-
+scope import) — no LLM, no paraphrase, no generic fallback; the adapter's own
+`HintUnavailableError` (missing/blank catalogue content, unknown template, out-of-range level) is
+mapped straight to a neutral `ConflictError` with no message detail, so a hint that cannot be
+produced fails closed rather than being synthesized. Catalogue/bundle resolution reuses
+`opportunity_selection._ENGINEERING_TEST_BUNDLES` (the same BE3b TEST-fixture bridge BE4b
+established) and `assert_catalogue_matches_bundle`, so a stale/mismatched catalogue also fails
+closed. Escalation is governed to exactly L1 → L2 → L3: the next level is
+`HintEventRepository.count_for_opportunity(...) + 1`, derived under the same opportunity
+`FOR UPDATE` row lock BE4c's attempt path takes (so concurrent hint requests for one opportunity
+serialize rather than race past L3); a request once 3 hint events already exist is refused
+(`ConflictError`), never a fourth level. Replay reuses `b_idempotency_records` (same key →
+original canonical response, same level, no re-escalation, no second write).
+
+**Hint ≠ mastery observation.** `b_hint_events` is a table fully separate from
+`b_attempts`/`b_skill_state_transitions`; `hint_request.py` never imports
+`LearnerSkillStateRepository`, `AttemptRepository`, or `SkillStateTransitionRepository`, and never
+touches `b_learner_skill_states`. Only the catalogue reconstruction key (`content_id` +
+`catalogue_version` + `catalogue_checksum`) is persisted per event — the hint text itself is
+returned to the caller but not stored, so there is no second, potentially-stale copy of governed
+content. Column names avoid every `PROHIBITED_COLUMN_TERMS` entry: the governed level is spelled
+`assist_level`, not `hint_level` (the response DTO field is `hint_level`, but DTO fields are not
+scanned by the column-term guard). `HintRequestResponse` (StrictModel) never carries the correct
+answer, accepted set, or any BKT/scientific parameter.
+
+**GATE-B note.** The only numeric bound enforced is the governed L1–L3 hint-escalation ceiling
+itself (BEplan §9 BE4.5 step 1). A combined attempt+hint numeric limit beyond that is a GATE-B item
+(UNRESOLVED) and is deliberately NOT enforced here; no fixture bound is promoted to "approved" by
+this batch.
+
+**Verification (Python 3.11 Docker + real Postgres, fresh database):** migration
+upgrade → downgrade(`20260728_0001`) → re-upgrade cycle and schema (`b_hint_events`,
+`uq_b_hint_events_opportunity_level`); first hint returns L1 and persists exactly one event;
+sequential requests escalate L1→L2→L3 then a fourth request is refused; replay with the same
+Idempotency-Key returns the same level without a second event or escalation; a template with no
+catalogue hint content fails closed (`ConflictError`, no answer/hint text in the error); a hint
+request creates no `AttemptRecord`, no `SkillStateTransitionRecord`, and no
+`LearnerSkillStateRecord`; the public response contains exactly the safe field set (no
+`correct_answer`/`p_l`/etc.). `test_be3_live_engine_boundary.py`: 24 passed, 0 skipped. Full suite:
+209 passed. `git status`: only `Dev/backend/` touched (`hint_request.py`, `b_hint.py`, the new
+migration, `test_be4d_hint_events.py` untracked; `b_session.py`, `persistence_models.py`,
+`repositories.py`, `test_be2_architecture_guards.py`, `test_be2_persistence.py` modified).
+
+This batch does NOT claim `BE4D_HINTS_RETRIES_BATCH_CLOSED` — a separate closure review decides
+that. Left uncommitted for Yasindu.

@@ -45,6 +45,8 @@ EXPECTED_TABLES = {
     "b_learner_skill_states",
     # BE4c (BEplan §9 BE4.3 + BE4.4) — private attempt events + immutable BKT transitions.
     "b_attempts", "b_skill_state_transitions",
+    # BE4d (BEplan §9 BE4.5) — private governed hint events, separate from attempts/transitions.
+    "b_hint_events",
 }
 COMMON_COLUMNS = {
     "created_at_utc", "updated_at_utc", "actor_user_id", "system_actor", "request_id",

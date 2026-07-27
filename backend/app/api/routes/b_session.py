@@ -1,6 +1,6 @@
 """Four governance-authorized neutral session-lifecycle endpoints (BE2.3-BE2.4), plus the
-BE4b adaptive next-question selection endpoint (BEplan §9 BE4.2) and the BE4c attempt-submission
-endpoint (BEplan §9 BE4.3 + BE4.4)."""
+BE4b adaptive next-question selection endpoint (BEplan §9 BE4.2), the BE4c attempt-submission
+endpoint (BEplan §9 BE4.3 + BE4.4), and the BE4d governed-hint endpoint (BEplan §9 BE4.5)."""
 
 from typing import Annotated
 from uuid import UUID
@@ -9,8 +9,10 @@ from fastapi import APIRouter, Depends, Header, Request, status
 
 from app.application.attempt_submission import AttemptSubmissionService
 from app.application.b_session_lifecycle import BSessionLifecycleService
+from app.application.hint_request import HintRequestService
 from app.application.opportunity_selection import OpportunitySelectionService
 from app.domain.b_attempt import AttemptResponse, SubmitResponseRequest
+from app.domain.b_hint import HintRequestResponse
 from app.domain.b_opportunity import OpportunityPresentationResponse
 from app.domain.b_session import ActiveSessionResponse, SessionCommandResponse
 from app.domain.principal import AuthenticatedPrincipal
@@ -30,6 +32,10 @@ def opportunity_selection_service() -> OpportunitySelectionService:
 
 def attempt_submission_service() -> AttemptSubmissionService:
     return AttemptSubmissionService()
+
+
+def hint_request_service() -> HintRequestService:
+    return HintRequestService()
 
 
 @router.post("", response_model=SessionCommandResponse, status_code=status.HTTP_201_CREATED)
@@ -103,4 +109,22 @@ async def submit_response(
 ) -> AttemptResponse:
     return await use_cases.submit_response(
         principal, session_id, item_opportunity_id, idempotency_key, request.state.request_id, body
+    )
+
+
+@router.post(
+    "/{session_id}/opportunities/{item_opportunity_id}/assists",
+    response_model=HintRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def request_assist(
+    session_id: UUID,
+    item_opportunity_id: UUID,
+    request: Request,
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_authenticated_principal)],
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=255)],
+    use_cases: Annotated[HintRequestService, Depends(hint_request_service)],
+) -> HintRequestResponse:
+    return await use_cases.request_hint(
+        principal, session_id, item_opportunity_id, idempotency_key, request.state.request_id
     )

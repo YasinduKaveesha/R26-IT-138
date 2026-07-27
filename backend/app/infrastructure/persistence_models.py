@@ -523,4 +523,36 @@ class SkillStateTransitionRecord(ProvenanceMixin, Base):
     p_l_after: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class HintEventRecord(ProvenanceMixin, Base):
+    """BE4d (BEplan §9 BE4.5): one row per governed L1/L2/L3 assist request on an opportunity.
+    PRIVATE table, SEPARATE from ``b_attempts``/``b_skill_state_transitions`` — a hint request is
+    never a mastery/BKT observation and this table is never joined into any BKT computation.
+    Column names avoid every ``PROHIBITED_COLUMN_TERMS`` entry (see
+    ``tests/test_be2_architecture_guards.py``): the governed hint level is spelled
+    ``assist_level``, not ``hint_level``. Only the catalogue reconstruction key
+    (``content_id`` + ``catalogue_version`` + ``catalogue_checksum``) is persisted — never the
+    hint text itself, which is always re-fetched from the governed catalogue via
+    ``LiveEngineAdapter.get_hint`` at request time."""
+
+    __tablename__ = "b_hint_events"
+    __table_args__ = (
+        UniqueConstraint("item_opportunity_id", "assist_level", name="uq_b_hint_events_opportunity_level"),
+        CheckConstraint("assist_level >= 1 AND assist_level <= 3", name="ck_b_hint_events_assist_level_bounded"),
+        *ProvenanceMixin.provenance_constraints("b_hint_events"),
+    )
+
+    assist_event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    item_opportunity_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_item_opportunities.item_opportunity_id", ondelete="RESTRICT"), nullable=False
+    )
+    learner_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False
+    )
+    assist_level: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    content_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    catalogue_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    catalogue_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    requested_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 AUTHORIZED_TABLES = frozenset(Base.metadata.tables)

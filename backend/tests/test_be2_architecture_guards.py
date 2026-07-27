@@ -25,12 +25,15 @@ EXPECTED_TABLES = {
     "b_learner_skill_states",
     # BE4c (BEplan §9 BE4.3 + BE4.4) — private attempt events + immutable BKT transitions.
     "b_attempts", "b_skill_state_transitions",
+    # BE4d (BEplan §9 BE4.5) — private governed hint events, separate from attempts/transitions.
+    "b_hint_events",
 }
 BE2_BASE_TABLES = EXPECTED_TABLES - {
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
     "b_item_opportunities", "b_task_instances", "b_presentation_tokens",
     "b_learner_skill_states",
     "b_attempts", "b_skill_state_transitions",
+    "b_hint_events",
 }
 PROHIBITED_COLUMN_TERMS = {
     "mastery", "bkt", "guess_guard", "certif", "sequenc", "hint", "answer",
@@ -102,6 +105,8 @@ EXPECTED_ROUTES = {
     ("/api/v1/b/sessions/{session_id}/opportunities", ("POST",)),
     # BE4c (BEplan §9 BE4.3 + BE4.4) — the one authorized attempt-submission route.
     ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/responses", ("POST",)),
+    # BE4d (BEplan §9 BE4.5) — the one authorized governed-hint-request route.
+    ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/assists", ("POST",)),
 }
 AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS = {
     ("/api/v1/classrooms/{classroom_id}/invites", ("POST",)),
@@ -125,6 +130,9 @@ AUTHORIZED_B_OPPORTUNITY_SELECTION_OPERATIONS = {
 }
 AUTHORIZED_B_ATTEMPT_SUBMISSION_OPERATIONS = {
     ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/responses", ("POST",)),
+}
+AUTHORIZED_B_HINT_REQUEST_OPERATIONS = {
+    ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/assists", ("POST",)),
 }
 PROHIBITED_SCIENTIFIC_PATH_TERMS = (
     "session", "attempt", "hint", "progress", "bkt", "mastery", "sequenc", "certif", "guess",
@@ -155,10 +163,11 @@ def test_no_session_question_answer_or_scientific_route_exists() -> None:
     """The blanket "session" path prohibition is carved out only for the four
     authorized BE2.3-BE2.4 neutral session-lifecycle routes plus the one BE4b adaptive-
     selection route (BEplan §9 BE4.2) plus the one BE4c attempt-submission route (BEplan §9
-    BE4.3 + BE4.4); every other prohibited scientific term remains prohibited unconditionally,
-    including on those routes themselves — in particular the selection and attempt-submission
-    routes must never contain "attempt", "hint", "progress", "bkt", "mastery", "sequenc",
-    "certif", or "guess"."""
+    BE4.3 + BE4.4) plus the one BE4d hint-request route (BEplan §9 BE4.5); every other
+    prohibited scientific term remains prohibited unconditionally, including on those routes
+    themselves — in particular the selection, attempt-submission, and hint-request routes must
+    never contain "attempt", "hint", "progress", "bkt", "mastery", "sequenc", "certif", or
+    "guess"."""
     for route in _current_routes():
         path, _ = route
         lowered = path.lower()
@@ -167,6 +176,7 @@ def test_no_session_question_answer_or_scientific_route_exists() -> None:
             route in AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS
             or route in AUTHORIZED_B_OPPORTUNITY_SELECTION_OPERATIONS
             or route in AUTHORIZED_B_ATTEMPT_SUBMISSION_OPERATIONS
+            or route in AUTHORIZED_B_HINT_REQUEST_OPERATIONS
         ):
             terms = tuple(term for term in terms if term != "session")
         assert not any(term in lowered for term in terms), path
@@ -177,6 +187,13 @@ def test_openapi_contains_exactly_the_one_authorized_b_attempt_submission_operat
     assert AUTHORIZED_B_ATTEMPT_SUBMISSION_OPERATIONS <= _current_routes()
     non_attempt_routes = {route for route in EXPECTED_ROUTES if route not in AUTHORIZED_B_ATTEMPT_SUBMISSION_OPERATIONS}
     assert _current_routes() - AUTHORIZED_B_ATTEMPT_SUBMISSION_OPERATIONS == non_attempt_routes
+
+
+def test_openapi_contains_exactly_the_one_authorized_b_hint_request_operation() -> None:
+    assert len(AUTHORIZED_B_HINT_REQUEST_OPERATIONS) == 1
+    assert AUTHORIZED_B_HINT_REQUEST_OPERATIONS <= _current_routes()
+    non_hint_routes = {route for route in EXPECTED_ROUTES if route not in AUTHORIZED_B_HINT_REQUEST_OPERATIONS}
+    assert _current_routes() - AUTHORIZED_B_HINT_REQUEST_OPERATIONS == non_hint_routes
 
 
 def test_openapi_contains_exactly_the_four_authorized_b_session_lifecycle_operations() -> None:

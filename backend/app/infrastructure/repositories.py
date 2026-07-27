@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence_models import (
     AppUser, AppUserLearnerLink, AttemptRecord, AuditEvent, Base, Classroom, ClassroomInvite,
-    ClassroomMembership, IdempotencyRecord, ItemOpportunityRecord, Learner,
+    ClassroomMembership, HintEventRecord, IdempotencyRecord, ItemOpportunityRecord, Learner,
     LearnerSkillStateRecord, PresentationTokenRecord, RuntimeBundleRecord,
     SessionEvent, SessionRecord, SkillStateTransitionRecord, TaskInstanceRecord, TeacherProfile,
 )
@@ -314,4 +314,16 @@ class SkillStateTransitionRepository(SqlAlchemyNeutralRepository[SkillStateTrans
     async def find_by_opportunity(self, item_opportunity_id: UUID) -> SkillStateTransitionRecord | None:
         return await self.session.scalar(
             select(SkillStateTransitionRecord).where(SkillStateTransitionRecord.item_opportunity_id == item_opportunity_id)
+        )
+
+
+class HintEventRepository(SqlAlchemyNeutralRepository[HintEventRecord]):
+    """BE4d (BEplan §9 BE4.5). SEPARATE from ``AttemptRepository``/``SkillStateTransitionRepository``
+    — a hint event never touches attempt or BKT-transition rows."""
+
+    model_type = HintEventRecord
+
+    async def count_for_opportunity(self, item_opportunity_id: UUID) -> int:
+        return await self.session.scalar(
+            select(func.count()).select_from(HintEventRecord).where(HintEventRecord.item_opportunity_id == item_opportunity_id)
         )
