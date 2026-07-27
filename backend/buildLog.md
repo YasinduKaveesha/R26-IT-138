@@ -5386,3 +5386,137 @@ migration, `test_be4d_hint_events.py` untracked; `b_session.py`, `persistence_mo
 
 This batch does NOT claim `BE4D_HINTS_RETRIES_BATCH_CLOSED` — a separate closure review decides
 that. Left uncommitted for Yasindu.
+
+---
+
+## 2026-07-28 — BE4e: completion, safe progress, and recovery (BEplan §9 BE4.6)
+
+Implements the next-or-complete opportunity/session transition, private session aggregation +
+Guess-Guard + certification, a SAFE session-standing view, and recovery paths, authorized by the
+same BE4 engineering-continuation instruction (TEST-provenance DRAFT only; no real-child/pilot/
+production; no GATE-B value). Builds on BE4a-d. New: `app/domain/b_completion.py` (strict
+`OpportunityAdvanceResponse`/`SessionStandingResponse` contracts), `app/application/
+session_completion.py` (`SessionCompletionService`), `migrations/versions/
+20260728_0003_be4e_session_completion.py` (`b_session_aggregate_results`,
+`b_skill_certification_results`), `tests/test_be4e_session_completion.py`. Changed:
+`persistence_models.py` (the two new tables), `repositories.py` (`SessionAggregateResultRepository`,
+`SkillCertificationResultRepository`, plus new query methods on `ItemOpportunityRepository`/
+`AttemptRepository`/`SkillStateTransitionRepository`), `app/api/routes/b_session.py` (two new
+routes), `app/application/opportunity_selection.py` (BE4b's selection endpoint made resumable;
+select/build/persist/token-issue logic factored into shared module-level functions —
+`resolve_bundle_and_catalogue`, `load_or_init_skill_states`, `open_adaptive_opportunity`,
+`reissue_presentation_for_open_opportunity` — reused by both BE4b and BE4e rather than duplicated),
+`tests/test_be2_architecture_guards.py` and `tests/test_be2_persistence.py` (allow-lists extended
+by name for the two tables + two routes), `tests/test_be4b_adaptive_selection.py` (one test updated
+— see "Recovery" below for why the old assertion no longer holds).
+
+**Routes:** `POST /api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/complete`
+(next-or-complete, atomic) and `GET /api/v1/b/sessions/{session_id}/summary` (SAFE standing) —
+neutral paths; "progress" (a prohibited scientific path term) never appears — "summary" is used
+instead, per the bounded prompt's own guidance. The `session` carve-out is extended to both routes
+only; every other prohibited path term (`attempt`, `hint`, `progress`, `bkt`, `mastery`, `sequenc`,
+`certif`, `guess`) is still enforced on them.
+
+**Scientific integrity.** Every scientific step goes through `LiveEngineAdapter` (lazy, function-
+scope import): `aggregate_session` folds the session's own attempts/hints/first-attempt outcomes
+(built from real `AttemptRecord`/`HintEventRecord`/`SkillStateTransitionRecord` rows, never
+synthesized) into first-attempt accuracy, retries, assisted-opportunity count, response-time
+stats, and per-skill estimated mastery; `plausibility_floor`/`evaluate` compute the per-skill
+Guess-Guard status from the learner's own per-skill response-time history (client-elapsed-ms
+telemetry, converted to seconds); `certify_skill` runs *inside* `aggregate_session` once
+`guard_statuses`/`theta_b` are supplied. No formula is reimplemented; the "median" RT is computed
+by calling the adapter's own `plausibility_floor` at `q=0.5, n_min=1` rather than a second quantile
+implementation. The pinned TEST_FIXTURE_ONLY `opportunity_selection._ENGINEERING_BKT_CONFIG` is
+reused unchanged (θ_B, floor_quantile, floor_min_obs) — never a GATE-B/population value.
+
+**GATE-B deferrals (not approved — recorded per the BE4e authorization and
+`provenance/component-b-closure-decisions.json`):**
+- **Completion policy**: "complete on command" — an opportunity completes when the client
+  explicitly calls the `/complete` route (gated on >=1 recorded attempt/timeout for that
+  opportunity, mirroring BE2's `b_session.complete`/`abandon` neutral-explicit-command pattern).
+  `MAX_OPPORTUNITIES_PER_SESSION = 5` (a fixed engineering session-length bound) decides
+  next-vs-complete-session; `COMPLETION_POLICY_VERSION` tags every persisted aggregate row so a
+  later governed policy change is traceable, never silently reinterpreted.
+- **Safe-progress policy**: `OpportunityAdvanceResponse`/`SessionStandingResponse` carry only
+  session state and coarse opportunity counts — no raw BKT value, no private selection rationale,
+  no Guess-Guard internals, no per-skill mastery/certification (architecturally GATE-B UNRESOLVED,
+  so not exposed even in aggregate form). Aggregation/Guess-Guard/certification are computed and
+  persisted PRIVATELY only.
+- θ_B and the Guess-Guard numerics are the same TEST_FIXTURE_ONLY engineering config BE4b/BE4c
+  already use; never promoted to "approved" by this batch.
+
+**Next-or-complete atomicity.** Closing the current opportunity, then either opening the next one
+(reusing BE4b's now-shared `open_adaptive_opportunity`) or transitioning the session to
+`completed` plus persisting the aggregate/certification rows, all happen inside one
+`SqlAlchemyUnitOfWork` and commit exactly once at the end of `complete_and_advance` — the same
+single-commit-point pattern `AttemptSubmissionService`/`HintRequestService` use. Any failure before
+that commit rolls back every step (including a partially-built next opportunity or partially-
+persisted aggregate), verified by `test_advance_requires_at_least_one_attempt` (fails closed with
+zero side effects) and the replay test (a duplicate request produces no second open/complete).
+
+**First-attempt-only is untouched.** `session_completion.py` never imports
+`LearnerSkillStateRepository` for writes and never inserts into `b_skill_state_transitions` — it
+only *reads* the transitions BE4c already wrote. `test_completion_creates_no_additional_bkt_
+transition_or_observation` asserts the transition-row count is unchanged by completion.
+
+**Privacy.** `test_public_advance_and_standing_responses_contain_no_private_fields` field-scans
+both public DTOs (and the nested `next_opportunity` presentation) against a forbidden-key set
+(`p_l*`, `predicted_probability`, `posterior_p_l`, `skill_estimate`, `certified`,
+`threshold_met_flag`, `plausibility_status`, `correct_answer`, `allowed_equivalent_answers`,
+`selection_provenance`, `theta_b`, `guard_status`) and asserts the exact safe field set. New
+PRIVATE-table column names avoid every `PROHIBITED_COLUMN_TERMS` entry: `outcome_pattern_
+distribution` not `error_class_distribution`, `assisted_opportunity_count` not `hint_bearing_
+opportunities`, `skill_estimate` not `mastery`/`p_l`, `threshold_met_flag` not `certified_flag`,
+`plausibility_status` not `guess_guard_status`, `first_attempt_match_count`/`_rate` not
+`first_attempt_correct_count`/`_rate`, and the `b_skill_certification_results` primary key is
+`skill_result_id` (not `skill_certification_result_id`, which the architecture guard's column-term
+scan rejected on first run — caught and fixed by the real full-suite run, see "Errors" below).
+
+**Recovery (BEplan §9 BE4.6 step 6).** Duplicate submission of `/complete` reuses the same
+`b_idempotency_records` mechanism as BE4c/BE4d (replay returns the original response, no second
+close/open/complete — `test_replay_with_same_idempotency_key_returns_same_response_without_
+second_effect`). App restart / a stale presentation token / a retried opportunity-select call are
+handled by making BE4b's `select_next_opportunity` resumable: if the session already has an OPEN
+opportunity, it now re-issues a fresh presentation token for that *same* opportunity
+(`reissue_presentation_for_open_opportunity`) instead of raising `ConflictError` — verified by
+`test_reselecting_with_an_open_opportunity_returns_the_same_opportunity_not_a_duplicate` and
+`test_stale_presentation_token_fails_closed_and_clean_reselect_succeeds` (an unknown/expired token
+still fails closed via `validate_presentation_token`, but a clean re-select recovers cleanly with
+no duplicate row). This intentionally changed BE4b's prior behavior, so
+`tests/test_be4b_adaptive_selection.py::test_one_open_opportunity_per_session_rejects_a_second_
+select` was renamed and its assertion updated to the new resumable contract, with an inline note
+explaining why.
+
+**Errors encountered and fixed (both caught by the real Docker+Postgres run, not by inline
+review):**
+1. `_build_opportunity_response` initially passed the raw `ItemOpportunityRecord` UUID as
+   `OpportunityResponse.item_opportunity_id`; the vendored package's `SessionSummary` validates
+   every opportunity id against `^STU-[0-9]{4}-B[0-9]{3}-I[0-9]{3}$` (and requires strictly
+   ascending item indices), which `aggregate_session` surfaced as a `LiveEngineError` ->
+   `ConflictError` on the very first "complete at bound" exercise. Fixed by deriving the same
+   package-format id BE4b's `build_task` already uses (`package_item_opportunity_id`), reused
+   rather than duplicated.
+2. `SkillCertificationResultRecord`'s primary key `skill_certification_result_id` contains
+   "certif" and tripped `test_exact_authorized_model_table_set_and_no_scientific_columns` on the
+   first full-suite run. Renamed to `skill_result_id` everywhere (model, migration, service).
+
+**Verification (Python 3.11.15, real Postgres 16.10, fresh isolated Docker network+containers —
+no compose file existed for this yet, so a network + `postgres:16.10-bookworm` container +
+`python:3.11.15-slim-bookworm` container with the vendored wheel installed were built ad hoc for
+this run):** migration upgrade -> downgrade(`20260728_0002`) -> re-upgrade cycle and schema (both
+new tables + their unique constraints); `alembic check` reports no drift after re-upgrade;
+`test_be3_live_engine_boundary.py`: **24 passed, 0 skipped** (not skipped). New
+`test_be4e_session_completion.py`: **9 passed** (migration cycle; below-bound advance
+closes-current-and-opens-exactly-one-next; at-bound completes the session and persists the
+aggregate + certification rows privately with the exact expected stats; completion requires >=1
+attempt; completion creates no additional BKT transition; idempotent replay; two recovery tests;
+public-DTO privacy scan). **Full suite: 219 passed, 0 failed** (two pre-existing-shape failures
+surfaced by this batch's own changes were fixed in the same run — the column-name violation and
+the BE4b resumability-contract test update above — then the full suite was re-run clean).
+`git status`: only `Dev/backend/` touched (`session_completion.py`, `b_completion.py`, the new
+migration, `test_be4e_session_completion.py` untracked; `b_session.py`, `opportunity_selection.py`,
+`persistence_models.py`, `repositories.py`, `test_be2_architecture_guards.py`,
+`test_be2_persistence.py`, `test_be4b_adaptive_selection.py` modified).
+
+This batch does NOT claim `BE4E_COMPLETION_RECOVERY_BATCH_CLOSED` — a separate closure review
+decides that. Left uncommitted for Yasindu.

@@ -350,7 +350,13 @@ def test_fails_closed_when_session_bundle_is_not_an_engineering_test_bundle() ->
     asyncio.run(exercise())
 
 
-def test_one_open_opportunity_per_session_rejects_a_second_select() -> None:
+def test_one_open_opportunity_per_session_resumes_the_same_opportunity_on_a_second_select() -> None:
+    """BE4e (BEplan §9 BE4.6 step 6) changed this from a hard reject to a resumable re-fetch: a
+    second select while one opportunity is still OPEN must recover app restart / a retried
+    network call / a stale presentation token by returning the *same* opportunity (fresh token,
+    no duplicate row) rather than raising ``ConflictError``. The DB-level one-open-per-session
+    invariant (``uq_b_item_opportunities_one_open_per_session``) is still what makes this safe —
+    see ``tests/test_be4e_session_completion.py`` for the dedicated recovery tests."""
     alembic("upgrade", "head")
 
     async def exercise() -> None:
@@ -364,8 +370,9 @@ def test_one_open_opportunity_per_session_rejects_a_second_select() -> None:
         first = await service.select_next_opportunity(principal, session_id, f"req-{uuid4()}")
         assert first.item_opportunity_id
 
-        with pytest.raises(ConflictError):
-            await service.select_next_opportunity(principal, session_id, f"req-{uuid4()}")
+        second = await service.select_next_opportunity(principal, session_id, f"req-{uuid4()}")
+        assert second.item_opportunity_id == first.item_opportunity_id
+        assert second.presentation_token != first.presentation_token
 
         await database_engine.dispose()
 

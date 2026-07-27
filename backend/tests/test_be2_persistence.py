@@ -47,6 +47,8 @@ EXPECTED_TABLES = {
     "b_attempts", "b_skill_state_transitions",
     # BE4d (BEplan §9 BE4.5) — private governed hint events, separate from attempts/transitions.
     "b_hint_events",
+    # BE4e (BEplan §9 BE4.6) — private, immutable session-aggregate + skill-certification results.
+    "b_session_aggregate_results", "b_skill_certification_results",
 }
 COMMON_COLUMNS = {
     "created_at_utc", "updated_at_utc", "actor_user_id", "system_actor", "request_id",

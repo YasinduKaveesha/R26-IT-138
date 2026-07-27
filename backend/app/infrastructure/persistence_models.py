@@ -555,4 +555,90 @@ class HintEventRecord(ProvenanceMixin, Base):
     requested_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class SessionAggregateResultRecord(ProvenanceMixin, Base):
+    """BE4e (BEplan §9 BE4.6): one immutable row per completed session — session-level aggregate
+    statistics computed via ``LiveEngineAdapter.aggregate_session`` from the session's own
+    attempts/hints/first-attempt outcomes. PRIVATE table: never read by any public-DTO projection
+    (see ``app.domain.b_completion``). Column names avoid every ``PROHIBITED_COLUMN_TERMS`` entry
+    (``outcome_pattern_distribution`` not ``error_class_distribution``,
+    ``assisted_opportunity_count`` not ``hint_bearing_opportunities``). No application code path
+    ever updates or deletes a row here."""
+
+    __tablename__ = "b_session_aggregate_results"
+    __table_args__ = (
+        UniqueConstraint("session_id", name="uq_b_session_aggregate_results_session"),
+        CheckConstraint(
+            "first_attempt_match_rate IS NULL OR (first_attempt_match_rate >= 0.0 AND first_attempt_match_rate <= 1.0)",
+            name="ck_b_session_aggregate_results_match_rate_bounded",
+        ),
+        CheckConstraint(
+            "completion_rate IS NULL OR (completion_rate >= 0.0 AND completion_rate <= 1.0)",
+            name="ck_b_session_aggregate_results_completion_rate_bounded",
+        ),
+        *ProvenanceMixin.provenance_constraints("b_session_aggregate_results"),
+    )
+
+    session_aggregate_result_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_sessions.session_id", ondelete="RESTRICT"), nullable=False
+    )
+    learner_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False
+    )
+    opportunity_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_attempt_match_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completion_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    completion_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_retry_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    assisted_opportunity_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    response_time_mean_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    response_time_median_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    response_time_std_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    outcome_pattern_distribution: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    skill_ids_practiced: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+    completion_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class SkillCertificationResultRecord(ProvenanceMixin, Base):
+    """BE4e (BEplan §9 BE4.6): one immutable row per (session, skill) roll-up — the TEST-fixture
+    plausibility-check and certification decision from ``LiveEngineAdapter.plausibility_floor``/
+    ``evaluate``/``certify_skill``. PRIVATE table; column names avoid every
+    ``PROHIBITED_COLUMN_TERMS`` entry (``skill_estimate`` not ``mastery``/``p_l``,
+    ``threshold_met_flag`` not ``certified_flag``, ``plausibility_status`` not
+    ``guess_guard_status``, ``first_attempt_match_count`` not ``first_attempt_correct_count``).
+    GATE-B deferred: theta_B and the plausibility numerics behind this row are the
+    TEST_FIXTURE_ONLY engineering config, never an approved value; never exposed through any
+    public DTO (see ``app.domain.b_completion``)."""
+
+    __tablename__ = "b_skill_certification_results"
+    __table_args__ = (
+        UniqueConstraint("session_id", "skill_id", name="uq_b_skill_certification_results_session_skill"),
+        CheckConstraint(
+            "skill_estimate IS NULL OR (skill_estimate >= 0.0 AND skill_estimate <= 1.0)",
+            name="ck_b_skill_certification_results_skill_estimate_bounded",
+        ),
+        CheckConstraint(
+            "plausibility_status IS NULL OR plausibility_status IN "
+            "('NOT_TRIGGERED', 'TRIGGERED', 'INSUFFICIENT_EVIDENCE')",
+            name="ck_b_skill_certification_results_plausibility_status",
+        ),
+        *ProvenanceMixin.provenance_constraints("b_skill_certification_results"),
+    )
+
+    skill_result_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_sessions.session_id", ondelete="RESTRICT"), nullable=False
+    )
+    learner_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False
+    )
+    skill_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    opportunity_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_attempt_match_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    skill_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    plausibility_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    threshold_met_flag: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+
 AUTHORIZED_TABLES = frozenset(Base.metadata.tables)

@@ -48,6 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.opportunity_persistence import OpportunityPersistenceService
 from app.core.errors import ConflictError, ForbiddenError, ResourceNotFoundError
 from app.domain.b_opportunity import (
+    OpportunityPresentationFields,
     OpportunityPresentationResponse,
     opportunity_presentation_fields,
     project_task_instance_to_presentation,
@@ -75,6 +76,7 @@ from app.infrastructure.repositories import (
     LearnerSkillStateRepository,
     RuntimeBundleRecordRepository,
     SessionRecordRepository,
+    TaskInstanceRepository,
 )
 from app.infrastructure.runtime_bundle.loader import RuntimeBundleLoader
 from app.infrastructure.unit_of_work import SqlAlchemyUnitOfWork
@@ -146,6 +148,12 @@ def _derive_global_seed(session_id: UUID) -> int:
     return int.from_bytes(digest[:8], "big")
 
 
+def student_number(learner_id: UUID) -> int:
+    """Deterministic 4-digit derivation from ``learner_id`` — see ``package_item_opportunity_id``
+    and ``package_student_id`` for the two package-format identifiers built from it."""
+    return int(hashlib.sha256(str(learner_id).encode()).hexdigest(), 16) % 10_000
+
+
 def package_item_opportunity_id(learner_id: UUID, b_session_index: int, opportunity_index: int) -> str:
     """The vendored package's ``GeneratedItemOpportunity.item_opportunity_id`` validator
     requires the exact format ``^STU-[0-9]{4}-B[0-9]{3}-I[0-9]{3}$`` (internal-only, opaque —
@@ -153,8 +161,16 @@ def package_item_opportunity_id(learner_id: UUID, b_session_index: int, opportun
     identity; the 4-digit student number here is a deterministic derivation from it purely to
     satisfy this format, not a second identity. Real global uniqueness of the opportunity is
     enforced separately, at the DB level, by ``ItemOpportunityRecord``'s UUID primary key."""
-    student_number = int(hashlib.sha256(str(learner_id).encode()).hexdigest(), 16) % 10_000
-    return f"STU-{student_number:04d}-B{b_session_index:03d}-I{opportunity_index:03d}"
+    return f"STU-{student_number(learner_id):04d}-B{b_session_index:03d}-I{opportunity_index:03d}"
+
+
+def package_student_id(learner_id: UUID) -> str:
+    """BE4e (BEplan §9 BE4.6): the vendored package's ``aggregate_session`` builds
+    ``session_id`` as ``f"{student_id}-B-{b_session_index:03d}"`` and validates it against
+    ``^STU-[0-9]{4}-B-[0-9]{3}$`` (see ``component_b_generator.aggregation.session``). Reuses the
+    same opaque, PII-free derivation as ``package_item_opportunity_id`` rather than inventing a
+    second student-identifier scheme."""
+    return f"STU-{student_number(learner_id):04d}"
 
 
 def provenance(user_id: UUID, request_id: str, operation: str, resource_type: str, resource_id: UUID) -> dict[str, object]:
@@ -245,6 +261,208 @@ def build_task(
     return adapter.build_task_instance(request, catalogue, catalogue_checksum)
 
 
+async def resolve_bundle_and_catalogue(
+    adapter: LiveEngineAdapter, bundle_record
+) -> tuple[Catalogue, str]:
+    """Shared engineering-bridge bundle/catalogue resolution (see module docstring) — reused by
+    BE4b's standalone selection endpoint and BE4e's next-or-complete transition (BEplan §9 BE4.2
+    + BE4.6) rather than duplicated. Fails closed (``ConflictError``) on any unknown bundle
+    version or mismatched/invalid catalogue."""
+    fixture = _ENGINEERING_TEST_BUNDLES.get(bundle_record.bundle_version)
+    if fixture is None:
+        raise ConflictError()
+    manifest_path, catalogue_path = fixture
+    try:
+        bundle = RuntimeBundleLoader().load_and_validate(
+            manifest_path,
+            RUNTIME_BUNDLE_SCHEMA_PATH,
+            artifact_paths={"catalogue": catalogue_path},
+            require_approved=False,
+        )
+        catalogue = adapter.load(catalogue_path)
+        catalogue_checksum = adapter.checksum(catalogue_path)
+        assert_catalogue_matches_bundle(bundle, catalogue, catalogue_checksum)
+    except (RuntimeBundleError, LiveEngineError) as exc:
+        raise ConflictError() from exc
+    return catalogue, catalogue_checksum
+
+
+async def load_or_init_skill_states(
+    session: AsyncSession,
+    learner_id: UUID,
+    bkt_config: BktConfig,
+    user_id: UUID,
+    request_id: str,
+) -> dict[str, float]:
+    """Module-level so BE4e's next-or-complete transition can reuse it without reaching into a
+    private ``OpportunitySelectionService`` method (BEplan §9 BE4.6)."""
+    repository = LearnerSkillStateRepository(session)
+    existing = {row.skill_id: row for row in await repository.list_for_learner(learner_id)}
+    mastery: dict[str, float] = {}
+    for skill_id in _SEVEN_SKILLS:
+        row = existing.get(skill_id)
+        if row is not None:
+            mastery[skill_id] = row.p_l
+            continue
+        p_l0 = bkt_config.skill_params[skill_id].p_l0
+        record_id = uuid4()
+        record = LearnerSkillStateRecord(
+            learner_skill_state_id=record_id,
+            learner_id=learner_id,
+            skill_id=skill_id,
+            p_l=p_l0,
+            observation_count=0,
+            **provenance(user_id, request_id, "b_learner_skill_state.initialized", "b_learner_skill_state", record_id),
+        )
+        session.add(record)
+        mastery[skill_id] = p_l0
+    await session.flush()
+    return mastery
+
+
+async def open_adaptive_opportunity(
+    *,
+    session: AsyncSession,
+    adapter: LiveEngineAdapter,
+    catalogue: Catalogue,
+    catalogue_checksum: str,
+    grade: int,
+    mastery: Mapping[str, float],
+    session_id: UUID,
+    learner_id: UUID,
+    runtime_bundle_record_id: UUID,
+    opportunity_index: int,
+    user_id: UUID,
+    request_id: str,
+) -> "OpportunityPresentationFields":
+    """Shared select -> build -> persist -> issue-token core (BEplan §9 BE4.2), reused by BE4b's
+    standalone selection endpoint and BE4e's next-or-complete transition (BEplan §9 BE4.6). No
+    persistence logic of its own beyond what BE4a's ``OpportunityPersistenceService`` already
+    provides."""
+    opportunity_service = OpportunityPersistenceService(session)
+
+    try:
+        selection_result = select_candidate(
+            adapter=adapter, catalogue=catalogue, bkt_config=_ENGINEERING_BKT_CONFIG, grade=grade, mastery=mastery
+        )
+    except LiveEngineError as exc:
+        raise ConflictError() from exc
+
+    selection_reason = selection_result.selection_reason
+    # One open opportunity per active session is enforced at the DB level (BE4a partial unique
+    # index) inside open_opportunity; callers of this function must have already established
+    # that no OPEN opportunity exists for this session (BE4b: brand-new session; BE4e: the prior
+    # opportunity was just closed in the same transaction).
+    opportunity = await opportunity_service.open_opportunity(
+        session_id=session_id,
+        learner_id=learner_id,
+        skill_id=selection_result.candidate.skill_id,
+        item_template_id=selection_result.candidate.item_template_id,
+        opportunity_index=opportunity_index,
+        selection_provenance={
+            "winning_item_template_id": selection_reason.winning_item_template_id,
+            "winning_skill_id": selection_reason.winning_skill_id,
+            "score": selection_reason.score,
+            "mastery_gap": selection_reason.mastery_gap,
+            "prerequisite_readiness": selection_reason.prerequisite_readiness,
+            "spacing_due": selection_reason.spacing_due,
+            "tie_broken": selection_reason.tie_broken,
+            "tie_break_basis": selection_reason.tie_break_basis,
+        },
+        timeout=DEFAULT_TIMEOUT,
+        provenance=provenance(user_id, request_id, "b_opportunity.opened", "b_item_opportunity", session_id),
+    )
+
+    try:
+        task_instance = build_task(
+            adapter=adapter,
+            catalogue=catalogue,
+            catalogue_checksum=catalogue_checksum,
+            selection=selection_result,
+            student_id=str(learner_id),
+            grade=grade,
+            item_opportunity_id=package_item_opportunity_id(learner_id, _B_SESSION_INDEX, opportunity_index),
+            opportunity_index=opportunity_index,
+            global_seed=_derive_global_seed(session_id),
+        )
+    except LiveEngineError as exc:
+        raise ConflictError() from exc
+
+    task_instance_record = await opportunity_service.create_task_instance(
+        item_opportunity_id=opportunity.item_opportunity_id,
+        item_template_id=task_instance.item_template_id,
+        skill_id=task_instance.skill_id,
+        grade=task_instance.grade,
+        difficulty_level=task_instance.difficulty_level,
+        representation_type=task_instance.representation_type,
+        response_format=task_instance.response_format,
+        prompt=task_instance.prompt,
+        correct_answer=task_instance.correct_answer,
+        allowed_equivalent_answers=task_instance.allowed_equivalent_answers,
+        distractor_candidates=task_instance.distractor_candidates,
+        distractor_rule_ids=task_instance.distractor_rule_ids,
+        generated_operands=task_instance.generated_operands,
+        generation_seed=task_instance.generation_seed,
+        applied_guard_ids=task_instance.applied_guard_ids,
+        catalogue_version=task_instance.catalogue_version,
+        catalogue_checksum=task_instance.catalogue_checksum,
+        provenance=provenance(user_id, request_id, "b_task_instance.created", "b_task_instance", opportunity.item_opportunity_id),
+    )
+
+    raw_token, _token_record = await opportunity_service.issue_presentation_token(
+        session_id=session_id,
+        item_opportunity_id=opportunity.item_opportunity_id,
+        learner_id=learner_id,
+        runtime_bundle_record_id=runtime_bundle_record_id,
+        ttl=PRESENTATION_TOKEN_TTL,
+        provenance=provenance(user_id, request_id, "b_presentation_token.issued", "b_presentation_token", opportunity.item_opportunity_id),
+    )
+
+    presented = project_task_instance_to_presentation(
+        task_instance_record,
+        presentation_token=raw_token,
+        server_timeout_deadline_utc=opportunity.timeout_deadline_utc,
+    )
+    return opportunity_presentation_fields(presented)
+
+
+async def reissue_presentation_for_open_opportunity(
+    *,
+    session: AsyncSession,
+    session_id: UUID,
+    learner_id: UUID,
+    runtime_bundle_record_id: UUID,
+    open_opportunity,
+    user_id: UUID,
+    request_id: str,
+) -> "OpportunityPresentationFields":
+    """BE4e recovery (BEplan §9 BE4.6 step 6): app restart, a stale/expired presentation token,
+    or a retried network call must be able to re-fetch the session's already-OPEN opportunity
+    without creating a duplicate — the BE4a partial unique index only prevents a *second* OPEN
+    opportunity, it does not itself provide a safe re-fetch path. Issues a fresh presentation
+    token bound to the same opportunity (the old token, if any, is left to expire naturally;
+    ``PresentationTokenRecord`` has no uniqueness constraint tying it to one token per
+    opportunity, so re-issuing is additive, not destructive)."""
+    opportunity_service = OpportunityPersistenceService(session)
+    task_instance_record = await TaskInstanceRepository(session).find_by_opportunity(open_opportunity.item_opportunity_id)
+    if task_instance_record is None:
+        raise ConflictError()
+    raw_token, _token_record = await opportunity_service.issue_presentation_token(
+        session_id=session_id,
+        item_opportunity_id=open_opportunity.item_opportunity_id,
+        learner_id=learner_id,
+        runtime_bundle_record_id=runtime_bundle_record_id,
+        ttl=PRESENTATION_TOKEN_TTL,
+        provenance=provenance(user_id, request_id, "b_presentation_token.reissued", "b_presentation_token", open_opportunity.item_opportunity_id),
+    )
+    presented = project_task_instance_to_presentation(
+        task_instance_record,
+        presentation_token=raw_token,
+        server_timeout_deadline_utc=open_opportunity.timeout_deadline_utc,
+    )
+    return opportunity_presentation_fields(presented)
+
+
 class OpportunitySelectionService:
     """BE4b application service: the ``POST /api/v1/b/sessions/{session_id}/opportunities``
     use case. Reuses BE4a's ``OpportunityPersistenceService`` for every persistence step; adds
@@ -264,37 +482,6 @@ class OpportunitySelectionService:
             raise ResourceNotFoundError()
         return user, link.learner_id
 
-    async def _load_or_init_skill_states(
-        self,
-        session: AsyncSession,
-        learner_id: UUID,
-        bkt_config: BktConfig,
-        user_id: UUID,
-        request_id: str,
-    ) -> dict[str, float]:
-        repository = LearnerSkillStateRepository(session)
-        existing = {row.skill_id: row for row in await repository.list_for_learner(learner_id)}
-        mastery: dict[str, float] = {}
-        for skill_id in _SEVEN_SKILLS:
-            row = existing.get(skill_id)
-            if row is not None:
-                mastery[skill_id] = row.p_l
-                continue
-            p_l0 = bkt_config.skill_params[skill_id].p_l0
-            record_id = uuid4()
-            record = LearnerSkillStateRecord(
-                learner_skill_state_id=record_id,
-                learner_id=learner_id,
-                skill_id=skill_id,
-                p_l=p_l0,
-                observation_count=0,
-                **provenance(user_id, request_id, "b_learner_skill_state.initialized", "b_learner_skill_state", record_id),
-            )
-            session.add(record)
-            mastery[skill_id] = p_l0
-        await session.flush()
-        return mastery
-
     async def select_next_opportunity(
         self, principal: AuthenticatedPrincipal, session_id: UUID, request_id: str
     ) -> OpportunityPresentationResponse:
@@ -312,6 +499,25 @@ class OpportunitySelectionService:
             if session_row.state != "active":
                 raise ConflictError()
 
+            # BE4e recovery (BEplan §9 BE4.6 step 6): app restart, a retried network call, or a
+            # stale presentation token must be able to re-fetch the session's already-OPEN
+            # opportunity rather than fail with the BE4a one-open-per-session conflict — see
+            # reissue_presentation_for_open_opportunity.
+            existing_open = await ItemOpportunityRepository(uow.session).find_open_for_session(session_id)
+            if existing_open is not None:
+                fields = await reissue_presentation_for_open_opportunity(
+                    session=uow.session,
+                    session_id=session_id,
+                    learner_id=learner_id,
+                    runtime_bundle_record_id=session_row.runtime_bundle_record_id,
+                    open_opportunity=existing_open,
+                    user_id=user.user_id,
+                    request_id=request_id,
+                )
+                response = OpportunityPresentationResponse(**fields.model_dump(), request_id=request_id)
+                await uow.commit()
+                return response
+
             learner_row = await LearnerRepository(uow.session).get_by_id(learner_id)
             if learner_row is None or learner_row.grade is None:
                 raise ConflictError()
@@ -320,121 +526,33 @@ class OpportunitySelectionService:
             bundle_record = await RuntimeBundleRecordRepository(uow.session).get_by_id(session_row.runtime_bundle_record_id)
             if bundle_record is None:
                 raise ConflictError()
-            fixture = _ENGINEERING_TEST_BUNDLES.get(bundle_record.bundle_version)
-            if fixture is None:
-                raise ConflictError()
-            manifest_path, catalogue_path = fixture
 
             from app.infrastructure.live_engine.adapter import LiveEngineAdapter  # see TYPE_CHECKING note above
 
             adapter = LiveEngineAdapter()
-            try:
-                bundle = RuntimeBundleLoader().load_and_validate(
-                    manifest_path,
-                    RUNTIME_BUNDLE_SCHEMA_PATH,
-                    artifact_paths={"catalogue": catalogue_path},
-                    require_approved=False,
-                )
-                catalogue = adapter.load(catalogue_path)
-                catalogue_checksum = adapter.checksum(catalogue_path)
-                assert_catalogue_matches_bundle(bundle, catalogue, catalogue_checksum)
-            except (RuntimeBundleError, LiveEngineError) as exc:
-                raise ConflictError() from exc
+            catalogue, catalogue_checksum = await resolve_bundle_and_catalogue(adapter, bundle_record)
 
-            mastery = await self._load_or_init_skill_states(
+            mastery = await load_or_init_skill_states(
                 uow.session, learner_id, _ENGINEERING_BKT_CONFIG, user.user_id, request_id
             )
 
-            opportunity_service = OpportunityPersistenceService(uow.session)
             existing_count = await ItemOpportunityRepository(uow.session).count_for_session(session_id)
             opportunity_index = existing_count + 1
 
-            try:
-                selection_result = select_candidate(
-                    adapter=adapter,
-                    catalogue=catalogue,
-                    bkt_config=_ENGINEERING_BKT_CONFIG,
-                    grade=grade,
-                    mastery=mastery,
-                )
-            except LiveEngineError as exc:
-                raise ConflictError() from exc
-
-            selection_reason = selection_result.selection_reason
-            # One open opportunity per active session is enforced at the DB level (BE4a partial
-            # unique index) inside open_opportunity; a concurrent/duplicate select for a session
-            # that already has an OPEN opportunity fails closed here with ConflictError.
-            opportunity = await opportunity_service.open_opportunity(
+            fields = await open_adaptive_opportunity(
+                session=uow.session,
+                adapter=adapter,
+                catalogue=catalogue,
+                catalogue_checksum=catalogue_checksum,
+                grade=grade,
+                mastery=mastery,
                 session_id=session_id,
-                learner_id=learner_id,
-                skill_id=selection_result.candidate.skill_id,
-                item_template_id=selection_result.candidate.item_template_id,
-                opportunity_index=opportunity_index,
-                selection_provenance={
-                    "winning_item_template_id": selection_reason.winning_item_template_id,
-                    "winning_skill_id": selection_reason.winning_skill_id,
-                    "score": selection_reason.score,
-                    "mastery_gap": selection_reason.mastery_gap,
-                    "prerequisite_readiness": selection_reason.prerequisite_readiness,
-                    "spacing_due": selection_reason.spacing_due,
-                    "tie_broken": selection_reason.tie_broken,
-                    "tie_break_basis": selection_reason.tie_break_basis,
-                },
-                timeout=DEFAULT_TIMEOUT,
-                provenance=provenance(user.user_id, request_id, "b_opportunity.opened", "b_item_opportunity", session_id),
-            )
-
-            try:
-                task_instance = build_task(
-                    adapter=adapter,
-                    catalogue=catalogue,
-                    catalogue_checksum=catalogue_checksum,
-                    selection=selection_result,
-                    student_id=str(learner_id),
-                    grade=grade,
-                    item_opportunity_id=package_item_opportunity_id(learner_id, _B_SESSION_INDEX, opportunity_index),
-                    opportunity_index=opportunity_index,
-                    global_seed=_derive_global_seed(session_id),
-                )
-            except LiveEngineError as exc:
-                raise ConflictError() from exc
-
-            task_instance_record = await opportunity_service.create_task_instance(
-                item_opportunity_id=opportunity.item_opportunity_id,
-                item_template_id=task_instance.item_template_id,
-                skill_id=task_instance.skill_id,
-                grade=task_instance.grade,
-                difficulty_level=task_instance.difficulty_level,
-                representation_type=task_instance.representation_type,
-                response_format=task_instance.response_format,
-                prompt=task_instance.prompt,
-                correct_answer=task_instance.correct_answer,
-                allowed_equivalent_answers=task_instance.allowed_equivalent_answers,
-                distractor_candidates=task_instance.distractor_candidates,
-                distractor_rule_ids=task_instance.distractor_rule_ids,
-                generated_operands=task_instance.generated_operands,
-                generation_seed=task_instance.generation_seed,
-                applied_guard_ids=task_instance.applied_guard_ids,
-                catalogue_version=task_instance.catalogue_version,
-                catalogue_checksum=task_instance.catalogue_checksum,
-                provenance=provenance(user.user_id, request_id, "b_task_instance.created", "b_task_instance", opportunity.item_opportunity_id),
-            )
-
-            raw_token, _token_record = await opportunity_service.issue_presentation_token(
-                session_id=session_id,
-                item_opportunity_id=opportunity.item_opportunity_id,
                 learner_id=learner_id,
                 runtime_bundle_record_id=session_row.runtime_bundle_record_id,
-                ttl=PRESENTATION_TOKEN_TTL,
-                provenance=provenance(user.user_id, request_id, "b_presentation_token.issued", "b_presentation_token", opportunity.item_opportunity_id),
+                opportunity_index=opportunity_index,
+                user_id=user.user_id,
+                request_id=request_id,
             )
-
-            presented = project_task_instance_to_presentation(
-                task_instance_record,
-                presentation_token=raw_token,
-                server_timeout_deadline_utc=opportunity.timeout_deadline_utc,
-            )
-            fields = opportunity_presentation_fields(presented)
             response = OpportunityPresentationResponse(**fields.model_dump(), request_id=request_id)
             await uow.commit()
             return response
