@@ -5848,3 +5848,91 @@ now-unused `getTimezone()` helper and `mobileAppVersion` import were removed fro
 `frontend/src/features/auth/authorized-placeholder-screen.tsx`. No backend file touched.
 
 Left uncommitted for Yasindu. Not run: any git command that mutates state.
+
+## 2026-07-28 — FE-1a: learner onboarding (profile, join-code, membership status)
+
+Implemented profile creation, classroom join-code resolve/confirm, and a new pending/approved
+membership-status screen against the frozen v1 contract's `learner-profile` and
+`classroom-invites`/`classroom-memberships` endpoints. No backend file touched. Out of scope and
+untouched: FE-1b teacher-side screens/endpoints, FE-2 session-prep, FE-3 opportunity/attempt/hint,
+and `AuthStatus`'s enum/gating logic (see open question below).
+
+**Contracts and validators (`contracts.ts`, `runtime-validation.ts`).** Re-exported
+`ProfileCreateRequest`, `InviteTokenRequest`, `InviteResolveResponse`, `MembershipRequestResponse`,
+`LearnerMembershipListResponse`, `LearnerMembershipListItem` from the generated types (no
+hand-rolled shapes). Added fail-closed validators for all of them, following the existing
+`is<TypeName>` pattern: `isProfileCreateRequest`, `isInviteTokenRequest`,
+`isInviteResolveResponse`, `isMembershipRequestResponse`, `isLearnerMembershipListResponse` (plus a
+private `isLearnerMembershipListItem` used for the array-of-items check). `grade` and `state` are
+checked against `Set`s of the contract's literal enum values.
+
+**New endpoint file (`learner-onboarding-api.ts`).** Added as a sibling to `component-b-api.ts`
+(kept separate rather than crowding it, since this is a different domain) with
+`createLearnerProfile`, `resolveClassroomInvite`, `requestClassroomMembership`,
+`listLearnerClassrooms` — each a thin wrapper over the shared `requestJson` from `client.ts`, no
+direct `fetch` calls. The three state-changing calls take a caller-supplied `idempotencyKey`; no
+new key-generation helper was added, matching the existing convention (session-preparation's
+`Crypto.randomUUID()` per call site).
+
+**Profile creation (`first-time-welcome-screen.tsx`).** Replaced the bare Continue button with a
+name field pre-filled from `profileName` (Supabase `display_name`) that the child can edit, then
+calls `POST /api/v1/learner/profile` with a `useRef`-held idempotency key (not persisted to
+SecureStore — a deliberate simplification versus the session-start pending-command pattern, since
+losing an in-flight profile-create on app kill is a low-frequency, low-harm case for this batch).
+On success, calls `retryAuthorization()` so `me.learnerProfile` comes from the server, then routes
+to `/(onboarding)/teacher-link`. On 422, shows a correction message and rotates to a fresh
+idempotency key (edited name = new action); on network/5xx, keeps the same key and lets the child
+retry.
+
+**Join-code screen (`teacher-link-instructions-screen.tsx`).** Replaced the QR placeholder and the
+`continueToComponentBPreview` dev-bypass entirely with real text entry (placeholder example
+`M7KP-4X9D`) and a two-step confirm: "Check code" calls `POST /classroom-invites/resolve` and shows
+`"{classroom_name}'s Grade {2|3} classroom — is this right?"` (or a generic "This classroom" if
+`classroom_name` is null) without auto-submitting; a second explicit "Yes, that's right" button
+calls `POST /classroom-memberships/requests` with the same invite token and its own fresh
+idempotency key, then routes to the new status screen with the created `classroom_membership_id`.
+On resolve, 422/404 (an unrecognized code) rotates to a fresh resolve key — a corrected code is a
+new action — and returns to code entry with a correction message; a network/5xx failure on resolve
+keeps the same resolve key and also returns to code entry, so the identical code can be retried
+without burning the key. On confirm, 422 rotates the membership key and returns to code entry the
+same way; network/5xx keeps the same membership key and stays on the preview step, so the
+previewed classroom isn't lost.
+
+**New pending/approved screen (`classroom-status-screen.tsx` + `app/(onboarding)/classroom-status.tsx`).**
+Calls `GET /api/v1/learner/classrooms` only on mount and on pull-to-refresh — never polls
+continuously while foregrounded, per frontend.md 15.10's don't-poll guidance applied by analogy.
+Matches the membership by the `membershipId` route param, falling back to the most recently
+requested item if absent. PENDING shows "Waiting for your teacher to approve"; APPROVED routes on
+to `/(learner)/home`; REJECTED shows a safe, non-shaming message with a "Try a different code"
+button back to the join-code screen.
+
+**Open question — not resolved here, needs a decision:** `auth-context.tsx`'s `authorizeSession`
+still sets `status: 'authorized'` as soon as `learnerProfile` exists, with no check on classroom
+membership state. Left unchanged per instructions, but flagging a concrete consequence: because
+step 3 above calls `retryAuthorization()` right after profile creation (as required), `status`
+flips to `'authorized'` *before* the child reaches the join-code or status screens, and
+`app/_layout.tsx`'s `Stack.Protected guard={learnerAccess}` will make `/(learner)` reachable (and
+`/(onboarding)` unreachable) at that point. In other words, with the current gating logic a learner
+could bypass or get pushed past the join-code/status flow immediately after profile creation. This
+is exactly the gate question raised in the batch: should `authorized` require an approved classroom
+membership, not just a learner profile? Needs a supervisor decision before this flow is fully
+reliable; no fix attempted here.
+
+**Verification** (from `frontend/`, all green):
+- `npx expo-doctor@latest` — 18/18 checks passed.
+- `npx tsc --noEmit` — clean (required regenerating `.expo/types/router.d.ts` via a brief offline
+  `expo start` so the two new route literals type-checked; that directory is gitignored and
+  regenerates automatically).
+- `npm run lint` — clean.
+- `npm run test:contract` — 4/4 passed, unregressed.
+
+**Files touched:** `frontend/src/api/contracts.ts`, `frontend/src/api/runtime-validation.ts`,
+`frontend/src/api/learner-onboarding-api.ts` (new),
+`frontend/src/features/onboarding/first-time-welcome-screen.tsx`,
+`frontend/src/features/onboarding/teacher-link-instructions-screen.tsx`,
+`frontend/src/features/onboarding/classroom-status-screen.tsx` (new),
+`frontend/app/(onboarding)/classroom-status.tsx` (new),
+`frontend/app/(onboarding)/welcome.tsx`, `frontend/app/(onboarding)/teacher-link.tsx` (stale
+deferred-work comments removed). No backend file touched.
+
+Left uncommitted for Yasindu. Not run: any git command that mutates state.

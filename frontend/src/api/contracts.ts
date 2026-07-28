@@ -1,11 +1,27 @@
 import type {
   AuthenticatedPrincipal,
+  InviteResolveResponse,
+  InviteTokenRequest,
+  LearnerMembershipListItem,
+  LearnerMembershipListResponse,
   LearnerProfileResponse,
+  MembershipRequestResponse,
+  ProfileCreateRequest,
   ReadinessResponse,
   SessionCommandResponse,
 } from '@/src/api/generated/openapi-types';
 
-export type { AuthenticatedPrincipal, LearnerProfileResponse, SessionCommandResponse };
+export type {
+  AuthenticatedPrincipal,
+  InviteResolveResponse,
+  InviteTokenRequest,
+  LearnerMembershipListItem,
+  LearnerMembershipListResponse,
+  LearnerProfileResponse,
+  MembershipRequestResponse,
+  ProfileCreateRequest,
+  SessionCommandResponse,
+};
 
 // GET /api/v1/me returns only the bare principal. Role/profile resolution is a separate call
 // (GET /api/v1/learner/profile); this app is child-facing only, so a null learnerProfile means
