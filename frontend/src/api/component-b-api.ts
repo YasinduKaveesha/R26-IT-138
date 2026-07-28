@@ -1,12 +1,12 @@
-import type { HealthReadyResponse, StartSessionRequest, StartSessionResponse } from '@/src/api/contracts';
+import type { HealthReadyResponse, SessionCommandResponse } from '@/src/api/contracts';
 import { requestJson } from '@/src/api/client';
 import { ApiClientError } from '@/src/api/errors';
-import { isHealthReadyResponse, isStartSessionResponse } from '@/src/api/runtime-validation';
+import { isHealthReadyResponse, isSessionCommandResponse } from '@/src/api/runtime-validation';
 import type { PublicConfig } from '@/src/config/env';
 
 type ComponentBApi = {
   checkReadiness: () => Promise<HealthReadyResponse>;
-  startSession: (request: StartSessionRequest, idempotencyKey: string, accessToken: string) => Promise<StartSessionResponse>;
+  startSession: (idempotencyKey: string, accessToken: string) => Promise<SessionCommandResponse>;
 };
 
 const fixtureFailures = new Set<string>();
@@ -43,7 +43,7 @@ function createFixtureApi(fixture: string): ComponentBApi {
         },
       };
     },
-    async startSession(_request, idempotencyKey) {
+    async startSession(idempotencyKey) {
       await fixtureDelay();
       if (fixture === 'network-failure-once' && !fixtureFailures.has(idempotencyKey)) {
         fixtureFailures.add(idempotencyKey);
@@ -52,16 +52,13 @@ function createFixtureApi(fixture: string): ComponentBApi {
       if (fixture === 'access-denied') {
         throw new ApiClientError('forbidden', 'Development access fixture denied the request.', 403, 'dev-forbidden');
       }
-      const resume = fixture === 'resume';
       return {
-        b_session_id: resume ? 'dev-session-resume-opaque' : 'dev-session-new-opaque',
-        current_opportunity_id: resume ? 'dev-opportunity-opaque' : null,
-        expires_at: '2026-07-22T12:00:00Z',
-        request_id: resume ? 'dev-resume-ok' : 'dev-start-ok',
-        resume,
+        created_at_utc: '2026-07-22T12:00:00Z',
+        request_id: 'dev-start-ok',
+        row_version: 1,
         runtime_bundle_version: 'development-fixture-only',
-        session_number: resume ? 4 : 1,
-        state: fixture === 'starting-response' ? 'starting' : 'active',
+        session_id: 'dev-session-new-opaque',
+        state: 'active',
       };
     },
   };
@@ -76,17 +73,13 @@ export function createComponentBApi(config?: PublicConfig): ComponentBApi {
 
   return {
     checkReadiness: () => requestJson(config, { method: 'GET', path: '/health/ready', validate: isHealthReadyResponse }),
-    // Not yet BE5-step-5 wired: the live POST /api/v1/b/sessions takes no request body and
-    // returns SessionCommandResponse, not this fixture-shaped StartSessionResponse — see the
-    // note on StartSessionResponse in contracts.ts.
-    startSession: (body, idempotencyKey, accessToken) =>
+    startSession: (idempotencyKey, accessToken) =>
       requestJson(config, {
         accessToken,
-        body,
         idempotencyKey,
         method: 'POST',
         path: '/api/v1/b/sessions',
-        validate: isStartSessionResponse,
+        validate: isSessionCommandResponse,
       }),
   };
 }

@@ -1,6 +1,10 @@
-import type { ApiErrorEnvelope, MeResponse } from '@/src/api/contracts';
+import type { ApiErrorEnvelope, AuthenticatedPrincipal, AuthorizedLearner } from '@/src/api/contracts';
 import { ApiClientError } from '@/src/api/errors';
-import { isApiErrorEnvelope, isMeResponse } from '@/src/api/runtime-validation';
+import {
+  isApiErrorEnvelope,
+  isAuthenticatedPrincipal,
+  isLearnerProfileResponse,
+} from '@/src/api/runtime-validation';
 import type { PublicConfig } from '@/src/config/env';
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -90,28 +94,67 @@ async function requestMeOnce(config: PublicConfig, accessToken: string) {
     accessToken,
     method: 'GET',
     path: '/api/v1/me',
-    validate: isMeResponse,
+    validate: isAuthenticatedPrincipal,
   });
+}
+
+async function requestLearnerProfileOnce(config: PublicConfig, accessToken: string) {
+  return requestJson(config, {
+    accessToken,
+    method: 'GET',
+    path: '/api/v1/learner/profile',
+    validate: isLearnerProfileResponse,
+  });
+}
+
+async function fetchPrincipal(
+  config: PublicConfig,
+  accessToken: string,
+  refreshAccessToken: RefreshAccessToken,
+): Promise<{ principal: AuthenticatedPrincipal; accessToken: string }> {
+  try {
+    return { accessToken, principal: await requestMeOnce(config, accessToken) };
+  } catch (error) {
+    if (!(error instanceof ApiClientError)) throw error;
+    if (error.kind === 'unauthenticated') {
+      const refreshedAccessToken = await refreshAccessToken();
+      if (!refreshedAccessToken) throw error;
+      return { accessToken: refreshedAccessToken, principal: await requestMeOnce(config, refreshedAccessToken) };
+    }
+    if (error.kind === 'network' || error.kind === 'timeout' || (error.kind === 'server' && (error.status ?? 0) >= 500)) {
+      await wait(SAFE_GET_RETRY_DELAY_MS);
+      return { accessToken, principal: await requestMeOnce(config, accessToken) };
+    }
+    throw error;
+  }
 }
 
 export async function getAuthorizedLearner(
   config: PublicConfig,
   accessToken: string,
   refreshAccessToken: RefreshAccessToken,
-): Promise<MeResponse> {
+): Promise<AuthorizedLearner> {
+  const { accessToken: verifiedAccessToken, principal } = await fetchPrincipal(
+    config,
+    accessToken,
+    refreshAccessToken,
+  );
+
   try {
-    return await requestMeOnce(config, accessToken);
+    const learnerProfile = await requestLearnerProfileOnce(config, verifiedAccessToken);
+    return { learnerProfile, principal };
   } catch (error) {
     if (!(error instanceof ApiClientError)) throw error;
-    if (error.kind === 'unauthenticated') {
-      const refreshedAccessToken = await refreshAccessToken();
-      if (!refreshedAccessToken) throw error;
-      return requestMeOnce(config, refreshedAccessToken);
-    }
-    if (error.kind === 'network' || error.kind === 'timeout' || (error.kind === 'server' && (error.status ?? 0) >= 500)) {
-      await wait(SAFE_GET_RETRY_DELAY_MS);
-      return requestMeOnce(config, accessToken);
-    }
-    throw error;
+    // A clean 404 means "no learner profile yet" -> onboarding. Anything else (network,
+    // 5xx, unexpected 4xx) fails closed as unavailable rather than guessing at onboarding.
+    if (error.status === 404) return { learnerProfile: null, principal };
+    if (error.kind === 'unauthenticated' || error.kind === 'forbidden') throw error;
+    throw new ApiClientError(
+      'unavailable',
+      'We could not verify the learner profile.',
+      error.status,
+      error.requestId,
+      error.envelope,
+    );
   }
 }

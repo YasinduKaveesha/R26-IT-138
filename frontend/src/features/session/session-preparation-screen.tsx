@@ -12,12 +12,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { PendingStartSessionCommand, StartSessionResponse } from '@/src/api/contracts';
+import type { PendingStartSessionCommand, SessionCommandResponse } from '@/src/api/contracts';
 import { createComponentBApi, getComponentBDevelopmentFixture } from '@/src/api/component-b-api';
 import { ApiClientError } from '@/src/api/errors';
 import { useAuth } from '@/src/auth/auth-context';
 import { AppText } from '@/src/components/app-text';
-import { mobileAppVersion } from '@/src/config/app-version';
 import { readPublicConfig } from '@/src/config/env';
 import { LearnerTabBar } from '@/src/features/navigation/learner-tab-bar';
 import {
@@ -52,19 +51,10 @@ type PreparationPhase =
   | 'network-failure'
   | 'technical-failure';
 
-type LearnerView = { displayName: string; grade: 2 | 3 };
-
-function getTimezone() {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch {
-    return 'UTC';
-  }
-}
+type LearnerView = { displayName: string };
 
 function createStartCommand(): PendingStartSessionCommand {
   return {
-    body: { client_timezone: getTimezone(), mobile_app_version: mobileAppVersion },
     createdAt: new Date().toISOString(),
     endpoint: '/api/v1/b/sessions',
     idempotencyKey: Crypto.randomUUID(),
@@ -106,18 +96,20 @@ export function SessionPreparationScreen() {
   const mountedRef = useRef(true);
   const runningRef = useRef(false);
 
-  const openActiveSession = useCallback(async (response: StartSessionResponse) => {
+  const openActiveSession = useCallback(async (response: SessionCommandResponse) => {
+    // Resume/recovery via GET /api/v1/b/sessions/active is deferred to FE-2; a non-'active'
+    // state here (completed/abandoned) is treated as a technical failure for now.
     if (response.state !== 'active') {
       setPhase('technical-failure');
       return;
     }
-    await saveActiveSessionId(response.b_session_id);
+    await saveActiveSessionId(response.session_id);
     await clearPendingStartCommand();
     if (!mountedRef.current) return;
     setPhase('active-session');
     router.replace({
       pathname: '/(learner)/session/[sessionId]',
-      params: { sessionId: response.b_session_id },
+      params: { sessionId: response.session_id },
     });
   }, []);
 
@@ -155,11 +147,7 @@ export function SessionPreparationScreen() {
       if (!api) return;
       setPhase('starting-session');
       try {
-        const response = await api.startSession(
-          command.body,
-          command.idempotencyKey,
-          accessToken,
-        );
+        const response = await api.startSession(command.idempotencyKey, accessToken);
         await openActiveSession(response);
       } catch (error) {
         if (!mountedRef.current) return;
@@ -167,11 +155,7 @@ export function SessionPreparationScreen() {
           const refreshedToken = await getAccessToken(true);
           if (refreshedToken) {
             try {
-              const response = await api.startSession(
-                command.body,
-                command.idempotencyKey,
-                refreshedToken,
-              );
+              const response = await api.startSession(command.idempotencyKey, refreshedToken);
               await openActiveSession(response);
               return;
             } catch (retryError) {
@@ -237,12 +221,11 @@ export function SessionPreparationScreen() {
   useEffect(() => {
     mountedRef.current = true;
     if (fixture) {
-      setLearner({ displayName: 'Yass', grade: 2 });
+      setLearner({ displayName: 'Yass' });
       void checkReadiness();
-    } else if (status === 'authorized' && me?.learner?.active && me.roles.includes('learner')) {
+    } else if (status === 'authorized' && me?.learnerProfile) {
       setLearner({
-        displayName: me.learner.display_name?.trim() || profileName || 'Math Explorer',
-        grade: me.learner.grade,
+        displayName: me.learnerProfile.name.trim() || profileName || 'Math Explorer',
       });
       void checkReadiness();
     } else if (status === 'access-denied') {
@@ -259,7 +242,6 @@ export function SessionPreparationScreen() {
   const busy = phase === 'checking-identity' || phase === 'checking-readiness' || phase === 'starting-session';
   const disabled = busy || phase === 'access-denied' || phase === 'active-session';
   const displayName = learner?.displayName || profileName || 'Math Explorer';
-  const grade = learner?.grade ?? 2;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -313,16 +295,8 @@ export function SessionPreparationScreen() {
                 <AppText style={styles.lessonValue}>{previewLesson.skillLabel}</AppText>
               </View>
             </View>
-            <View style={styles.divider} />
-            <View style={styles.lessonColumn}>
-              <View style={[styles.lessonIcon, styles.gradeIcon]}>
-                <Ionicons color={colors.primaryForeground} name="school" size={compact ? 24 : 28} />
-              </View>
-              <View>
-                <AppText style={styles.lessonLabel}>Grade</AppText>
-                <AppText style={styles.lessonValue}>Grade {grade}</AppText>
-              </View>
-            </View>
+            {/* Grade badge removed: no `grade` field exists anywhere reachable from the frozen
+                v1 contract (AuthenticatedPrincipal/LearnerProfileResponse); do not invent one. */}
           </View>
 
           <View style={[styles.preparationCard, compact && styles.preparationCardCompact]}>
@@ -414,8 +388,6 @@ function PreparationItem({
 const styles = StyleSheet.create({
   brandArtwork: { aspectRatio: 1916 / 821, height: 68 },
   brandArtworkCompact: { height: 56 },
-  divider: { alignSelf: 'stretch', backgroundColor: colors.border, width: 1 },
-  gradeIcon: { backgroundColor: '#9466e8' },
   greeting: { flexShrink: 1, fontFamily: typography.fonts.body, fontSize: 25, lineHeight: 30, textAlign: 'right' },
   greetingCompact: { fontSize: 21, lineHeight: 25 },
   greetingName: { color: '#26A5FD', fontFamily: typography.fonts.heavy, fontSize: 33.75, lineHeight: 40.5 },

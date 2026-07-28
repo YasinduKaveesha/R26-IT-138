@@ -11,7 +11,7 @@ import {
 } from 'react';
 
 import { getAuthorizedLearner } from '@/src/api/client';
-import type { MeResponse } from '@/src/api/contracts';
+import type { AuthorizedLearner } from '@/src/api/contracts';
 import { ApiClientError } from '@/src/api/errors';
 import { getSupabaseClient } from '@/src/auth/supabase';
 import { readPublicConfig, type PublicConfig } from '@/src/config/env';
@@ -40,7 +40,7 @@ type AuthActionResult =
   | { ok: false; message: string };
 
 type AuthContextValue = {
-  me: MeResponse | null;
+  me: AuthorizedLearner | null;
   notice: string | null;
   profileName: string | null;
   status: AuthStatus;
@@ -81,7 +81,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const configResult = useMemo(() => readPublicConfig(), []);
   const config = configResult.config;
   const [status, setStatus] = useState<AuthStatus>('checking');
-  const [me, setMe] = useState<MeResponse | null>(null);
+  const [me, setMe] = useState<AuthorizedLearner | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [profileName, setProfileName] = useState<string | null>(null);
   const operationRef = useRef(0);
@@ -114,23 +114,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
         if (operation !== operationRef.current) return;
 
-        if (!authorizedUser.learner) {
+        if (!authorizedUser.learnerProfile) {
           setMe(authorizedUser);
           setStatus('onboarding');
           return;
         }
 
-        if (!authorizedUser.roles.includes('learner') || !authorizedUser.learner.active) {
-          setMe(null);
-          setStatus('access-denied');
-          setNotice(
-            'This account does not have active learner access. Please ask a supervisor for help.',
-          );
-          return;
-        }
-
         setMe(authorizedUser);
-        setProfileName(authorizedUser.learner.display_name?.trim() || readDisplayName(session));
+        setProfileName(authorizedUser.learnerProfile.name.trim() || readDisplayName(session));
         setStatus('authorized');
       } catch (error) {
         if (operation !== operationRef.current) return;

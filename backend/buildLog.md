@@ -5779,3 +5779,72 @@ which Node's native type-stripping can't erase on its own):
 
 This batch does NOT claim `BE5A_CONTRACT_FREEZE_BATCH_CLOSED` — a separate review decides that.
 Left uncommitted for Yasindu.
+
+## 2026-07-28 — Frontend auth/identity rewiring against the frozen v1 contract (BE5 step 5, part 1)
+
+Reconciled the four stale `contracts.ts` types identified in the BE5a batch above against the real
+generated shapes in `frontend/src/api/generated/openapi-types.ts`, and updated the minimum
+consumer code required for them to compile and behave correctly. No backend file touched; no
+classroom/invite/membership, opportunity/attempt/hint/complete, or session-recovery endpoints
+touched (those remain FE-1a/FE-1b/FE-3/FE-2 scope).
+
+**Identity (`contracts.ts`, `runtime-validation.ts`, `client.ts`, `auth-context.tsx`).** Deleted
+the fictional `MeResponse` (`roles`/`learner`/`request_id`). `GET /api/v1/me` now types and
+validates as the real `AuthenticatedPrincipal` (`user_id`, optional `email`) via a new
+`isAuthenticatedPrincipal`. Role/profile resolution is the separate `GET /api/v1/learner/profile`
+call, typed/validated against the real `LearnerProfileResponse` via a new
+`isLearnerProfileResponse`. `client.ts`'s `getAuthorizedLearner` now fetches both — principal first
+(preserving the existing unauthenticated-refresh and 5xx-retry-once behavior), then the learner
+profile using whatever access token the principal fetch ended up succeeding with — and returns a
+new composed `AuthorizedLearner = { principal, learnerProfile }` type (added to `contracts.ts`). A
+clean `404` on the profile call maps to `learnerProfile: null` (onboarding, matching prior
+routing); `401`/`403` propagate unchanged for existing handling; anything else (network, 5xx,
+unexpected 4xx) is wrapped as `ApiClientError('unavailable', ...)` — fails closed rather than
+guessing at onboarding. `auth-context.tsx`'s `me` state and `authorizeSession` now key off
+`AuthorizedLearner`/`learnerProfile` instead of the fictional `roles`/`learner.active`/
+`learner.grade`; the `AuthStatus` enum and its meanings are unchanged, only what drives them.
+`learner-home-screen.tsx` and `authorized-placeholder-screen.tsx` (both consumers of
+`useAuth().me`) updated to read `me.learnerProfile.name` instead of `me.learner.display_name`.
+
+**No `grade` field exists anywhere reachable from `AuthenticatedPrincipal` or
+`LearnerProfileResponse`.** `session-preparation-screen.tsx` previously rendered "Grade {grade}"
+from the fictional `me.learner.grade`. Removed that badge and its now-dead `gradeIcon`/`divider`
+styles entirely rather than fabricating a value; left a one-line comment at the removal site
+pointing at the gap. No replacement grade selector or other compensation added — out of scope.
+
+**Session start (`contracts.ts`, `runtime-validation.ts`, `component-b-api.ts`,
+`session-preparation-screen.tsx`).** Deleted `StartSessionRequest` (`POST /api/v1/b/sessions`
+takes no request body, only a required `Idempotency-Key` header) and the fictional
+`StartSessionResponse` (`b_session_id`/`resume`/`current_opportunity_id`/`expires_at`/
+`session_number`); consumers now use the real generated `SessionCommandResponse`
+(`session_id`/`state: 'active'|'completed'|'abandoned'`/`runtime_bundle_version`/
+`created_at_utc`/`row_version`/`request_id`), re-exported from `contracts.ts`.
+`PendingStartSessionCommand.body` is deleted (nothing to persist/replay beyond the idempotency
+key). `component-b-api.ts`'s `startSession` takes just `(idempotencyKey, accessToken)` — no body
+parameter — and validates responses with a new `isSessionCommandResponse` (replacing
+`isStartSessionResponse`); the dev fixture's `createFixtureApi` returns the real
+`SessionCommandResponse` shape and no longer branches on `resume`/`starting-response` fixture
+names (removed from `.env.example`'s documented fixture list too, since those fields no longer
+exist to fixture). `session-preparation-screen.tsx`'s `openActiveSession` now treats
+`state === 'active'` as success (routes via `response.session_id`) and any other state
+(`'completed'`/`'abandoned'`) as `technical-failure`; a one-line comment notes that resume
+detection via `GET /api/v1/b/sessions/active` is deferred to FE-2, not implemented here.
+`createStartCommand` no longer builds a `client_timezone`/`mobile_app_version` body, so the
+now-unused `getTimezone()` helper and `mobileAppVersion` import were removed from that screen.
+
+**Verification** (from `frontend/`, all green):
+- `npx expo-doctor@latest` — 18/18 checks passed.
+- `npx tsc --noEmit` — clean.
+- `npm run lint` — clean (required `NODE_OPTIONS=--max-old-space-size=4096` in this environment;
+  the default heap OOM'd on `expo lint`, unrelated to this batch's changes).
+- `npm run test:contract` — 4/4 passed, unregressed (frozen-artefact checksum, generated-types
+  staleness, `isHealthReadyResponse` fail-closed-per-field, dev-fixture env gating).
+
+**Files touched:** `frontend/.env.example`, `frontend/src/api/contracts.ts`,
+`frontend/src/api/runtime-validation.ts`, `frontend/src/api/client.ts`,
+`frontend/src/api/component-b-api.ts`, `frontend/src/auth/auth-context.tsx`,
+`frontend/src/features/session/session-preparation-screen.tsx`,
+`frontend/src/features/home/learner-home-screen.tsx`,
+`frontend/src/features/auth/authorized-placeholder-screen.tsx`. No backend file touched.
+
+Left uncommitted for Yasindu. Not run: any git command that mutates state.

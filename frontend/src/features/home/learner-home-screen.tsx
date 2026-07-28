@@ -67,7 +67,7 @@ export function LearnerHomeScreen() {
   const insets = useSafeAreaInsets();
   const compact = height < 760;
   const { me, profileName } = useAuth();
-  const displayName = me?.learner?.display_name?.trim() || profileName || 'Yass';
+  const displayName = me?.learnerProfile?.name.trim() || profileName || 'Yass';
   const openBLearning = () => router.push('/(learner)/prepare');
   const scrollRef = useRef<ScrollView>(null);
   const dismissTriggeredRef = useRef(heroDismissedThisAppSession);

@@ -1,9 +1,10 @@
 import type {
   ApiErrorEnvelope,
+  AuthenticatedPrincipal,
   HealthReadyResponse,
-  MeResponse,
+  LearnerProfileResponse,
   PendingStartSessionCommand,
-  StartSessionResponse,
+  SessionCommandResponse,
 } from '@/src/api/contracts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -34,40 +35,28 @@ export function isApiErrorEnvelope(value: unknown): value is ApiErrorEnvelope {
   );
 }
 
-export function isMeResponse(value: unknown): value is MeResponse {
+export function isAuthenticatedPrincipal(value: unknown): value is AuthenticatedPrincipal {
   if (!isRecord(value)) return false;
-
-  const validRoles = new Set(['learner', 'supervisor', 'operator']);
-  const rolesAreValid =
-    Array.isArray(value.roles) &&
-    value.roles.every((role) => typeof role === 'string' && validRoles.has(role));
-
-  const learner = value.learner;
-  const learnerIsValid =
-    learner === null ||
-    (isRecord(learner) &&
-      isNonEmptyString(learner.learner_id) &&
-      (learner.grade === 2 || learner.grade === 3) &&
-      typeof learner.active === 'boolean' &&
-      (learner.display_name === undefined || typeof learner.display_name === 'string'));
-
   return (
     isNonEmptyString(value.user_id) &&
-    rolesAreValid &&
-    learnerIsValid &&
+    (value.email === undefined || value.email === null || typeof value.email === 'string')
+  );
+}
+
+export function isLearnerProfileResponse(value: unknown): value is LearnerProfileResponse {
+  if (!isRecord(value)) return false;
+  return (
+    isNonEmptyString(value.learner_id) &&
+    isNonEmptyString(value.user_id) &&
+    isNonEmptyString(value.name) &&
+    (value.email === null || typeof value.email === 'string') &&
+    value.profile_type === 'LEARNER' &&
+    isNonEmptyString(value.created_at_utc) &&
     isNonEmptyString(value.request_id)
   );
 }
 
-const sessionStates = new Set([
-  'starting',
-  'active',
-  'completing',
-  'completed',
-  'abandoned',
-  'expired',
-  'technical_failed',
-]);
+const sessionCommandStates = new Set(['active', 'completed', 'abandoned']);
 
 export function isHealthReadyResponse(value: unknown): value is HealthReadyResponse {
   const checksAreValid =
@@ -84,31 +73,25 @@ export function isHealthReadyResponse(value: unknown): value is HealthReadyRespo
   );
 }
 
-export function isStartSessionResponse(value: unknown): value is StartSessionResponse {
+export function isSessionCommandResponse(value: unknown): value is SessionCommandResponse {
   return (
     isRecord(value) &&
-    isNonEmptyString(value.b_session_id) &&
-    Number.isInteger(value.session_number) &&
-    (value.session_number as number) > 0 &&
+    isNonEmptyString(value.session_id) &&
     typeof value.state === 'string' &&
-    sessionStates.has(value.state) &&
-    typeof value.resume === 'boolean' &&
-    (value.current_opportunity_id === null || isNonEmptyString(value.current_opportunity_id)) &&
+    sessionCommandStates.has(value.state) &&
     isNonEmptyString(value.runtime_bundle_version) &&
-    isNonEmptyString(value.expires_at) &&
-    !Number.isNaN(Date.parse(value.expires_at)) &&
+    isNonEmptyString(value.created_at_utc) &&
+    Number.isInteger(value.row_version) &&
     isNonEmptyString(value.request_id)
   );
 }
 
 export function isPendingStartSessionCommand(value: unknown): value is PendingStartSessionCommand {
-  if (!isRecord(value) || !isRecord(value.body)) return false;
+  if (!isRecord(value)) return false;
   return (
     value.kind === 'start_session' &&
     value.endpoint === '/api/v1/b/sessions' &&
     isNonEmptyString(value.idempotencyKey) &&
-    isNonEmptyString(value.createdAt) &&
-    isNonEmptyString(value.body.client_timezone) &&
-    isNonEmptyString(value.body.mobile_app_version)
+    isNonEmptyString(value.createdAt)
   );
 }
