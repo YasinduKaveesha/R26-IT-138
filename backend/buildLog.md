@@ -5677,3 +5677,105 @@ no compose file exists yet, matching BE4e's own ad hoc verification setup):**
 
 This batch does NOT claim `BE4_LIVE_LEARNING_FLOW_BATCH_CLOSED` — a separate review decides that
 (the overall BE4 Exit-Gate identifier). Left uncommitted for Yasindu.
+
+## 2026-07-28 — BE5a: freeze & version the frontend contract (BEplan §10 steps 1-4, 8, 10)
+
+Engineering-only, contract-shape batch — no route behavior change, no new endpoint, no scientific
+logic touched. Froze the live `app.openapi()` and generated/checked TypeScript types from it on
+the frontend side, adding drift tests on both sides against one shared artefact.
+
+**Frozen artefact.** `backend/contract/openapi.v1.json` (2,622 lines, produced by
+`app.openapi()` under the project's own `python:3.11.15-slim-bookworm` Docker image — the local
+host has no 3.11/3.12 interpreter, same constraint as every prior batch) plus
+`backend/contract/openapi.v1.meta.json` (`contract_version: "v1"`,
+`checksum_sha256: 910fde8ef0d2ff7d09fc0edcf8479811d599691db0fba764e1df7d85375d44fc`). Its route
+set (25 distinct paths / 28 operations) matches `test_be2_architecture_guards.py::EXPECTED_ROUTES`
+exactly (asserted as a set, not a hardcoded count).
+
+**No-private-field guarantee.** `test_be5a_contract_freeze.py::test_no_private_or_scientific_
+field_name_in_frozen_schema` scans every `components.schemas.*.properties` key (not description
+text — docstrings on several of these models legitimately discuss BKT/mastery/distractors as
+what is NOT exposed, so a naive substring scan over the whole JSON would false-positive) against
+the same forbidden-term set `test_be2_architecture_guards.py` uses at the DB-column layer
+(`mastery`, `bkt`, `answer`, `correct`, `distractor`, `seed`, `provenance`, and more). Zero
+offenders — independently confirms BE4's private/public DTO split holds at the API-schema layer.
+
+**Backend drift tests** (`test_be5a_contract_freeze.py`, 4 new tests): live `app.openapi()` ==
+frozen JSON; frozen file's own sha256 == the committed meta checksum; frozen route set ==
+`EXPECTED_ROUTES` == live route set; the no-private-field scan above.
+
+**Generated TypeScript types.** `frontend/scripts/generate-contract-types.mjs` — a small,
+dependency-free, deterministic OpenAPI-schema-to-TS-interface generator (no `openapi-typescript`
+install; handles `$ref`, `anyOf`, `const`, `enum`, and `additionalProperties` as they actually
+appear in this schema) — mechanically emits `frontend/src/api/generated/openapi-types.ts` (one
+`interface` per component schema, alphabetically ordered, plus a `CONTRACT_OPERATIONS`
+path/operation index). Committed output is verified non-stale by a frontend test that re-runs the
+generator in-memory and diffs it against the committed file.
+
+**Frontend reconciliation — real finding.** Comparing the frozen artefact against the existing
+handwritten `frontend/src/api/contracts.ts` surfaced that most of it predates the real backend:
+`/api/v1/me` returns only `AuthenticatedPrincipal{user_id, email}` (no `roles`/`learner`/
+`request_id`), and `POST /api/v1/b/sessions` takes no request body and returns
+`SessionCommandResponse{session_id, state, runtime_bundle_version, created_at_utc, row_version,
+request_id}` — not the `b_session_id`/`session_number`/`resume`/`current_opportunity_id`/
+`expires_at` shape `contracts.ts`'s `MeResponse`/`StartSessionResponse` assume. Those two types
+are consumed throughout `auth-context.tsx`'s authorization gating and
+`session-preparation-screen.tsx`'s whole phase/navigation state machine — both currently exercised
+only via the `EXPO_PUBLIC_COMPONENT_B_DEV_FIXTURE` path, never against the live backend. Aligning
+them to reality is BE5 step 5 (wiring the session-prep/identity flow to real APIs), explicitly
+excluded from this BE5a batch (steps 1-4, 8, 10 only) — confirmed with the project director before
+proceeding. Left `MeResponse`/`StartSessionRequest`/`StartSessionResponse`/
+`PendingStartSessionCommand` unchanged, with an explicit code comment on each documenting the real
+shape and pointing at `openapi-types.ts`, so the gap is visible rather than silently papered over.
+Similarly, the real runtime error envelope (`app/core/errors.py` `ErrorResponse`/`ErrorBody`:
+schema_version plus a nested error object with code/message/request_id/details) is invisible to
+`app.openapi()` — FastAPI does not auto-register custom-exception-handler responses in the
+generated schema — so `ApiErrorEnvelope` (flat, with an unused `retryable` field) has no frozen
+artefact to reconcile against yet; left unchanged with the same kind of comment, and flagged as a
+follow-up (adding explicit `responses=` schema annotations to every route) rather than attempted
+here.
+
+**What WAS safely reconciled** (present in the frozen artefact, no screen/business-logic consumer
+to break): `HealthReadyResponse` in `contracts.ts` is now derived directly from the generated
+`ReadinessResponse` type instead of a hand-guessed partial shape; `isHealthReadyResponse` in
+`runtime-validation.ts` now requires `stage: "infrastructure"` and a `checks` string-map object
+(previously accepted partial/incorrect shapes) — strictly more fail-closed, never weaker.
+`component-b-api.ts`'s dev fixture literal for `checkReadiness()` was updated to match (adds
+`stage`/`checks`) — no behavior change, just keeps the fixture type-correct.
+
+**Frontend contract-check tests** (step 10) — `frontend/src/api/__tests__/contract-freeze.test.ts`,
+run via Node's built-in test runner (`node --import tsx --test`, `npm run test:contract`; added
+`tsx` as a devDependency since the app's own TypeScript uses constructor parameter properties,
+which Node's native type-stripping can't erase on its own):
+1. sha256 of the frontend's own read of `backend/contract/openapi.v1.json` matches
+   `openapi.v1.meta.json` (both sides checking the same artefact, not independently-trusted
+   copies).
+2. Re-running the generator in-memory produces byte-identical output to the committed
+   `openapi-types.ts` (no stale generated file).
+3. `isHealthReadyResponse` accepts a schema-derived valid `ReadinessResponse` sample and, for each
+   of the schema's required fields independently, rejects a sample with that field dropped
+   (fail-closed proven per-field, not just on the happy path).
+4. `getComponentBDevelopmentFixture()` returns null under `EXPO_PUBLIC_APP_ENV` set to staging,
+   production, or unset, even with `EXPO_PUBLIC_COMPONENT_B_DEV_FIXTURE` set, and only returns the
+   fixture name under development (BEplan step 8 — dev-fixture gating, asserted not assumed; the
+   guard already existed in `component-b-api.ts`, this batch adds the test).
+
+**Verification.**
+- Backend, Python 3.11.15 + real Postgres 16 (fresh Docker network + `postgres:16-alpine` + the
+  project's own `Dockerfile`, now also copying `contract/` into the image so the drift test can
+  read it in-container): `alembic upgrade head` stayed at unchanged `20260728_0003`; full suite
+  **236 passed, 0 failed, 0 skipped** in 189.94s (up from 232 — the 4 new BE5a tests), including
+  `test_be3_live_engine_boundary.py` and `test_be4f_parity.py` running for real (not skipped).
+- Frontend: `npx tsc --noEmit` clean; `npm run test:contract` — 4/4 passed.
+- `git status`: `backend/Dockerfile` (contract COPY line), `backend/contract/` (new, frozen
+  artefact + meta), `backend/tests/test_be5a_contract_freeze.py` (new);
+  `frontend/src/api/contracts.ts`, `frontend/src/api/runtime-validation.ts`,
+  `frontend/src/api/component-b-api.ts` (reconciliation + comments),
+  `frontend/src/api/generated/` (new, generated types),
+  `frontend/scripts/generate-contract-types.mjs` (new, the generator),
+  `frontend/src/api/__tests__/` (new, contract-freeze tests),
+  `frontend/package.json` and `package-lock.json` (`tsx` devDependency + two new scripts). No
+  other file touched; no `app/` route behavior changed.
+
+This batch does NOT claim `BE5A_CONTRACT_FREEZE_BATCH_CLOSED` — a separate review decides that.
+Left uncommitted for Yasindu.

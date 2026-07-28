@@ -22,6 +22,7 @@ RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app
 COPY --chown=10001:10001 app ./app
 COPY --chown=10001:10001 tests ./tests
+COPY --chown=10001:10001 contract ./contract
 COPY --chown=10001:10001 pytest.ini ./pytest.ini
 COPY --chown=10001:10001 alembic.ini ./alembic.ini
 COPY --chown=10001:10001 migrations ./migrations
