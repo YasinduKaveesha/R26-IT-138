@@ -24,11 +24,14 @@ characterization file cites) shows it is NOT reproducible through the adapter al
   attempt_loop`` (simulated attempts/timing), and ``generation.item_opportunities._draw_item_count``
   (a randomized per-session item count) to decide *how many* opportunities and *which* templates
   each of the 8 learners receives across 3 sessions.
-- Every one of those modules is explicitly listed as
-  ``explicitly_prohibited_from_application`` in
-  ``backend/provenance/component-b-live-engine-reuse-map.json`` ("cohort and cohort/*", "hidden
+- Every one of those modules is prohibited from the live application. ``cohort/*``,
+  ``behaviour.attempt_loop``, and ``pipeline`` are named in ``explicitly_prohibited_from_application``
+  in ``backend/provenance/component-b-live-engine-reuse-map.json`` ("cohort and cohort/*", "hidden
   learner truth", "component_b_generator.behaviour.first_attempt/.latency/.attempt_loop",
-  "component_b_generator.pipeline", "dataset-generation entry points", "experiment runners") and is
+  "component_b_generator.pipeline", "dataset-generation entry points", "experiment runners");
+  ``generation.item_opportunities`` is not named literally in that array but falls under
+  "dataset-generation entry points" and is independently enforced-unreachable by the boundary
+  guard (``tests/test_be3_live_engine_boundary.py``). Each is
   therefore, by design, never vendored into ``upadya-component-b-live-engine`` / never importable
   from ``app/`` (``tests/test_be3_live_engine_boundary.py``). No script reproducing this exact
   54-item sweep is checked into either the ``Yass`` research repo or this backend at any commit

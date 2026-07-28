@@ -60,11 +60,16 @@ the runtime-bundle loader already fails closed on anything but `APPROVED`. **Thi
 2. **Determinism is driven by real identity → seed lineage.** BE4 supplies `SeedManager` lineage coordinates
    (`student_id, scheduled_session_number, b_session_index, item_index`) from real session/opportunity rows, so
    `build_task_instance` is reproducible. Same inputs ⇒ identical `TaskInstance` ⇒ parity with the generator.
-3. **Parity is proven, not assumed.** A characterization-parity test pins the adapter-driven construction sweep
-   against the generator's own anchor recorded in `backend/provenance/component-b-characterization.json`:
-   `global_seed = 20260716`, 54 items,
-   `private_output_sha256 = b1d8cb3388ac7e47dd353af68210b24debf3d49791f40a6447ad57f74641926c`
-   (byte-identical across Python 3.10.20 and 3.11.15).
+3. **Parity is proven, not assumed.** The parity test asserts that `LiveEngineAdapter.build_task_instance` is
+   **byte-for-byte identical** to an independently-constructed direct call into the vendored package's own
+   `build_task_instance` (its own `GeneratedItemOpportunity`/`SeedManager`/`load_catalogue`, never via adapter
+   helpers), across all 29 implemented templates at every eligible grade, repeat-run deterministic. This proves
+   the adapter is a non-diverging pass-through — no formula/seed/sampler/distractor/guard reimplemented.
+   **Correction (BE4f):** the characterization digest `b1d8cb33…` (`config_version = b1-smoke-0.1.0`,
+   `global_seed = 20260716`, 54 items) in `component-b-characterization.json` is NOT the anchor and is **not
+   adapter-reproducible** — BE4f established it is a research **cohort-pipeline** output whose regeneration
+   requires the prohibited `pipeline`/`cohort`/`behaviour.attempt_loop`/item-count-draw modules. Reproducing it
+   would breach the reuse boundary, so the byte-identical A/B test above is the correct (and stronger) proof.
 
 ---
 
@@ -106,7 +111,8 @@ predecessor. Every batch enforces the §1.4 scientific non-negotiables + the §1
 - **New routes (BE4b–e):** `backend/app/api/routes/` alongside `b_session.py` (select / attempt / hint /
   complete).
 - **New tests:** `backend/tests/` — first-attempt-only, concurrency/replay, fail-closed, privacy-field scans,
-  and the **parity test** pinning `private_output_sha256 = b1d8cb33…` (seed 20260716, 54 items).
+  and the **parity test** asserting `adapter.build_task_instance` == the vendored package's own
+  `build_task_instance` byte-for-byte (all 29 templates × eligible grades), repeat-run deterministic.
 
 ---
 
@@ -123,9 +129,10 @@ predecessor. Every batch enforces the §1.4 scientific non-negotiables + the §1
 
 ## 7. Verification (end-to-end)
 
-1. **Parity (the "same characters" proof):** run the adapter-driven construction sweep with
-   `global_seed = 20260716` and confirm the canonical serialization SHA-256 equals
-   `b1d8cb3388ac7e47dd353af68210b24debf3d49791f40a6447ad57f74641926c`; repeat run byte-identical.
+1. **Parity (the "same characters" proof):** assert `adapter.build_task_instance` produces byte-for-byte
+   identical canonical JSON to an independent direct call into the vendored package's own `build_task_instance`
+   for identical inputs (all 29 implemented templates × eligible grades); repeat runs byte-identical. (The
+   `b1d8cb33…` characterization digest is a prohibited-pipeline output and is NOT adapter-reproducible — see §3.)
 2. **Import boundary:** `pytest backend/tests/test_be3_live_engine_boundary.py` stays green (13 prohibited
    modules unreachable; adapter the sole importer).
 3. **First-attempt-only BKT:** attempt-1 produces exactly one mastery transition; retries/hints produce none;
