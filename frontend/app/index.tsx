@@ -29,6 +29,6 @@ export default function BootstrapRoute() {
   if (status === 'authorized' || status === 'preview') {
     return <Redirect href="/(learner)/home" />;
   }
-  if (status === 'onboarding') return <Redirect href="/(onboarding)/welcome" />;
+  if (status === 'onboarding') return <Redirect href="/(onboarding)" />;
   return <Redirect href="/(auth)/sign-in" />;
 }

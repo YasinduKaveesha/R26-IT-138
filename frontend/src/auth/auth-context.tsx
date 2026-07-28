@@ -114,7 +114,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
         if (operation !== operationRef.current) return;
 
-        if (!authorizedUser.learnerProfile) {
+        const membershipApproved = authorizedUser.classroomMembership?.state === 'APPROVED';
+        if (!authorizedUser.learnerProfile || !membershipApproved) {
           setMe(authorizedUser);
           setStatus('onboarding');
           return;

@@ -25,10 +25,14 @@ export type {
 
 // GET /api/v1/me returns only the bare principal. Role/profile resolution is a separate call
 // (GET /api/v1/learner/profile); this app is child-facing only, so a null learnerProfile means
-// "no learner profile yet" (onboarding), never a teacher/operator role check.
+// "no learner profile yet" (onboarding), never a teacher/operator role check. classroomMembership
+// is the most relevant membership (see pickMembership) from GET /api/v1/learner/classrooms; null
+// means no membership has been requested yet. 'authorized' status requires both a profile and an
+// APPROVED membership — see auth-context.tsx's authorizeSession.
 export type AuthorizedLearner = {
   principal: AuthenticatedPrincipal;
   learnerProfile: LearnerProfileResponse | null;
+  classroomMembership: LearnerMembershipListItem | null;
 };
 
 export type ApiFieldIssue = { field: string; code: string };

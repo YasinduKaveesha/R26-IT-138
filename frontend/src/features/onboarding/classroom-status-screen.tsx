@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, V
 
 import type { LearnerMembershipListItem } from '@/src/api/contracts';
 import { listLearnerClassrooms } from '@/src/api/learner-onboarding-api';
+import { pickMembership } from '@/src/api/membership-selection';
 import { useAuth } from '@/src/auth/auth-context';
 import { AppText } from '@/src/components/app-text';
 import { ScreenShell } from '@/src/components/screen-shell';
@@ -12,20 +13,6 @@ import { readPublicConfig } from '@/src/config/env';
 import { colors, radius, spacing } from '@/src/theme/tokens';
 
 type StatusPhase = 'loading' | 'ready' | 'error';
-
-function pickMembership(
-  memberships: LearnerMembershipListItem[],
-  membershipId?: string,
-): LearnerMembershipListItem | null {
-  if (membershipId) {
-    const match = memberships.find((item) => item.membership_id === membershipId);
-    if (match) return match;
-  }
-  const sorted = [...memberships].sort(
-    (a, b) => new Date(b.requested_at_utc).getTime() - new Date(a.requested_at_utc).getTime(),
-  );
-  return sorted[0] ?? null;
-}
 
 function iconFor(
   phase: StatusPhase,

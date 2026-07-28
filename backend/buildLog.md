@@ -5936,3 +5936,65 @@ reliable; no fix attempted here.
 deferred-work comments removed). No backend file touched.
 
 Left uncommitted for Yasindu. Not run: any git command that mutates state.
+
+## 2026-07-28 — Classroom-membership gating + onboarding entry-routing
+
+Resolves the FE-1a open question with a supervisor-approved decision: `authorized` status now
+requires an APPROVED classroom membership, not just a learner profile. No backend file touched.
+Out of scope and untouched: FE-1b, FE-2, FE-3, the `AuthStatus` enum's members (only the
+data-condition driving `'authorized'` changed), and the already-correct in-flow forward navigation
+in welcome/teacher-link/classroom-status.
+
+**Shared membership-selection helper (`src/api/membership-selection.ts`, new).** Extracted the
+`pickMembership` function that `classroom-status-screen.tsx` already had locally (matches a
+membership by `membership_id` if given, else falls back to the most recently requested item) to a
+new small file under `src/api/`, since `client.ts` must not import from `src/features/`.
+`classroom-status-screen.tsx` now imports it from there instead of defining its own copy.
+
+**`AuthorizedLearner` extended (`contracts.ts`).** Added `classroomMembership:
+LearnerMembershipListItem | null` alongside the existing `principal`/`learnerProfile` fields.
+
+**`getAuthorizedLearner` extended (`client.ts`).** After `learnerProfile` resolves and is non-null,
+now also calls `listLearnerClassrooms` and picks the most relevant membership via the shared
+`pickMembership` (no `membershipId` — just "most recently requested"). Split into
+`getLearnerProfileOrNull` and the new `getClassroomMembershipOrNull`, both following the same
+fail-closed rule already used for the profile lookup: an empty membership list is a legitimate "no
+membership yet" state (`classroomMembership: null`), but network/5xx/unexpected errors wrap as
+`ApiClientError('unavailable', ...)` rather than silently guessing or crashing `/me` resolution.
+`client.ts` now imports `listLearnerClassrooms` from `learner-onboarding-api.ts`, which itself
+imports `requestJson` from `client.ts` — a function-level circular import, not a value-level one,
+so it resolves fine under Metro/TypeScript (confirmed by `tsc --noEmit` below).
+
+**Auth condition changed (`auth-context.tsx`).** `authorizeSession` now flips to `'authorized'`
+only when `learnerProfile` exists AND `classroomMembership?.state === 'APPROVED'`; any other
+combination (no profile, no membership, PENDING, REJECTED) sets `'onboarding'`, exactly as before
+but now membership-aware. No new `AuthStatus` values added — `'onboarding'` remains the single
+catch-all; which onboarding screen to show is a routing decision, not an auth-status decision.
+
+**New onboarding entry point (`app/(onboarding)/index.tsx`, new + `_layout.tsx`).** Added as the
+group's real entry/re-entry route (app boot, or returning to `(onboarding)` after being elsewhere),
+mirroring the root `app/index.tsx`'s status-based redirect pattern. Reads `me`/`status` from
+`useAuth()` and does a single `router.replace`: no `learnerProfile` -> `welcome`; profile but no
+`classroomMembership` -> `teacher-link`; membership present (PENDING or REJECTED; APPROVED never
+reaches here since that flips `AuthStatus` to `'authorized'` and the outer guard in `app/_layout.tsx`
+routes to `(learner)` first) -> `classroom-status` with `membershipId` param, matching how
+`teacher-link-instructions-screen.tsx` already navigates there after a fresh request. Renders only a
+loading state while `status === 'checking'` — never redirects on stale/incomplete data.
+`(onboarding)/_layout.tsx` now declares `<Stack.Screen name="index" />` first, mirroring how the
+root layout explicitly declares its own `index`. Also updated the root `app/index.tsx`'s onboarding
+case to redirect to `/(onboarding)` instead of hardcoding `/(onboarding)/welcome`, so app boot
+actually goes through the new entry-routing decision instead of bypassing it.
+
+**Verification** (from `frontend/`):
+- `npx expo-doctor@latest`
+- `npx tsc --noEmit`
+- `npm run lint`
+- `npm run test:contract` (must not regress against FE-1a's 4/4)
+
+**Files touched:** `frontend/src/api/membership-selection.ts` (new), `frontend/src/api/contracts.ts`,
+`frontend/src/api/client.ts`, `frontend/src/auth/auth-context.tsx`,
+`frontend/src/features/onboarding/classroom-status-screen.tsx`,
+`frontend/app/(onboarding)/index.tsx` (new), `frontend/app/(onboarding)/_layout.tsx`,
+`frontend/app/index.tsx`. No backend file touched.
+
+Left uncommitted for Yasindu. Not run: any git command that mutates state.
