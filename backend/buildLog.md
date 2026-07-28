@@ -5998,3 +5998,94 @@ actually goes through the new entry-routing decision instead of bypassing it.
 `frontend/app/index.tsx`. No backend file touched.
 
 Left uncommitted for Yasindu. Not run: any git command that mutates state.
+
+## 2026-07-29 — BE-G1: assign `Learner.grade` on classroom-membership approval (backend bug fix)
+
+**The bug.** `Learner.grade` was written in exactly one place in all of `backend/app/` —
+`application/profile_classroom.py:117`, which writes `grade=None` at learner-profile creation.
+Membership approval (`application/classroom_membership.py`, `approve_membership`) never touched
+it. But `application/opportunity_selection.py:521-523` fails closed with `ConflictError`/409 when
+`learner.grade is None`. Net effect: a learner could complete the entire onboarding flow —
+profile -> join code -> membership request -> teacher approval -> start session — and then EVERY
+question request 409'd forever. There was no path in the product to a usable learner, which
+blocked the per-screen "design UI -> integrate the real backend API -> test end-to-end" loop the
+frontend work is following. `test_be4f_transactional_sweep.py::setup_learner` had already
+documented the symptom in a comment (it sets `Learner.grade` directly in SQL to work around it);
+this batch removes the underlying cause.
+
+**The fix** (`app/application/classroom_membership.py`, the only production file changed).
+Inside `ClassroomMembershipService.approve_membership`, after the state/decision fields are set on
+the membership and before the `flush()`: load the membership's `Classroom` row, map its grade to
+the learner's integer grade, load the `Learner` for `membership.learner_id`, and assign it. The
+mapping is an EXPLICIT module-level dict —
+`_CLASSROOM_GRADE_TO_LEARNER_GRADE = {"GRADE_2": 2, "GRADE_3": 3}` — not string slicing or
+parsing. `Classroom.grade` is `String(16)` with a `GRADE_2|GRADE_3` check constraint;
+`Learner.grade` is a nullable `SmallInteger` with `ck_b_learners_grade` permitting only
+`NULL|2|3`. An explicit dict raises `KeyError` if a third classroom grade is ever added, which is
+the desired behavior: a silent mis-map here would corrupt catalogue eligibility. The write sits
+inside the existing advisory xact lock (`classroom_membership.approve:{learner_id}`) and the
+`with_for_update()` on the membership row, so it is race-safe; no additional lock was added.
+
+**SCOPE NOTE — explicitly stated.** `grade` here is ROSTER METADATA the teacher already chose
+when creating the classroom (`Classroom.grade` is NOT NULL and is supplied at
+`POST /api/v1/classrooms`). It selects which catalogue templates are eligible; it sets no mastery
+prior, no BKT parameter, no difficulty ladder, no session bound, and no attempt limit. This batch
+therefore introduces NO scientific behavior, clears NO gate-B item, and authorizes NO real-child,
+pilot, or production use. It proceeds under the project-director instruction in
+`backend/provenance/component-b-be4-engineering-continuation-instruction.json` — TEST-provenance
+DRAFT bundles only.
+
+**Deliberately unchanged.** `reject_membership` (rejection must never touch grade —
+asserted below). `MembershipDecisionResponse` and every other DTO/schema: the response shape is
+byte-identical, so `backend/contract/openapi.v1.json`'s sha256 is unchanged and both
+contract-freeze tests (`backend/tests/test_be5a_contract_freeze.py`,
+`frontend/src/api/__tests__/contract-freeze.test.ts`) stayed green without being touched. The
+route set (no new route; `test_be2_architecture_guards.py` asserts `_current_routes() ==
+EXPECTED_ROUTES` exactly). No migration, no new column, no seed data.
+
+**Idempotency, verified on both paths.** The idempotency replay at the top of
+`approve_membership` returns the stored canonical response before any grade write, so a retried
+approval with the same `Idempotency-Key` re-reads the same grade rather than rewriting it. A
+second approval with a FRESH key still hits the `membership.state != "PENDING"` guard and fails
+closed with 409, leaving the grade untouched. Both are asserted.
+
+**No guard amendments were needed.** All three pre-existing `grade is None` assertions were
+re-checked and all three still pass UNCHANGED, because each tests a state where NULL is genuinely
+correct: `test_classroom_membership.py:589` (after a membership REQUEST — state PENDING, not
+approved), `test_classroom_membership.py:862` (after a ROLLED-BACK failed approval — still
+PENDING; the injected `_audit` failure fires after the grade assignment but before commit, so the
+whole transaction including the grade write rolls back), and `test_profile_classroom.py:78`
+(after profile creation, no classroom yet). No existing test was edited.
+
+**New test** — `backend/tests/test_learner_activation_path.py` (new, 5 tests). Drives the
+COMPLETE HTTP chain through real FastAPI routes and real Postgres, following the existing
+auth-override + isolated-database patterns (`dependency_overrides` on
+`get_authenticated_principal`, fresh `uuid4()` subjects per test, and
+`test_be4f_transactional_sweep.py`'s `_pinned_lifecycle_service` trick to pin
+`POST /api/v1/b/sessions` deterministically to the BE3b TEST-provenance DRAFT fixture bundle
+rather than depending on which APPROVED bundle other test files inserted most recently):
+teacher profile -> `POST /api/v1/classrooms` -> `POST /api/v1/classrooms/{id}/invites` ->
+learner profile -> `POST /api/v1/classroom-invites/resolve` ->
+`POST /api/v1/classroom-memberships/requests` ->
+`POST /api/v1/classroom-memberships/{id}/approve` -> `POST /api/v1/b/sessions` ->
+`POST /api/v1/b/sessions/{id}/opportunities` ===> asserted **201, not 409**. Run for both
+GRADE_2 and GRADE_3, each asserting directly against the database that `Learner.grade` is NULL
+before approval and 2 / 3 after. Plus: rejection leaves grade NULL; the replay/double-approval
+idempotency pair above; and a guard that the mapping dict is exactly `{"GRADE_2": 2,
+"GRADE_3": 3}` and raises `KeyError` on an unknown classroom grade.
+
+**Verification** (real Postgres 16 via `compose.yaml`, not sqlite; the `api` image was rebuilt
+because it bakes `app/` and `tests/` in rather than bind-mounting them):
+- `docker compose up -d --build`; `docker compose exec api alembic upgrade head` — head unchanged
+  at `20260728_0003`.
+- `docker compose exec api pytest -q tests/test_learner_activation_path.py` — **5 passed,
+  0 failed** in 6.31s.
+- `docker compose exec api pytest -q` (FULL suite) — **241 passed, 0 failed, 0 skipped** in
+  145.59s, up from 236 (the 5 new tests), with no pre-existing test modified.
+- `cd frontend && npm.cmd run test:contract` — **4/4 passed**, unregressed.
+
+**Files touched:** `backend/app/application/classroom_membership.py`,
+`backend/tests/test_learner_activation_path.py` (new), `backend/buildLog.md`. No frontend file
+touched; no migration, DTO, contract artefact, or route touched.
+
+Left uncommitted for Yasindu. Not run: any git command that mutates state.
