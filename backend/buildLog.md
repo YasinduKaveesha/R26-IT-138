@@ -5520,3 +5520,160 @@ migration, `test_be4e_session_completion.py` untracked; `b_session.py`, `opportu
 
 This batch does NOT claim `BE4E_COMPLETION_RECOVERY_BATCH_CLOSED` — a separate closure review
 decides that. Left uncommitted for Yasindu.
+
+---
+
+## 2026-07-28 — BE4f: full transactional sweep + deterministic parity + Exit Gate (BEplan §9 BE4.7)
+
+Authorized by the same BE4 engineering-continuation instruction (TEST-provenance DRAFT only; no
+real-child/pilot/production; no GATE-B value). Verification-only batch, as directed: no production
+code changed. New: `tests/test_be4f_parity.py` (the deterministic parity test) and
+`tests/test_be4f_transactional_sweep.py` (the full end-to-end sweep, real routes via `TestClient` +
+real Postgres). No migration added — `alembic current` stays at `20260728_0003` (BE4e's head)
+before and after this batch.
+
+**Parity — headline deliverable, documented fallback, not the raw digest match.** Traced the
+characterization anchor (`provenance/component-b-characterization.json`:
+`config_version="b1-smoke-0.1.0"`, `global_seed=20260716`, 54 item instances,
+`private_output_sha256=b1d8cb3388ac7e47dd353af68210b24debf3d49791f40a6447ad57f74641926c`) back to
+its source in the `Yass` research repo at the exact `generator_git_tree_sha1` the characterization
+file cites (`73acb113bbb179f5946333c27b0142c43f3063f3`). `config_version="b1-smoke-0.1.0"` is
+emitted only by `component_b_generator.config.loader.default_b1_config(global_seed=20260716,
+n_learners=8, scheduled_session_count=3)` — an 8-learner, 3-session **cohort pipeline** run
+(`component_b_generator.pipeline`), not a single `build_task_instance` call. Producing 54 instances
+from that config requires `pipeline`'s own orchestration plus `cohort.builder`,
+`behaviour.initialization` (hidden per-learner truth), `behaviour.attempt_loop` (simulated attempts/
+timing), and `generation.item_opportunities._draw_item_count` (a randomized per-session item
+count) — every one of which is listed verbatim under `explicitly_prohibited_from_application` in
+`provenance/component-b-live-engine-reuse-map.json` and is never vendored into
+`upadya-component-b-live-engine` / never importable from `app/` (`test_be3_live_engine_boundary.py`
+keeps exactly this shut). `git grep` across every commit of both the `Yass` repo and this backend
+for `item_instance_count` / `private_output_sha256` found no reproduction script anywhere — the
+54-item sweep was evidently run ad hoc against the full (never-vendored) pipeline. Reproducing the
+exact digest through the adapter is therefore architecturally unavailable, not merely
+inconvenient — attempting it would require importing precisely the modules BE3/BE4's reuse
+boundary exists to keep out of the live application. STOPPED short of fudging the digest, per the
+bounded prompt's own instruction, and used the documented **ACCEPTABLE FALLBACK** instead: for
+every one of the 29 implemented, grade-eligible fixture-catalogue templates (the same
+full-coverage sweep `test_be3c_characterization.py::TestAllImplementedTemplatesGenerate` already
+uses), `LiveEngineAdapter.build_task_instance` is compared byte-for-byte (canonical JSON,
+`sort_keys=true, separators=(",", ":")`, per the characterization file's own recorded method)
+against an independently constructed direct call into the vendored package's own
+`component_b_generator.generation.task_instances.build_task_instance` — built from scratch in the
+test (its own `GeneratedItemOpportunity`, its own `SeedManager`, its own `load_catalogue`), never
+by reaching into the adapter's private helpers. Comparison is scoped to exactly the field set the
+adapter's `TaskInstance` port type exposes (every generated/scientific field: operands, correct
+answer, distractors, distractor rule ids, applied guards, generation seed — the package's raw
+`GeneratedItemInstance` also carries internal-only bookkeeping fields like `generation_phase`/
+`item_index`/`learner_id`/`validation_status` outside the adapter's contract, which are excluded
+from the comparison, not silently matched). Repeat-run byte-identity is asserted for both the
+adapter and the direct call. **Result: every pair matched byte-for-byte; repeat runs were
+byte-identical for both paths.** `test_be4f_parity.py`: 3 passed.
+
+**Full transactional sweep** (`test_be4f_transactional_sweep.py`, real FastAPI routes via
+`TestClient`, real Postgres — as directed, not direct service calls like BE4a-e's own dedicated
+per-batch test files, which this file complements rather than duplicates):
+1. **Full session flow, every path, one integrated session**: correct-first-attempt: wrong-first-
+   attempt-then-correct-retry (only attempt 1 observes BKT): hint request (asserted either to
+   succeed or fail closed, since which item_template_id real adaptive selection lands on is not
+   hand-controlled and only 29/36 fixture templates carry hint content) followed by a correct
+   attempt: a genuinely expired server-side timeout (deadline fixed at opportunity-OPEN time, so
+   the timeout patch is applied before the opening call, not merely before the later attempt — a
+   bug caught and fixed during this run, see "Errors" below): completion to the
+   `MAX_OPPORTUNITIES_PER_SESSION=5` bound, session transitions to `completed`. Exactly 4 BKT
+   transitions resulted from the 4 genuine first-attempt RESPONSE events (the TIMEOUT opportunity
+   created none) — asserted directly against `b_skill_state_transitions`.
+2. **Concurrency**: two concurrent duplicate attempt submissions (distinct Idempotency-Keys, same
+   opportunity) via real HTTP threads produce exactly one `SkillStateTransitionRecord`; five
+   concurrent hint requests never escalate past L3 (the same opportunity-row `FOR UPDATE` lock
+   BE4c's attempt path uses serializes them) — successes' levels are exactly `1..n`, n<=3, excess
+   requests fail closed (409).
+3. **DB/technical failure before AND after the BKT/mastery calculation**: a service subclass
+   raising `SQLAlchemyError` as the first statement of `_apply_first_attempt_bkt` (BEFORE any
+   `predict`/`posterior`/`update` call — BE4c's own test only covers AFTER, at commit) proves the
+   attempt-record flush that precedes it also rolls back (zero `AttemptRecord`, zero
+   `SkillStateTransitionRecord`); a `commit()`-raising unit-of-work (AFTER the BKT calc, mirroring
+   BE4c's own pattern) proves the same at the later boundary. Both surface as `TECHNICAL_FAILURE`
+   (503), never a learner-facing incorrect-attempt outcome, and neither alters
+   `LearnerSkillStateRecord.observation_count`.
+4. **Network retry + idempotent replay** across every BE4 command route in one flow (start,
+   attempt, hint, complete) — replays return byte-identical canonical responses and create no
+   second write, with one documented exception: a hint request that legitimately fails closed
+   (no catalogue content for the selected template) is never persisted to
+   `b_idempotency_records` (only a *successful* hint reserves+finishes that record), so replaying
+   it re-executes the same fail-closed path with a fresh `request_id` rather than replaying a
+   stored canonical response — there is no second side effect either way, so this is intended
+   behavior, not a gap.
+5. **Server/client clock disagreement**: a genuinely server-side-expired opportunity still times
+   out even when the client claims `client_elapsed_ms=0`; a fresh opportunity submitted with the
+   client claiming the maximum allowed elapsed time (3,600,000 ms) is still judged correct/incorrect
+   from `submitted_value` alone — `client_elapsed_ms` never enters the correctness or timeout
+   decision, only server timestamps and the server-persisted deadline do.
+6. **Grade eligibility + deferred-template exclusion sustained across a whole session**: a
+   Grade-2 learner is driven through all 5 opportunities of a session end-to-end; every
+   `(skill_id, item_template_id)` pair persisted for the session is asserted to never be
+   `multiplication`/`division` and never the deferred-calibration-pending template id.
+7. **Technical failure never recorded as learner failure or a BKT observation**: reuses the
+   before-BKT-calc failure injection and asserts the opportunity's learner-skill-state row is
+   either absent or has `observation_count == 0` afterward.
+8. **Public payload + structured-log field scan across every BE4 route**: select/hint/attempt/
+   complete/summary response bodies are recursively scanned against a forbidden-key set (answers,
+   accepted-answer sets, distractor internals, generation seed/guards, catalogue version/checksum
+   outside the hint route's own governed reconstruction key, selection provenance, sequencing
+   score internals, raw BKT/mastery/theta_B) with none found; `caplog`-captured structured JSON log
+   records from the same session (via `app.core.logging.JsonFormatter`'s fixed whitelisted field
+   set) are scanned the same way — none found. `test_be4f_transactional_sweep.py`: 10 passed.
+
+**Errors encountered and fixed (all caught by the real Docker+Postgres run):**
+1. `/api/v1/learner/profile` creates a learner with `grade=None` (grade is only ever assigned via
+   classroom-membership approval); every opportunity-selection call fails closed
+   (`ConflictError`/409) without a grade. Fixed by directly setting `Learner.grade` after profile
+   creation in this file's `setup_learner` helper, the same way `test_be4b_adaptive_selection.py`
+   seeds grade directly rather than routing through classroom membership.
+2. The server timeout deadline is fixed at opportunity-OPEN time
+   (`opportunity_selection.open_adaptive_opportunity` reads `DEFAULT_TIMEOUT` once, when the
+   opportunity row is created) — an early version of both the full-session-flow and the
+   clock-disagreement test patched `DEFAULT_TIMEOUT` to zero only *after* the opportunity had
+   already been opened with the original 5-minute value, so the "genuinely expired" scenario
+   spuriously returned `RESPONSE` instead of `TIMEOUT`. Fixed by moving the monkeypatch to wrap
+   the opening call itself.
+3. An initial version of the hint step in the full-session-flow and network-retry tests assumed
+   any selected opportunity's template carries catalogue hint content; real adaptive selection is
+   not hand-pinned to a template in this integrated flow (unlike BE4d's dedicated, pinned-template
+   hint tests), and only 29/36 fixture templates do. Fixed by asserting either outcome (success or
+   fail-closed 409) and, for the replay comparison specifically, only requiring byte-identical
+   replay when the first call actually succeeded (see point 4 above for why a failed lookup's
+   replay legitimately differs only in `request_id`).
+4. The parity test's first draft called `.model_dump(mode="json")` on the adapter's `TaskInstance`
+   return value, which is a frozen `dataclasses.dataclass`, not a Pydantic model — fixed with
+   `dataclasses.asdict`. The first full-field comparison against the vendored package's raw
+   `GeneratedItemInstance.model_dump(mode="json")` also failed for one pair because that raw dump
+   carries extra internal-only fields the adapter's narrower port type never exposes; fixed by
+   scoping the comparison to exactly the fields the adapter payload contains (see "Parity" above).
+
+**Exit Gate assertion.** The end-to-end Component B learner scenario above passes transaction,
+concurrency, replay, timeout, privacy, and recovery in one integrated session; each genuine first
+attempt produced exactly one atomic mastery transition (4 transitions for 4 first-attempt RESPONSE
+events across the swept session, zero for the TIMEOUT opportunity, zero for retries, zero for
+hints); no technical failure (before or after the BKT calc) altered `observation_count` or left a
+partial `AttemptRecord`/`SkillStateTransitionRecord`.
+
+**No production gap found.** This batch is verification-only, as directed; no `app/` code changed
+(confirmed by `git status` below).
+
+**Verification (Python 3.11.15, real Postgres 16 — a fresh, ad hoc Docker network + `postgres:16-
+alpine` container + `python:3.11.15-slim-bookworm` image built from the existing `Dockerfile`, since
+no compose file exists yet, matching BE4e's own ad hoc verification setup):**
+- `test_be4f_parity.py`: **3 passed** (not skipped — `component_b_generator` importable, ran
+  against the real vendored wheel).
+- `test_be4f_transactional_sweep.py`: **10 passed** (not skipped).
+- `test_be3_live_engine_boundary.py`: **24 passed, 0 skipped** (13 prohibited modules stay
+  unreachable; the adapter is still the sole `app/` importer).
+- `alembic upgrade head` → `20260728_0003` (BE4e's head, unchanged); no migration added by this
+  batch.
+- **Full suite: 232 passed, 0 failed, 0 skipped**, run in 225.27s.
+- `git status`: only `Dev/backend/tests/test_be4f_parity.py` and
+  `Dev/backend/tests/test_be4f_transactional_sweep.py` (both untracked) — no other file touched.
+
+This batch does NOT claim `BE4_LIVE_LEARNING_FLOW_BATCH_CLOSED` — a separate review decides that
+(the overall BE4 Exit-Gate identifier). Left uncommitted for Yasindu.
