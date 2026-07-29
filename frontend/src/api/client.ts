@@ -28,7 +28,7 @@ async function wait(milliseconds: number) {
 }
 
 function mapHttpError(status: number, envelope?: ApiErrorEnvelope) {
-  const requestId = envelope?.request_id;
+  const requestId = envelope?.error.request_id;
   if (status === 401) return new ApiClientError('unauthenticated', 'The session is no longer valid.', status, requestId, envelope);
   if (status === 403) return new ApiClientError('forbidden', 'This account is not approved for learner access.', status, requestId, envelope);
   if (status === 400 || status === 422) return new ApiClientError('invalid-request', 'The request could not be accepted.', status, requestId, envelope);

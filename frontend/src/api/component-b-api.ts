@@ -1,12 +1,80 @@
 import type { HealthReadyResponse, SessionCommandResponse } from '@/src/api/contracts';
 import { requestJson } from '@/src/api/client';
 import { ApiClientError } from '@/src/api/errors';
-import { isHealthReadyResponse, isSessionCommandResponse } from '@/src/api/runtime-validation';
+import {
+  isActiveSessionResponse,
+  isAttemptResponse,
+  isHealthReadyResponse,
+  isHintRequestResponse,
+  isOpportunityAdvanceResponse,
+  isOpportunityPresentationResponse,
+  isSessionCommandResponse,
+  isSessionStandingResponse,
+} from '@/src/api/runtime-validation';
+import type {
+  ActiveSessionResponse,
+  AttemptResponse,
+  HintRequestResponse,
+  OpportunityAdvanceResponse,
+  OpportunityPresentationResponse,
+  SessionStandingResponse,
+} from '@/src/api/generated/openapi-types';
 import type { PublicConfig } from '@/src/config/env';
+
+// Mirrors SubmitResponseRequest's own constraints (app/domain/b_attempt.py) exactly — not answer
+// validation. The server alone judges correctness; this only stops a malformed request (one the
+// server would 422 anyway) from leaving the device.
+const SUBMITTED_VALUE_MIN_LENGTH = 1;
+const SUBMITTED_VALUE_MAX_LENGTH = 255;
+const CLIENT_ELAPSED_MS_MAX = 3_600_000;
+
+export type SubmitResponseBody = {
+  submitted_value: string;
+  client_elapsed_ms?: number;
+};
+
+function normalizeSubmitResponseBody(body: SubmitResponseBody) {
+  if (
+    body.submitted_value.length < SUBMITTED_VALUE_MIN_LENGTH ||
+    body.submitted_value.length > SUBMITTED_VALUE_MAX_LENGTH
+  ) {
+    throw new ApiClientError(
+      'invalid-request',
+      `submitted_value must be between ${SUBMITTED_VALUE_MIN_LENGTH} and ${SUBMITTED_VALUE_MAX_LENGTH} characters.`,
+    );
+  }
+  if (body.client_elapsed_ms === undefined) {
+    return { submitted_value: body.submitted_value };
+  }
+  const clientElapsedMs = Math.max(0, Math.min(body.client_elapsed_ms, CLIENT_ELAPSED_MS_MAX));
+  return { client_elapsed_ms: clientElapsedMs, submitted_value: body.submitted_value };
+}
 
 type ComponentBApi = {
   checkReadiness: () => Promise<HealthReadyResponse>;
   startSession: (idempotencyKey: string, accessToken: string) => Promise<SessionCommandResponse>;
+  getActiveSession: (accessToken: string) => Promise<ActiveSessionResponse>;
+  selectOpportunity: (sessionId: string, accessToken: string) => Promise<OpportunityPresentationResponse>;
+  submitResponse: (
+    sessionId: string,
+    itemOpportunityId: string,
+    idempotencyKey: string,
+    body: SubmitResponseBody,
+    accessToken: string,
+  ) => Promise<AttemptResponse>;
+  requestAssist: (
+    sessionId: string,
+    itemOpportunityId: string,
+    idempotencyKey: string,
+    accessToken: string,
+  ) => Promise<HintRequestResponse>;
+  completeOpportunity: (
+    sessionId: string,
+    itemOpportunityId: string,
+    idempotencyKey: string,
+    accessToken: string,
+  ) => Promise<OpportunityAdvanceResponse>;
+  getSessionSummary: (sessionId: string, accessToken: string) => Promise<SessionStandingResponse>;
 };
 
 const fixtureFailures = new Set<string>();
@@ -61,6 +129,28 @@ function createFixtureApi(fixture: string): ComponentBApi {
         state: 'active',
       };
     },
+    // The fixture covers the prep screen's readiness/start path only. The session loop itself
+    // (opportunity selection, response submission, hints, completion, standing) is deliberately
+    // left unimplemented — an immediate throw, no delay, no fake payload — so a fixture run can
+    // never masquerade as a real session past the prep screen.
+    async getActiveSession() {
+      throw new ApiClientError('unavailable', 'The development fixture does not implement session recovery.');
+    },
+    async selectOpportunity() {
+      throw new ApiClientError('unavailable', 'The development fixture does not implement opportunity selection.');
+    },
+    async submitResponse() {
+      throw new ApiClientError('unavailable', 'The development fixture does not implement response submission.');
+    },
+    async requestAssist() {
+      throw new ApiClientError('unavailable', 'The development fixture does not implement hint requests.');
+    },
+    async completeOpportunity() {
+      throw new ApiClientError('unavailable', 'The development fixture does not implement opportunity completion.');
+    },
+    async getSessionSummary() {
+      throw new ApiClientError('unavailable', 'The development fixture does not implement session standing.');
+    },
   };
 }
 
@@ -80,6 +170,57 @@ export function createComponentBApi(config?: PublicConfig): ComponentBApi {
         method: 'POST',
         path: '/api/v1/b/sessions',
         validate: isSessionCommandResponse,
+      }),
+    getActiveSession: (accessToken) =>
+      requestJson(config, {
+        accessToken,
+        method: 'GET',
+        path: '/api/v1/b/sessions/active',
+        validate: isActiveSessionResponse,
+      }),
+    selectOpportunity: (sessionId, accessToken) =>
+      // No idempotency key and no body, deliberately: this re-issues the session's already-OPEN
+      // opportunity rather than creating a new one whenever one exists
+      // (app/application/opportunity_selection.py's reissue_presentation_for_open_opportunity) —
+      // that's what makes it the crash-recovery path. Calling it again after an app restart or a
+      // dropped response returns the same open question instead of minting a second one.
+      requestJson(config, {
+        accessToken,
+        method: 'POST',
+        path: `/api/v1/b/sessions/${sessionId}/opportunities`,
+        validate: isOpportunityPresentationResponse,
+      }),
+    submitResponse: (sessionId, itemOpportunityId, idempotencyKey, body, accessToken) =>
+      requestJson(config, {
+        accessToken,
+        body: normalizeSubmitResponseBody(body),
+        idempotencyKey,
+        method: 'POST',
+        path: `/api/v1/b/sessions/${sessionId}/opportunities/${itemOpportunityId}/responses`,
+        validate: isAttemptResponse,
+      }),
+    requestAssist: (sessionId, itemOpportunityId, idempotencyKey, accessToken) =>
+      requestJson(config, {
+        accessToken,
+        idempotencyKey,
+        method: 'POST',
+        path: `/api/v1/b/sessions/${sessionId}/opportunities/${itemOpportunityId}/assists`,
+        validate: isHintRequestResponse,
+      }),
+    completeOpportunity: (sessionId, itemOpportunityId, idempotencyKey, accessToken) =>
+      requestJson(config, {
+        accessToken,
+        idempotencyKey,
+        method: 'POST',
+        path: `/api/v1/b/sessions/${sessionId}/opportunities/${itemOpportunityId}/complete`,
+        validate: isOpportunityAdvanceResponse,
+      }),
+    getSessionSummary: (sessionId, accessToken) =>
+      requestJson(config, {
+        accessToken,
+        method: 'GET',
+        path: `/api/v1/b/sessions/${sessionId}/summary`,
+        validate: isSessionStandingResponse,
       }),
   };
 }
