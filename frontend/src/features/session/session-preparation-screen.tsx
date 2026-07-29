@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { PendingStartSessionCommand, SessionCommandResponse } from '@/src/api/contracts';
 import { createComponentBApi, getComponentBDevelopmentFixture } from '@/src/api/component-b-api';
 import { ApiClientError } from '@/src/api/errors';
+import type { ActiveSessionResponse } from '@/src/api/generated/openapi-types';
 import { useAuth } from '@/src/auth/auth-context';
 import { AppText } from '@/src/components/app-text';
 import { readPublicConfig } from '@/src/config/env';
@@ -26,18 +27,45 @@ import {
   savePendingStartCommand,
 } from '@/src/features/session/session-command-store';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { firstNameOf } from '@/src/utils/display-name';
 
 const brandArtwork = require('../../../assets/images/mathmingo-header.png');
 const heroArtwork = require('../../../assets/images/prepare-hero.png');
 const heroAspectRatio = 1672 / 941;
 const heroBorderWidth = 4;
 
-// Temporary preparation data. Replace this one object with the backend-selected
-// lesson summary when the preparation contract exposes it.
-const previewLesson = {
-  skillId: 'counting',
-  skillLabel: 'Counting',
-} as const;
+// No skill is named on this screen, by necessity rather than preference: `skill_id` does not
+// exist until a question is selected, and selection is what starts the child's timeout clock
+// (timeout_deadline_utc = now + timeout, opportunity_persistence.py). GET /b/sessions/active
+// cannot report whether a question is already open, so asking for the skill here would risk
+// creating one and starting that clock while the child is still reading this screen. The real
+// skill is shown per question on the live session screen, where OpportunityPresentationResponse
+// carries skill_id legitimately and for free.
+const gradeLabels: Record<'GRADE_2' | 'GRADE_3', string> = {
+  GRADE_2: 'Grade 2',
+  GRADE_3: 'Grade 3',
+};
+
+// GET /api/v1/b/sessions/active is a UX affordance, not a correctness requirement: it exists so
+// the child sees "Resume" before tapping, instead of discovering it after. POST /api/v1/b/sessions
+// never 409s on an existing session (it takes an advisory lock, finds any starting-or-active
+// session for the learner, and returns it with 201 regardless of idempotency key — see
+// b_session_lifecycle.py:185-194), so a failed or stale read here is self-correcting: if a session
+// actually exists, starting "a new one" anyway just returns it. That is why this check is safe to
+// treat as best-effort — any failure (including the fixture, which does not implement this call)
+// degrades silently to the Start label rather than a new error phase.
+export async function resolveResumableSessionId(
+  api: { getActiveSession: (accessToken: string) => Promise<ActiveSessionResponse> },
+  accessToken: string,
+): Promise<string | null> {
+  try {
+    const { session } = await api.getActiveSession(accessToken);
+    if (session && session.state === 'active') return session.session_id;
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 type PreparationPhase =
   | 'checking-identity'
@@ -93,25 +121,34 @@ export function SessionPreparationScreen() {
   );
   const [phase, setPhase] = useState<PreparationPhase>('checking-identity');
   const [learner, setLearner] = useState<LearnerView | null>(null);
+  const [resumableSessionId, setResumableSessionId] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const runningRef = useRef(false);
 
-  const openActiveSession = useCallback(async (response: SessionCommandResponse) => {
-    // Resume/recovery via GET /api/v1/b/sessions/active is deferred to FE-2; a non-'active'
-    // state here (completed/abandoned) is treated as a technical failure for now.
-    if (response.state !== 'active') {
-      setPhase('technical-failure');
-      return;
-    }
-    await saveActiveSessionId(response.session_id);
+  const navigateToSession = useCallback(async (sessionId: string) => {
+    await saveActiveSessionId(sessionId);
     await clearPendingStartCommand();
     if (!mountedRef.current) return;
     setPhase('active-session');
     router.replace({
       pathname: '/(learner)/session/[sessionId]',
-      params: { sessionId: response.session_id },
+      params: { sessionId },
     });
   }, []);
+
+  const openActiveSession = useCallback(
+    async (response: SessionCommandResponse) => {
+      // A non-'active' state here (completed/abandoned) has nothing to resume into — this is
+      // reached only from the start-a-new-session path, never from the resume path below (which
+      // only ever targets a session resolveResumableSessionId already confirmed is 'active').
+      if (response.state !== 'active') {
+        setPhase('technical-failure');
+        return;
+      }
+      await navigateToSession(response.session_id);
+    },
+    [navigateToSession],
+  );
 
   const checkReadiness = useCallback(async () => {
     if (runningRef.current || !api) return false;
@@ -121,6 +158,20 @@ export function SessionPreparationScreen() {
       await api.checkReadiness();
       if (!mountedRef.current) return false;
       setPhase('ready');
+      // Skip the resume check for the fixture: FE-0d made createFixtureApi.getActiveSession
+      // throw by design (the fixture covers the prep screen's readiness/start path only), so
+      // calling it here would just be a swallowed error masquerading as "no active session" —
+      // an explicit skip keeps that distinction visible instead of hiding a real regression.
+      if (!fixture) {
+        const accessToken = await getAccessToken();
+        if (accessToken && mountedRef.current) {
+          const sessionId = await resolveResumableSessionId(api, accessToken);
+          if (mountedRef.current) {
+            setResumableSessionId(sessionId);
+            if (sessionId) await saveActiveSessionId(sessionId);
+          }
+        }
+      }
       return true;
     } catch (error) {
       if (!mountedRef.current) return false;
@@ -140,7 +191,7 @@ export function SessionPreparationScreen() {
     } finally {
       runningRef.current = false;
     }
-  }, [api]);
+  }, [api, fixture, getAccessToken]);
 
   const sendStartCommand = useCallback(
     async (command: PendingStartSessionCommand, accessToken: string) => {
@@ -195,6 +246,11 @@ export function SessionPreparationScreen() {
         runningRef.current = true;
       }
 
+      if (resumableSessionId) {
+        await navigateToSession(resumableSessionId);
+        return;
+      }
+
       let accessToken = fixture ? 'development-fixture-token' : await getAccessToken();
       if (!accessToken && !fixture) {
         setPhase('authentication-failure');
@@ -213,7 +269,9 @@ export function SessionPreparationScreen() {
     checkReadiness,
     fixture,
     getAccessToken,
+    navigateToSession,
     phase,
+    resumableSessionId,
     retryAuthorization,
     sendStartCommand,
   ]);
@@ -241,7 +299,10 @@ export function SessionPreparationScreen() {
   const readiness = readinessCopy(phase);
   const busy = phase === 'checking-identity' || phase === 'checking-readiness' || phase === 'starting-session';
   const disabled = busy || phase === 'access-denied' || phase === 'active-session';
-  const displayName = learner?.displayName || profileName || 'Math Explorer';
+  const displayName = firstNameOf(learner?.displayName || profileName || 'Math Explorer');
+  // Only an APPROVED membership is shown; a PENDING/REJECTED one is not a classroom the learner
+  // is in yet. The fixture path has no membership, so the card simply does not render there.
+  const classroom = me?.classroomMembership?.state === 'APPROVED' ? me.classroomMembership : null;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -278,26 +339,29 @@ export function SessionPreparationScreen() {
               <AppText style={[styles.heroSubtitle, compact && styles.heroSubtitleCompact]}>
                 Let&apos;s start your{`\n`}
                 <AppText style={[styles.heroSkill, compact && styles.heroSkillCompact]}>
-                  {previewLesson.skillLabel}
+                  maths
                 </AppText>{' '}
                 adventure
               </AppText>
             </View>
           </View>
 
-          <View style={styles.lessonCard}>
-            <View style={styles.lessonColumn}>
-              <View style={[styles.lessonIcon, styles.skillIcon]}>
-                <Ionicons color={colors.primaryForeground} name="calculator" size={compact ? 24 : 28} />
-              </View>
-              <View>
-                <AppText style={styles.lessonLabel}>Skill</AppText>
-                <AppText style={styles.lessonValue}>{previewLesson.skillLabel}</AppText>
+          {/* Classroom + grade, both real fields on the learner's own approved membership
+              (LearnerMembershipListItem.classroom_name / .grade) — not a lesson or skill claim,
+              which this screen cannot make. Rendered only when a membership is actually loaded. */}
+          {classroom ? (
+            <View style={styles.lessonCard}>
+              <View style={styles.lessonColumn}>
+                <View style={[styles.lessonIcon, styles.skillIcon]}>
+                  <Ionicons color={colors.primaryForeground} name="school" size={compact ? 24 : 28} />
+                </View>
+                <View>
+                  <AppText style={styles.lessonLabel}>{gradeLabels[classroom.grade]}</AppText>
+                  <AppText style={styles.lessonValue}>{classroom.classroom_name ?? 'Your classroom'}</AppText>
+                </View>
               </View>
             </View>
-            {/* Grade badge removed: no `grade` field exists anywhere reachable from the frozen
-                v1 contract (AuthenticatedPrincipal/LearnerProfileResponse); do not invent one. */}
-          </View>
+          ) : null}
 
           <View style={[styles.preparationCard, compact && styles.preparationCardCompact]}>
             <AppText style={[styles.sectionTitle, compact && styles.sectionTitleCompact]}>
@@ -341,7 +405,9 @@ export function SessionPreparationScreen() {
             {phase === 'starting-session' ? (
               <ActivityIndicator color={colors.primaryForeground} size="small" />
             ) : (
-              <AppText style={styles.startButtonText}>Start Adventure</AppText>
+              <AppText style={styles.startButtonText}>
+                {resumableSessionId ? 'Resume Adventure' : 'Start Adventure'}
+              </AppText>
             )}
             <Ionicons color={colors.primaryForeground} name="chevron-forward" size={26} />
           </Pressable>
