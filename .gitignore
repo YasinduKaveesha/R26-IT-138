@@ -31,6 +31,10 @@ Thumbs.db
 !/backend/README.md
 !/frontend/README.md
 !/backend/buildLog.md
+# buildLog.md was closed at FE-0c and rotated; all later batch entries live here.
+!/backend/buildLog1.md
+# Carries the mandatory "delete this directory when FE-1b lands" notice for the dev fixture.
+!/backend/scripts/README.md
 !/backend/packaging/component_b_internal/IMPORT_POLICY.md
 # Supervisor BE4 sequencing guidance (tracked documentation, not a README).
 !/Component_B_BE4_Sequencing_Plan.md
