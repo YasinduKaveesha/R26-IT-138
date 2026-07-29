@@ -18,6 +18,7 @@ import { useAuth } from '@/src/auth/auth-context';
 import { AppText } from '@/src/components/app-text';
 import { LearnerTabBar } from '@/src/features/navigation/learner-tab-bar';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { firstNameOf } from '@/src/utils/display-name';
 
 const brandArtwork = require('../../../assets/images/mathmingo-header.png');
 const heroArtwork = require('../../../assets/images/hero-section.png');
@@ -67,7 +68,7 @@ export function LearnerHomeScreen() {
   const insets = useSafeAreaInsets();
   const compact = height < 760;
   const { me, profileName } = useAuth();
-  const displayName = me?.learnerProfile?.name.trim() || profileName || 'Yass';
+  const displayName = firstNameOf(me?.learnerProfile?.name.trim() || profileName || 'Yass');
   const openBLearning = () => router.push('/(learner)/prepare');
   const scrollRef = useRef<ScrollView>(null);
   const dismissTriggeredRef = useRef(heroDismissedThisAppSession);

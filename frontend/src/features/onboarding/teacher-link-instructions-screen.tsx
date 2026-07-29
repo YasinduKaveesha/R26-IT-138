@@ -20,6 +20,16 @@ const gradeLabels: Record<InviteResolveResponse['grade'], string> = {
   GRADE_3: '3',
 };
 
+// Mirrors the server's own join-code format (classroom_membership.py's _JOIN_CODE_LENGTH=8,
+// grouped 4-4, e.g. "M7KP-4X9D") purely for display. The resolve/request endpoints already
+// accept the code case-insensitively with separators ignored, so this is a readability aid
+// only — it does not change what gets sent, and does not restrict which characters are typed.
+function formatInviteTokenInput(raw: string): string {
+  const alphanumeric = raw.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 8);
+  if (alphanumeric.length <= 4) return alphanumeric;
+  return `${alphanumeric.slice(0, 4)}-${alphanumeric.slice(4)}`;
+}
+
 function previewCopy(resolution: InviteResolveResponse) {
   const gradeLabel = gradeLabels[resolution.grade];
   if (resolution.classroom_name) {
@@ -137,7 +147,7 @@ export function TeacherLinkInstructionsScreen() {
               autoCapitalize="characters"
               autoCorrect={false}
               editable={phase === 'entering'}
-              onChangeText={setInviteToken}
+              onChangeText={(text) => setInviteToken(formatInviteTokenInput(text))}
               placeholder="e.g. M7KP-4X9D"
               placeholderTextColor={palette.textMuted}
               style={[
