@@ -48,3 +48,6 @@ Thumbs.db
 # BE3b/BE3c test fixture (not documentation): the *.md rule above would otherwise silently
 # exclude this file from every commit, even though BE3b's and BE3c's test suites depend on it.
 !/backend/tests/fixtures/runtime_bundle/test_catalogue.md
+!/Component_B_Backend_Overview.md
+!/Component_B_Measurement_And_Parity_Review.md
+!/Component_B_Backend_Work_Order.md
