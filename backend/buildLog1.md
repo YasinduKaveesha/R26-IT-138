@@ -2710,4 +2710,153 @@ downgraded starting point) after rebuilding the container with the fix:**
 (docstring + `upgrade()` body only), `backend/buildLog1.md`.
 
 Implemented directly, per the same explicit instruction as the batch above. No git
+state-changing command was run; everything above is left staged for review.
+
+---
+
+## 2026-08-08 — BF-4: engine wheel rebuild — RT-std fix, B-NS07 delta, one latent test bug found
+
+**Why now, and why not just rebuild from GF-1..4.** BF-4 was blocked on GF-3 landing in Yass
+(fixed_hidden_growth_g, spec 8.4 step 4). GF-1 through GF-4 merged to Yass `main` (958ab06),
+confirmed via `git merge-base --is-ancestor` on full 40-character SHAs, not abbreviated ones —
+this repo underwent a directory flatten (the `Implementation_v1.0/` prefix was removed at some
+commit in this range) and abbreviated-SHA / prefixed-path lookups were independently found to
+give a self-consistent but WRONG answer once mid-investigation (an `ls-tree` count of 0 for a
+path that `cat-file -e` confirmed did exist), traced to intermittent subprocess fork failures in
+this Windows Git Bash environment corrupting one pipeline silently. Every path and commit used
+below was re-resolved with a full SHA and `git cat-file -e` before being trusted.
+
+**Restricted to this package's two source directories (`component_b_generator/`, `models/`),
+the GF-1..4 diff barely touches what BF-4 rebuilds.** `git diff` between the BE3 pin
+(`0e86fdcbc0ffcdbda3d37c742e83b1d532910e2b`) and the new one, six files differ:
+`adapters/to_3.py`, `audits/leakage.py`, `pilot.py`, `pipeline.py` — all four already on this
+package's own `excluded_by_omission` list, so GF-1's SF-038 gate and GF-3's
+`fixed_hidden_growth_g` never reach the live-safe wheel regardless of this rebuild;
+`models/behaviour.py` — its only change is a new `hidden_growth_ceiling` field on
+`BTruthInitializationConfig`, a class already absent from this package's trimmed copy, so the
+existing BE3 trim absorbs it with zero code change (confirmed by grepping the shipped trimmed
+module for both names — no match — not assumed from "should"); and
+`component_b_generator/aggregation/session.py`, the actual RT-std fix this batch exists for.
+
+**The B-NS07 delta-in-prompt fix was upstreamed to Yass first, not shipped as a local
+modification.** `backend/packaging` already carried this exact fix locally (FE-3h Part 0,
+inert until now), and `samplers/number_sense.py` was otherwise byte-identical to the BE3 pin.
+Rather than let the manifest's "all 45 verbatim" claim degrade to "44 verbatim, 1 local" — the
+entire point of this architecture is that the live system provably runs the same science that
+was reviewed offline — the two-line change was upstreamed as its own Yass PR
+(`component-b-ns07-delta-in-prompt`, commit `69cb112`, merged as `09267ab`) before this rebuild
+pinned to it. Checked, not assumed, that this was safe: no test anywhere in the Yass suite
+(1661 tests) asserts `sample_conservation`'s prompt keys exactly — `.prompt` is only ever
+forwarded wholesale (`dict(content.prompt)`) — and both `SampledContent.prompt` and
+`TaskInstance.prompt` are typed `Dict[str, Any]`, no strict schema to violate. Full Yass suite
+re-run after the change: 1661 passed, matching the pre-change baseline exactly.
+
+**Anchor: `09267ab` (full: `09267abfe83829168b8b4817eb4c59d10f54e311`), origin/main tip.**
+Independently confirmed via `git fetch` + `git merge-base --is-ancestor` (both `75d0216` and
+`09267ab` are real ancestors of `origin/main`), not taken on report.
+
+**Rebuild.** `pyproject.toml` version bumped `0.1.0+be3.0e86fdc` -> `0.1.0+bf4.09267ab`.
+`aggregation/session.py` and `samplers/number_sense.py` overwritten with the exact bytes from
+`git show 09267ab:Implementation_v1.0/component_b_generator/<path>` (diffed against the pinned
+commit content directly — zero output both times, confirming byte-identity before either file
+was trusted). `SOURCE_MANIFEST.txt` updated for those two files' new per-file hashes; the
+aggregate `package_source_manifest.sha256` recomputed as the sha256 of the manifest file itself
+(the algorithm it documents). Built with
+`python -m build --wheel --no-isolation --outdir dist` **inside the exact application base
+image** (`python:3.11.15-slim-bookworm@sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098
+c647482bcad5cba`), not a merely-compatible local interpreter — no native Python 3.11.x was even
+available on this machine (`py -0` showed 3.10/3.13/3.14 only), and interpreter parity is the
+point of a hash-pinned wheel. New wheel sha256: `148d03e7fd3f7ec075ee9b97effd3955ef013cee583baf
+19cc90686381537d06`.
+
+**Verified the fix directly against the built artifact before touching any pinned location.**
+Installed the wheel in an isolated container and called `_response_time_stats` and
+`sample_conservation` directly: a single-observation session now returns `std=None` (was `0.0`);
+a zero-variance two-observation session also returns `None`; a genuine-variance two-observation
+session still returns a real positive `std` (the guard is narrow, not a blanket suppression);
+`sample_conservation`'s prompt dict now carries `delta`. Also re-ran BE3's own boundary
+checks — capability-symbol import, prohibited-module unreachability, hidden-truth-class
+absence (specifically re-checked that GF-3's new `hidden_growth_ceiling` field did not leak in
+through the existing trim) — all passed against the new wheel.
+
+**Four pinned locations, plus a fifth found while doing this:
+`requirements.lock`, `requirements.in`, `Dockerfile` (COPY line), and
+`provenance/component-b-live-engine-manifest.json` were the four named going in. Rebuilding the
+container first failed — `.dockerignore` allow-lists the wheel by exact filename, the same
+blanket-ignore-with-allowlist pattern `.gitignore` uses for markdown docs, and it only knew the
+BE3 filename. Added the BF-4 filename as a second allow-line rather than replacing the BE3 one.
+
+**Bundle fixtures — three files, not a blanket update.** `app/infrastructure/runtime_bundle/
+loader.py:103` actually opens and hashes the file at `generator.source_path` — confirmed by
+reading the code, not assumed — so all three fixtures' `source_path` needed the new filename or
+`bad_checksum_bundle.json`'s deliberately-wrong checksum would start raising a file-not-found
+once the old wheel's filename stopped being current, masquerading as a checksum failure.
+`checksum.value` was updated only in `valid_unapproved_bundle.json` and
+`missing_field_bundle.json`, to the new real wheel hash; `bad_checksum_bundle.json`'s
+deliberate `ffff...` sentinel was left untouched — only its `source_path` moved. All three
+validated as well-formed JSON after editing; all 21 bundle-fixture-dependent tests (including
+the deliberate-mismatch path) re-run in isolation afterward: 21 passed.
+
+**Old wheel kept, not deleted** (both `be0.0e86fdc` and `be3.0e86fdc` wheels remain in
+`provenance/wheels/`, hashes reconfirmed unchanged) — a provenance repo benefits from retained
+artifacts, `--require-hashes` only installs what's listed so a stray wheel is inert, and this is
+already the de facto pattern for the BE0 wheel. The manifest gained a `rebuild_provenance`
+section documenting the superseded BE3 package's version/hash/pin and why it's retained, rather
+than silently overwriting its record.
+
+**A real, independent bug found during verification, not a BF-4 defect but caught by BF-4's own
+discipline.** The full suite's first post-rebuild run showed the *same* "300 passed, 1 xfailed"
+as before the rebuild — the wrong signal, since the whole point of this rebuild was for that
+specific `xfail(strict=True)` test to flip. Per the standing rule that a green suite doesn't
+prove a strict-xfail converted, it was checked directly: `pytest --runxfail` on
+`test_response_time_std_is_none_not_zero_for_a_single_observation` showed it failing for a
+completely unrelated reason — a `session_id`/`item_opportunity_id` format validation error, not
+the std assertion. This test's own fixture data (`student_id="STU-BF03-0001"`,
+`item_opportunity_id="opportunity-bf3-1"`, `task_instance_id="task-bf3-1"`) never matched the
+package's real id formats (`^STU-[0-9]{4}-B-[0-9]{3}$` for a session id,
+`^STU-[0-9]{4}-B[0-9]{3}-I[0-9]{3}$` for an opportunity/task-instance id, confirmed against
+`test_be4f_parity.py`'s established convention) and had been silently masked since BF-3, because
+`xfail(strict=True)` marks any exception as the expected failure regardless of cause — this test
+had been xfailing for the wrong reason since it was written. Fixed both id values
+(`STU-0003`, `STU-0003-B001-I001`); re-ran with `--runxfail`: passes for real. Removed the
+`xfail` marker per its own reason string's instruction ("this test will XPASS ... the point is
+to force that removal"). Full suite re-run: **301 passed, 0 xfailed, 0 failed** — the correct
+conversion (300 + 1 xfail -> 301 passed, arithmetic matches exactly).
+
+**Final verification, all re-run after the marker removal:**
+- `pip show upadya-component-b-live-engine` inside the rebuilt container: `0.1.0+bf4.09267ab` —
+  confirmed the running system actually has the new wheel, not inferred from the build log.
+- Full suite: 301 passed, 0 xfailed, 0 failed.
+- Boundary/parity guards in isolation: 43/43.
+- All 21 bundle-fixture-dependent tests in isolation: 21 passed.
+- Hash chain: `requirements.lock`, the manifest, and all three bundle fixtures' `source_path`
+  agree on `upadya_component_b_live_engine-0.1.0+bf4.09267ab-py3-none-any.whl`; `checksum.value`
+  (where not deliberately wrong) agrees on `148d03e7...537d06` in all three real-hash locations.
+  All three retained wheel files' sha256sums re-checked and match their recorded values.
+- `python scripts/dev_fixture_learner.py --test-fixture-only`: self-verify succeeded, real
+  session served a real opportunity end-to-end. One interruption along the way, not a BF-4
+  regression: the familiar bundle-shadowing condition from running the full suite repeatedly —
+  fixed with the same one-row `created_at_utc` timestamp bump this project has used every
+  previous time (table is `b_runtime_bundle_records`, not guessed correctly on the first try).
+
+**Files touched:** `backend/packaging/component_b_internal/pyproject.toml`,
+`backend/packaging/component_b_internal/SOURCE_MANIFEST.txt`,
+`backend/packaging/component_b_internal/component_b_generator/aggregation/session.py`,
+`backend/packaging/component_b_internal/component_b_generator/samplers/number_sense.py`,
+`backend/provenance/component-b-live-engine-manifest.json`,
+`backend/provenance/wheels/upadya_component_b_live_engine-0.1.0+bf4.09267ab-py3-none-any.whl`
+(new), `backend/requirements.lock`, `backend/requirements.in`, `backend/Dockerfile`,
+`backend/.dockerignore`, `backend/tests/fixtures/runtime_bundle/valid_unapproved_bundle.json`,
+`backend/tests/fixtures/runtime_bundle/missing_field_bundle.json`,
+`backend/tests/fixtures/runtime_bundle/bad_checksum_bundle.json`,
+`backend/tests/test_bf_estimator_parity.py`, `backend/buildLog1.md`. Not deleted: either
+retained wheel. Not touched: any BKT/sequencing parameter value, `backend/scripts/
+dev_fixture_learner.py` itself (only its database state).
+
+On the Yass side (separate repository, already merged, not part of any Upadya commit): PR #13
+(`component-b-ns07-delta-in-prompt`, commit `69cb112`, merged as `09267ab`) — prepared and
+verified in this same session (targeted + full 1661-test suite), left for Yasindu to push/merge
+per the same no-agent-git-mutation discipline as this repository.
+
+Implemented directly, per the same explicit instruction as the batches above. No git
 state-changing command was run.

@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 COPY requirements.lock ./requirements.lock
-COPY provenance/wheels/upadya_component_b_live_engine-0.1.0+be3.0e86fdc-py3-none-any.whl ./provenance/wheels/upadya_component_b_live_engine-0.1.0+be3.0e86fdc-py3-none-any.whl
+COPY provenance/wheels/upadya_component_b_live_engine-0.1.0+bf4.09267ab-py3-none-any.whl ./provenance/wheels/upadya_component_b_live_engine-0.1.0+bf4.09267ab-py3-none-any.whl
 RUN python -m pip install --require-hashes --no-deps -r requirements.lock
 RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app

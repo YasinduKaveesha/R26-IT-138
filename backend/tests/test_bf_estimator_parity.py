@@ -140,8 +140,8 @@ def _single_opportunity_response(response_time_ms: int) -> OpportunityResponse:
         learner_id="learner-bf3",
         session_id="session-bf3",
         scheduled_session_index=1,
-        item_opportunity_id="opportunity-bf3-1",
-        task_instance_id="task-bf3-1",
+        item_opportunity_id="STU-0003-B001-I001",
+        task_instance_id="STU-0003-B001-I001",
         item_template_id="B-ADD04-2D-NO-REGROUP",
         skill_id="addition",
         first_attempt_correct=True,
@@ -157,32 +157,37 @@ def _single_opportunity_response(response_time_ms: int) -> OpportunityResponse:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Blocked on BF-4 (wheel rebuild). The shipped wheel's aggregation/session.py still "
-        "computes an unguarded population std (`std = _population_std(rts, mean)`), which "
-        "returns 0.0 for a single observation rather than None - see Component_B_Measurement_"
-        "And_Parity_Review.md finding F1 and Component_B_Backend_Work_Order.md BF-4. "
-        "strict=True: once the wheel is rebuilt from a commit containing the upstream fix "
-        "(Yass commit e41b641), this test will XPASS and the suite will fail until this marker "
-        "is removed - the point is to force that removal rather than let it be forgotten."
-    ),
-)
 def test_response_time_std_is_none_not_zero_for_a_single_observation() -> None:
     """A standard deviation computed from exactly one sample is undefined, not zero. The B->3
     contract field `b_item_response_time_std_sec` is `PositiveTiming | None` (`gt=0.0`), so 0.0 is
     rejected at that boundary - "no usable evidence" must be represented as None, matching the
-    existing all-timeout precedent (an empty RT list already returns None for all three stats)."""
+    existing all-timeout precedent (an empty RT list already returns None for all three stats).
+
+    BF-4: previously `xfail(strict=True)`, blocked on a wheel rebuild (Component_B_Measurement_
+    And_Parity_Review.md finding F1) — the shipped wheel's aggregation/session.py computed an
+    unguarded population std, returning 0.0 for a single observation. The wheel is now rebuilt
+    from a Yass main commit containing the fix (e41b641). The marker is removed per its own
+    reason string's instruction ("this test will XPASS ... the point is to force that removal").
+
+    Also fixed here, independent of BF-4: this test's own fixture data was malformed twice over —
+    `student_id="STU-BF03-0001"` and `item_opportunity_id`/`task_instance_id` of
+    `"opportunity-bf3-1"`/`"task-bf3-1"` never matched the package's real id formats
+    (`^STU-[0-9]{4}-B-[0-9]{3}$` for a session id, `^STU-[0-9]{4}-B[0-9]{3}-I[0-9]{3}$` for an
+    opportunity/task-instance id — confirmed against `tests/test_be4f_parity.py`'s established
+    convention). Neither defect was ever visible: `xfail(strict=True)` marks any exception as the
+    expected failure regardless of cause, so this test had been xfailing for the wrong reason
+    since BF-3 — a validation error, not the std assertion — and only surfaced once `--runxfail`
+    was used to check what the test does with the marker removed, which is exactly how this
+    should be caught before trusting a converted xfail as proof a fix landed."""
     adapter = LiveEngineAdapter()
     aggregate = adapter.aggregate_session(
         session_identity=SessionIdentity(
-            student_id="STU-BF03-0001", b_session_index=1, scheduled_session_number=1, status="attended",
+            student_id="STU-0003", b_session_index=1, scheduled_session_number=1, status="attended",
         ),
         opportunities=[_single_opportunity_response(2000)],
         skill_mastery_updates=[
             SkillMasteryUpdate(
-                student_id="STU-BF03-0001", skill_id="addition", b_session_index=1,
+                student_id="STU-0003", skill_id="addition", b_session_index=1,
                 mastery_before=0.6, predicted_correct_probability=0.8, posterior_l=0.87, mastery_after=0.89,
             )
         ],
