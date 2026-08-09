@@ -215,6 +215,11 @@ export function createComponentBApi(config?: PublicConfig): ComponentBApi {
         path: `/api/v1/b/sessions/${sessionId}/opportunities/${itemOpportunityId}/complete`,
         validate: isOpportunityAdvanceResponse,
       }),
+    // Built but intentionally unused, not an oversight: FE-3f's results screen reads its counts off
+    // the completion response it already holds, so calling this would add a round trip for numbers
+    // in hand — and would import its `session_state` behaviour, where abandoned, expired and
+    // technical_failed all report as "active" (session_completion.py:550), so it can never tell a
+    // caller that a session ended badly.
     getSessionSummary: (sessionId, accessToken) =>
       requestJson(config, {
         accessToken,

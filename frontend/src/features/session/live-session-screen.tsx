@@ -5,7 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { PendingSubmitResponseCommand } from '@/src/api/contracts';
+import type {
+  PendingCompleteOpportunityCommand,
+  PendingRequestAssistCommand,
+  PendingSubmitResponseCommand,
+} from '@/src/api/contracts';
 import { createComponentBApi } from '@/src/api/component-b-api';
 import { ApiClientError } from '@/src/api/errors';
 import type { AttemptResponse } from '@/src/api/generated/openapi-types';
@@ -13,24 +17,38 @@ import { useAuth } from '@/src/auth/auth-context';
 import { AppText } from '@/src/components/app-text';
 import { readPublicConfig } from '@/src/config/env';
 import {
+  canAdvance,
+  canRequestHint,
   classifyAttemptOutcome,
   classifyFailure,
   failureRequestId,
+  hintStateFor,
   initialAnswerState,
   isAnswerSurfaceDisabled,
   isDeadlinePassed,
+  markHintsUnavailable,
   outcomeView,
   planPresentation,
+  recordHint,
+  decideAdvance,
+  decidePendingAssist,
   decidePendingReplay,
+  HINTS_UNAVAILABLE_COPY,
   type AttemptOutcome,
+  type HintState,
   type SessionFailure,
   type SessionPlan,
+  type SessionProgress,
 } from '@/src/features/session/live-session-logic';
 import {
+  clearActiveSessionId,
   clearPendingCommand,
   loadPendingCommand,
   savePendingCommand,
 } from '@/src/features/session/session-command-store';
+import { SessionResultsScreen } from '@/src/features/session/session-results-screen';
+import { PromptVisual } from '@/src/features/session/prompt-visuals/prompt-visual';
+import { resolvePromptVisual } from '@/src/features/session/prompt-visuals/registry';
 import { encodeSubmittedValue } from '@/src/features/session/renderers/encode';
 import { ChoiceGrid } from '@/src/features/session/renderers/choice-grid';
 import { CountSelection } from '@/src/features/session/renderers/count-selection';
@@ -50,6 +68,10 @@ type RenderPlan = Extract<SessionPlan, { kind: 'render' }>;
 type Phase =
   | { kind: 'loading' }
   | { kind: 'question'; plan: RenderPlan }
+  // Reached when the server reports the session bound is met. FE-3f owns the real results screen;
+  // this batch only needs to arrive here cleanly and stop, rather than dead-ending on a blank
+  // question surface.
+  | { kind: 'completed'; progress: SessionProgress }
   | { kind: 'unrenderable'; requestId: string }
   | { kind: 'failure'; failure: SessionFailure; requestId: string | null };
 
@@ -72,6 +94,12 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
   const [answer, setAnswer] = useState<AnswerState | null>(null);
   const [outcome, setOutcome] = useState<AttemptOutcome | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [hints, setHints] = useState<HintState | null>(null);
+  const [requestingHint, setRequestingHint] = useState(false);
+  // Server-reported progress. Null until the first advance, because POST /opportunities does not
+  // report it — showing nothing is more honest than seeding a client-side guess.
+  const [progress, setProgress] = useState<SessionProgress | null>(null);
+  const [advancing, setAdvancing] = useState(false);
   const mountedRef = useRef(true);
   const runningRef = useRef(false);
   // client_elapsed_ms is telemetry only and is never read for correctness (server timestamps are
@@ -123,12 +151,17 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
     try {
       const presentation = await withToken((token) => api.selectOpportunity(sessionId, token));
       if (!mountedRef.current) return;
-      const plan = planPresentation(presentation);
+      const plan = planPresentation(presentation, presentation.request_id);
       if (plan.kind !== 'render') {
         setPhase({ kind: 'unrenderable', requestId: plan.requestId });
         return;
       }
       setAnswer(initialAnswerState(plan.spec));
+      // Hint state is scoped to the opportunity, so a re-presentation of the *same* question (the
+      // crash-recovery path) keeps hints the child has already been given, while a genuinely new
+      // question starts from scratch. FE-3e advancing the loop in place needs no change here.
+      setHints((current) => hintStateFor(current, plan.itemOpportunityId));
+      setRequestingHint(false);
       shownAtRef.current = Date.now();
       setPhase({ kind: 'question', plan });
 
@@ -222,6 +255,164 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
     await sendSubmit(command);
   }, [answer, phase, sendSubmit, sessionId, submitting]);
 
+  /**
+   * Ask for the next hint. The client never requests or sends a level — the server derives it from
+   * its own count of prior hint events, under the opportunity row lock, strictly L1 → L2 → L3.
+   *
+   * A 409 is the ordinary outcome (only 2 of 36 templates carry hint content) and is handled as a
+   * normal, neutral end state rather than an error: the control closes for this opportunity and
+   * the child gets forward-pointing copy. No attempt is made to work out *which* 409 it was; the
+   * server maps "no content", "blank content", "checksum mismatch" and "already at L3" to one
+   * indistinguishable ConflictError on purpose, so nothing can leak the answer through the error
+   * path.
+   *
+   * Nothing here touches the answer surface. Asking for help never blocks answering, and a hint is
+   * never a mastery/BKT observation, so it costs the child nothing.
+   */
+  const requestHint = useCallback(async () => {
+    if (!api || phase.kind !== 'question' || requestingHint) return;
+    const scoped = hintStateFor(hints, phase.plan.itemOpportunityId);
+    if (!canRequestHint(scoped)) return;
+
+    // Reuse a persisted key for this same opportunity if one survived. If a previous request
+    // succeeded but its response was lost (network drop, app kill), a *fresh* key would make the
+    // server count that first event and escalate — the child would silently never see L1, the
+    // gentlest hint. Replaying the saved key returns the original level and content instead.
+    const pending = decidePendingAssist(
+      await loadPendingCommand(),
+      sessionId,
+      phase.plan.itemOpportunityId,
+    );
+    const command: PendingRequestAssistCommand =
+      pending.action === 'reuse'
+        ? pending.command
+        : {
+            createdAt: new Date().toISOString(),
+            endpoint: '/api/v1/b/sessions/{sessionId}/opportunities/{itemOpportunityId}/assists',
+            idempotencyKey: Crypto.randomUUID(),
+            itemOpportunityId: phase.plan.itemOpportunityId,
+            kind: 'request_assist',
+            sessionId,
+          };
+
+    setRequestingHint(true);
+    try {
+      // Persisted before the request, never after — that ordering is the whole protection.
+      if (pending.action !== 'reuse') await savePendingCommand(command);
+      const hint = await withToken((token) =>
+        api.requestAssist(
+          command.sessionId,
+          command.itemOpportunityId,
+          command.idempotencyKey,
+          token,
+        ),
+      );
+      await clearPendingCommand();
+      if (!mountedRef.current) return;
+      setHints((current) => recordHint(hintStateFor(current, hint.item_opportunity_id), hint));
+    } catch (error) {
+      const failure = classifyFailure(error);
+      if (failure === 'conflict') {
+        // The normal case. The key has done its job; there is nothing left to replay.
+        await clearPendingCommand();
+        if (!mountedRef.current) return;
+        setHints((current) =>
+          markHintsUnavailable(hintStateFor(current, command.itemOpportunityId)),
+        );
+        return;
+      }
+      // Any other failure deliberately changes no state: the key stays persisted so the next tap
+      // replays it rather than escalating, and the control stays available so the child may simply
+      // try again. It is not promoted to the full-screen failure phase either — losing the question
+      // because a hint request failed would be a far worse outcome than not getting the hint.
+    } finally {
+      if (mountedRef.current) setRequestingHint(false);
+    }
+  }, [api, hints, phase, requestingHint, sessionId, withToken]);
+
+  /**
+   * Move to the next question.
+   *
+   * The advance response carries the next presentation inline, so it is rendered directly — no
+   * second POST /opportunities. The idempotency fingerprint is `{session_id,
+   * item_opportunity_id}`, so a replay of the same key returns the original advance: no
+   * double-close and no skipped question. That is why the key is persisted before the request and
+   * cleared only on success — a lost response retried with a *fresh* key would risk closing an
+   * opportunity twice.
+   */
+  const advance = useCallback(async () => {
+    if (!api || phase.kind !== 'question' || advancing) return;
+    // Advancing requires at least one recorded attempt (session_completion.py:321-325); the
+    // control is gated on an outcome being on screen, so this is belt-and-braces.
+    if (!canAdvance(outcome !== null)) return;
+
+    const command: PendingCompleteOpportunityCommand = {
+      createdAt: new Date().toISOString(),
+      endpoint: '/api/v1/b/sessions/{sessionId}/opportunities/{itemOpportunityId}/complete',
+      idempotencyKey: Crypto.randomUUID(),
+      itemOpportunityId: phase.plan.itemOpportunityId,
+      kind: 'complete_opportunity',
+      sessionId,
+    };
+
+    setAdvancing(true);
+    try {
+      // Overwrites the shared pending slot, which is correct here: any command still sitting in it
+      // belongs to the question being left behind (FE-3d's assist key, for instance), and a stale
+      // command must never survive into the next question.
+      await savePendingCommand(command);
+      const response = await withToken((token) =>
+        api.completeOpportunity(
+          command.sessionId,
+          command.itemOpportunityId,
+          command.idempotencyKey,
+          token,
+        ),
+      );
+      await clearPendingCommand();
+      if (!mountedRef.current) return;
+
+      const decision = decideAdvance(response);
+      if (decision.kind === 'drift') {
+        // Neither a next question nor a finished session. Re-ask rather than guess.
+        await presentOpportunity();
+        return;
+      }
+      setProgress(decision.progress);
+      if (decision.kind === 'completed') {
+        setPhase({ kind: 'completed', progress: decision.progress });
+        return;
+      }
+      if (decision.plan.kind !== 'render') {
+        setPhase({ kind: 'unrenderable', requestId: decision.plan.requestId });
+        return;
+      }
+      // Everything scoped to the question being left goes with it: the answer, the outcome, the
+      // hints (keyed on item_opportunity_id since FE-3d, so this is a re-key rather than a manual
+      // clear) and the elapsed-time reference behind client_elapsed_ms.
+      setAnswer(initialAnswerState(decision.plan.spec));
+      setOutcome(null);
+      setHints(hintStateFor(null, decision.plan.itemOpportunityId));
+      setRequestingHint(false);
+      shownAtRef.current = Date.now();
+      setPhase({ kind: 'question', plan: decision.plan });
+    } catch (error) {
+      if (!mountedRef.current) return;
+      const failure = classifyFailure(error);
+      if (failure === 'conflict') {
+        // Almost certainly "no attempt recorded yet" or a state that has already moved on. Re-ask
+        // POST /opportunities and render whatever the server returns — never a client-side rule
+        // about what should have happened.
+        await clearPendingCommand();
+        if (mountedRef.current) await presentOpportunity();
+        return;
+      }
+      setPhase({ kind: 'failure', failure, requestId: failureRequestId(error) });
+    } finally {
+      if (mountedRef.current) setAdvancing(false);
+    }
+  }, [advancing, api, outcome, phase, presentOpportunity, sessionId, withToken]);
+
   const tryAgain = useCallback(() => {
     if (phase.kind !== 'question') return;
     setOutcome(null);
@@ -243,6 +434,18 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
 
   const goHome = useCallback(() => router.replace('/(learner)/home'), []);
 
+  /**
+   * Leaving a finished session. The stored active-session id has done its job; leaving it behind
+   * would let a later launch offer "Resume" and then try to resume a session the server has already
+   * completed. Results are not persisted and are not deep-linkable — deliberately, since the app
+   * keeps no learner-facing record of performance — so once this screen is left there is nothing to
+   * return to, and the child lands on preparation and starts fresh.
+   */
+  const exitSession = useCallback(async () => {
+    await clearActiveSessionId();
+    goHome();
+  }, [goHome]);
+
   if (phase.kind === 'loading') {
     return (
       <SessionFrame>
@@ -254,6 +457,13 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
         </View>
       </SessionFrame>
     );
+  }
+
+  if (phase.kind === 'completed') {
+    // The progress numbers come straight from the completion response — GET /summary is not called
+    // (see component-b-api.ts's note on getSessionSummary). See SessionResultsScreen for why this
+    // surface carries counts and nothing evaluative.
+    return <SessionResultsScreen onExit={() => void exitSession()} progress={phase.progress} />;
   }
 
   if (phase.kind === 'unrenderable' || phase.kind === 'failure') {
@@ -307,17 +517,43 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
   // state prevents a guaranteed 422 — it is not a correctness judgement about the answer. It is
   // never unavailable because time has run out; that submit is what records the TIMEOUT.
   const canSubmit = encoded !== null && !answeringDisabled;
+  const hintView = hintStateFor(hints, plan.itemOpportunityId);
+  // Resolved from payload keys, never from item_template_id or representation_type — see the
+  // registry for why both of those would be wrong. `selectable-pool` is an answer surface rather
+  // than an illustration, so it is routed into CountSelection below instead of being drawn here.
+  const promptVisual = resolvePromptVisual(plan.promptPayload);
+  const passiveVisual = promptVisual?.kind === 'selectable-pool' ? null : promptVisual;
+  const poolSize = promptVisual?.kind === 'selectable-pool' ? promptVisual.poolSize : undefined;
 
   return (
     <SessionFrame>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <View style={styles.skillPill}>
-          <Ionicons color={colors.primaryShadow} name="sparkles" size={16} />
-          <AppText style={styles.skillText}>{plan.skillLabel || 'Maths'}</AppText>
+        <View style={styles.headerRow}>
+          <View style={styles.skillPill}>
+            <Ionicons color={colors.primaryShadow} name="sparkles" size={16} />
+            <AppText style={styles.skillText}>{plan.skillLabel || 'Maths'}</AppText>
+          </View>
+          {/* Straight from the server's own numbers — never a client-side counter, and never a
+              client-side bound. Absent until the first advance reports them. */}
+          {progress ? (
+            <AppText style={styles.progressText}>
+              {`${progress.completed} of ${progress.totalBound}`}
+            </AppText>
+          ) : null}
         </View>
 
         <View style={styles.promptCard}>
           <AppText style={styles.stem}>{plan.stem}</AppText>
+          {/* FE-3g — the concrete representation the question refers to. `prompt` carries content
+              keys beyond `stem`, and rendering only the stem left 7 of 14 Grade 2 templates
+              unanswerable. `null` means this payload has no visual, which renders stem-only exactly
+              as before. The visual presents the quantity the server sent and nothing else: no
+              counting, no comparing, no checking the child. */}
+          {passiveVisual ? (
+            <View style={styles.visual}>
+              <PromptVisual spec={passiveVisual} />
+            </View>
+          ) : null}
         </View>
 
         {answer?.kind === 'choice' && plan.spec.kind === 'choice' ? (
@@ -339,11 +575,51 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
         {answer?.kind === 'count-selection' && plan.spec.kind === 'count-selection' ? (
           <CountSelection
             disabled={answeringDisabled}
+            // Remount per question so the pool's local selection state cannot survive an advance.
+            // (The surface also clears itself when the answer is reseeded, which is what "Try again"
+            // does without changing the opportunity — both paths matter.)
+            key={plan.itemOpportunityId}
             onChange={setAnswer}
+            poolSize={poolSize}
             spec={plan.spec}
             state={answer}
           />
         ) : null}
+
+        {/* Hints sit below the answer surface and never gate it: the child can answer at any
+            point, with or without asking for help. Every hint the child has been given stays on
+            screen — L2 elaborates on L1, so replacing would take away the scaffold. */}
+        {hintView.received.map((hint) => (
+          <View key={hint.hint_level} style={styles.hintCard}>
+            <View style={styles.hintHeader}>
+              <Ionicons color={colors.accentBlue} name="bulb" size={18} />
+              <AppText style={styles.hintLevel}>Hint {hint.hint_level}</AppText>
+            </View>
+            <AppText>{hint.content}</AppText>
+          </View>
+        ))}
+
+        {canRequestHint(hintView) ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: requestingHint }}
+            disabled={requestingHint}
+            onPress={() => void requestHint()}
+            style={({ pressed }) => [styles.hintButton, pressed && styles.pressed]}>
+            {requestingHint ? (
+              <ActivityIndicator color={colors.accentBlue} size="small" />
+            ) : (
+              <>
+                <Ionicons color={colors.accentBlue} name="bulb-outline" size={20} />
+                <AppText style={styles.hintButtonText}>
+                  {hintView.received.length > 0 ? 'ANOTHER HINT' : 'I NEED A HINT'}
+                </AppText>
+              </>
+            )}
+          </Pressable>
+        ) : (
+          <AppText style={styles.hintClosed}>{HINTS_UNAVAILABLE_COPY}</AppText>
+        )}
 
         {view ? (
           <View
@@ -357,8 +633,17 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
           </View>
         ) : null}
 
+        {/* Once an attempt is on record the child can always move on, including after a wrong
+            answer — trying again is offered, never required. */}
         {view?.canTryAgain ? <PrimaryButton label="TRY AGAIN" onPress={tryAgain} /> : null}
-        {view && !view.canTryAgain ? <PrimaryButton label="BACK TO HOME" onPress={goHome} /> : null}
+        {view ? (
+          <PrimaryButton
+            busy={advancing}
+            label="NEXT QUESTION"
+            onPress={() => void advance()}
+            variant={view.canTryAgain ? 'secondary' : 'primary'}
+          />
+        ) : null}
         {!view ? (
           <PrimaryButton
             busy={submitting}
@@ -385,12 +670,15 @@ function PrimaryButton({
   disabled = false,
   label,
   onPress,
+  variant = 'primary',
 }: {
   busy?: boolean;
   disabled?: boolean;
   label: string;
   onPress: () => void;
+  variant?: 'primary' | 'secondary';
 }) {
+  const secondary = variant === 'secondary';
   return (
     <Pressable
       accessibilityRole="button"
@@ -399,13 +687,14 @@ function PrimaryButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
+        secondary && styles.buttonSecondary,
         (disabled || busy) && styles.buttonDisabled,
         pressed && !disabled && !busy && styles.pressed,
       ]}>
       {busy ? (
-        <ActivityIndicator color={colors.primaryForeground} size="small" />
+        <ActivityIndicator color={secondary ? colors.primary : colors.primaryForeground} size="small" />
       ) : (
-        <AppText style={styles.buttonText}>{label}</AppText>
+        <AppText style={[styles.buttonText, secondary && styles.buttonTextSecondary]}>{label}</AppText>
       )}
     </Pressable>
   );
@@ -424,6 +713,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   buttonDisabled: { opacity: 0.5 },
+  buttonSecondary: { backgroundColor: colors.surface1, borderColor: colors.primary },
+  buttonTextSecondary: { color: colors.primary },
   buttonText: {
     color: colors.primaryForeground,
     fontFamily: typography.fonts.bold,
@@ -432,6 +723,41 @@ const styles = StyleSheet.create({
   },
   canvas: { alignSelf: 'center', backgroundColor: colors.background, flex: 1, maxWidth: 500, width: '100%' },
   centered: { alignItems: 'center', flex: 1, gap: spacing.md, justifyContent: 'center', padding: spacing.lg },
+  hintButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.secondarySoft,
+    borderColor: colors.secondary,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    minHeight: 48,
+    paddingHorizontal: spacing.md,
+  },
+  hintButtonText: {
+    color: colors.secondaryForeground,
+    fontFamily: typography.fonts.bold,
+    fontSize: typography.fontSize.sm,
+    letterSpacing: typography.letterSpacing.button,
+  },
+  hintCard: {
+    backgroundColor: colors.secondarySoft,
+    borderColor: colors.secondary,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    gap: spacing.xs,
+    padding: spacing.smPlus,
+  },
+  hintClosed: { color: colors.textSecondary },
+  hintHeader: { alignItems: 'center', flexDirection: 'row', gap: spacing.xs },
+  hintLevel: {
+    color: colors.secondaryForeground,
+    fontFamily: typography.fonts.bold,
+    fontSize: typography.fontSize.sm,
+    letterSpacing: typography.letterSpacing.label,
+  },
+  headerRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   iconCircle: {
     alignItems: 'center',
     backgroundColor: colors.primarySoft,
@@ -457,6 +783,11 @@ const styles = StyleSheet.create({
     lineHeight: typography.lineHeight.subtitle,
   },
   pressed: { opacity: 0.85 },
+  progressText: {
+    color: colors.textSecondary,
+    fontFamily: typography.fonts.bold,
+    fontSize: typography.fontSize.sm,
+  },
   promptCard: {
     backgroundColor: colors.surface1,
     borderBottomColor: colors.borderStrong,
@@ -491,4 +822,5 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   supportCode: { color: colors.textMuted, fontSize: typography.fontSize.xs },
+  visual: { marginTop: spacing.md },
 });

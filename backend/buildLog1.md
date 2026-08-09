@@ -2860,3 +2860,247 @@ per the same no-agent-git-mutation discipline as this repository.
 
 Implemented directly, per the same explicit instruction as the batches above. No git
 state-changing command was run.
+
+---
+
+## 2026-08-09 — B→C evidence-boundary review: proposal-only, no code touched
+
+An architecture/research review of a proposed MINIMAL-CHANGE enrichment of the B→C boundary:
+send the seven mastery probabilities **plus** an approved per-skill evidence/readiness signal, so
+Component C can distinguish `mastery_addition = 0.977` backed by three observations from the same
+value backed by twenty. Explicitly proposal-only — no code, no BKT parameter, and no contract was
+modified, and no git state-changing command was run. The deliverable is a published review
+document, not a patch.
+
+**The review was conducted against the Component C generator as implemented**
+(`Yass/Implementation_v1.0/component_c_generator`), not against its specifications, and that
+distinction changed the answer three times.
+
+**Finding 1 — the "C-side warm-up" alternative is not a proposal; it is shipped code.**
+`selection/phase.py::decide_session_phase` implements the familiarization off-by-one rule,
+`selection/selector.py` honours it with a mastery-free seeded rotation, and
+`selection/config.py:82` carries grade-specific windows `{2: 2, 3: 3}`. Any A-vs-B comparison is
+really "replace working code" vs "keep it".
+
+**Finding 2 — the proposal is a request to reopen a recorded deferral, not a new idea.** The
+`Component_C_ColdStart_Bootstrap_Readiness_Assessment_v1.0` §4 decision table already scores the
+"B→C v2.2 mask" option as *highest* scientific validity and still dispositions it
+`deferred (v2.2)`; an earlier draft of that same document proposed an orchestrator-routed
+readiness mask and **withdrew** it. C enforces the resulting purity actively, not by convention:
+`models/session.py:28-31` blocks the substrings `observation_count` and `readiness` at runtime,
+and `tests/test_c_generator_phase_c1.py:313` asserts the rejection.
+
+**Finding 3 — the proposal identifies a real gap the assessment missed, but misplaces the harm.**
+The assessment analysed thin evidence only in the *low* direction (a prior-only skill mislabelled
+"weakest"). The *high* direction was never analysed. Quantifying it against the approved
+provisional priors (Component B Empirical Statistical Parameters §6.2.1) and
+`_clamp_initial_difficulty` verbatim: **one to three consecutive correct first attempts drive C's
+initial difficulty to the maximum of 5 in every population cell** (TD·counting: 1; MLD: 2;
+DD: 3). The decisive number is that at exactly `K = 2` — the bootstrap coverage target the whole
+§5.5 feasibility constraint exists to guarantee — initial difficulty is already 4 or 5 in six of
+seven cells. **The approved safety mechanism does not constrain the difficulty axis at all**,
+because it was engineered for the selection axis. Hand-derived values were re-computed
+programmatically and agreed to three decimal places.
+
+Severity is bounded, and honestly so: only task 1 uses the mastery-seeded difficulty
+(`pipeline/session.py:16-19`), C4.1 adaptation reads zero mastery (verified — `adaptation.py` and
+`policy/rule_based.py` contain no occurrence of the string), and the exposure is fully contained
+during sessions 1..W. Real risk of unknown magnitude, not a catastrophe.
+
+**Recommendation: useful but not required — do not open a v2.2 field proposal yet.** The harm
+channel, `_clamp_initial_difficulty`, is entirely C-owned, so the minimal response is a C-side
+difficulty cap needing no contract change, no schema bump, and no cross-owner approval. Ahead of
+that in priority: the Cold-Start Assessment is `DRAFT FOR OWNER REVIEW` with a blank signature
+table while shipped C code already transcribes its numbers, and its §1/§2 statements that
+"Component C is not implemented" and the selector is "proposed only … not yet code" are now
+false. Getting it signed and corrected is a larger exposure than the field question.
+
+**On signal choice, if the boundary is ever reopened:** the appropriate candidate is a raw
+per-skill first-attempt observation count in the existing `SkillCounts` model — *not* guess-guard
+status (derived from median RT, which B→C §2 prohibits outright) and *not* certification
+(`mastery_certified_<skill>` is named in the prohibited table, and it is a high-mastery gate, not
+an evidence measure — a category error, not merely a prohibited one). Two supporting facts worth
+recording: per-skill opportunity counts are **already an approved FROZEN export** on the B→3 edge
+(register B-032, `opportunities_w4`), so this would extend an existing field pattern rather than
+invent one; and the B→C spec carries its own reopening clause ("unless a higher-precedence
+document explicitly approves that field for this edge"), so the blocker is procedural, not
+absolute. Contrary to an earlier impression, **B-014 is not a blocker** — it governs B's internal
+estimation, not what B exports. SF-043 is not one either (it prohibits caching; a fresh
+same-session count is not a cache) and its register status is `PROPOSED`, not frozen.
+
+**Two incidental findings, both outside this review's scope, flagged for their owners:**
+- `app/infrastructure/live_engine/adapter.py:292` hardcodes `observation_count=0` when
+  reconstructing skill state for the packaged sequencer. Nothing downstream is wrong today (the
+  persisted column is authoritative and is incremented correctly at
+  `attempt_submission.py:351`), but any future readiness signal must be sourced from the column,
+  never from that reconstruction path.
+- The live backend still has **no B→C exporter at all** — `mastery_counting`, `BToCMastery`, and
+  `component_source` return nothing across `app/` and `contract/`. This weakens any urgency
+  argument but strengthens the timing one: whoever writes it should write it once, against
+  whichever schema is approved.
+
+**Files touched:** `backend/buildLog1.md` only. No source file, parameter, contract, or
+specification document was modified in either repository; the review was read-only throughout. A
+scratch BKT-trajectory probe was written to the session scratchpad, outside both repositories.
+
+---
+
+## 2026-08-09 — Component C production build plan: planning only, no code written
+
+A full implementation/build plan for taking the Adaptive Game-Based Learning Engine from research
+generator to live backend, live frontend, and an integrated B+C learning experience. Planning
+task only — no production code, no BKT parameter, no contract, and no specification document was
+modified in either repository, and no git state-changing command was run. Deliverable is a
+published 19-section plan with 17 diagrams. Sources: the actual C generator implementation under
+`Yass/Implementation_v1.0/component_c_generator`, the C SPEC / C3 telemetry spec / build plan /
+cold-start assessment, the Game-Task Catalogue and Parameters, the boundary contracts and
+registers, the governance memos, `HandowerDocs/`, and the live B backend/frontend under
+`Upadya/Dev`.
+
+**The plan was written against the code, not the specifications, and that reversed three things
+the documents assert.**
+
+**Finding 1 — the C research generator is COMPLETE, not pending.** Its own build plan states "no
+code authorized until the C0 preflight clears" and lists every phase as future work. In fact C0
+through C7.1 are all implemented: 84 modules, ~9,200 lines, and fourteen phase test files
+(`test_c_generator_phase_c1.py` → `test_c_generator_phase_c7_1_pilot.py`). `CToComponent3Payload`
+schema 3.0 exists and validates. The build plan and the cold-start assessment are both stale
+relative to the code they govern.
+
+**Finding 2 — nothing of C exists in production.** No live backend module, no frontend feature, no
+game tables (all 21 live tables are `b_*` or shared), no B→C exporter, no C→3 delivery. The
+production work is genuinely greenfield, but with a complete tested reference to port from.
+
+**Finding 3 — the unified Home / practice-streak concept is 100% unspecified.** Searching every
+spec, contract, register and governance document for `streak` and `unlock` returns **zero**
+matches. So the entire product layer is an owner decision with no prior art to contradict — which
+is the cleanest decision in the document. Recorded candidate rules only; no threshold, window, or
+expiry value invented.
+
+**The initial-difficulty finding, verified structurally.** The earlier review established that 1–3
+correct first attempts drive `_clamp_initial_difficulty` to level 5. Tracing the call graph this
+time produced the actual mechanism: `apply_safety` already owns difficulty bounding and already
+computes ceilings (familiarization cap, fallback cap, recovery cap, prior-state cap) — **but it
+never runs on task 1.** The selector sets the opening difficulty directly and the safety controller
+only enters from task 2 onward. So the system has two difficulty-setting paths and only one is
+audited. The minimum change splits cleanly: (a) route the opening pick through the existing safety
+ceiling computation — structural, parameter-free, no formula change, should happen regardless; and
+(b) the ceiling value itself, which is a genuine owner decision because today's ceilings leave a
+healthy mastery-driven session at 5. Three candidates recorded (reuse the existing familiarization
+cap for the first mastery-driven session; a new capped config value; or drop mastery-seeding
+entirely). **Deliberately did not select one** — the choice trades engagement against caution.
+
+**Scientific/product separation made structural rather than aspirational.** The plan requires
+`c_access_state` to declare no scientific column, the access module to import nothing from the
+engine adapter, and a denied-substring guard over its responses — mirroring C's existing
+`_B_DERIVED_KEY_MARKERS` pattern. Also noted that the product lock and the scientific
+familiarization window already agree without being coupled: a learner who only plays games never
+completes a combined handoff, so the familiarization counter never advances anyway. They reinforce
+each other and must still not be wired together.
+
+**Generator→production boundary.** Roughly half the generator is a learner simulator and must never
+ship: `behaviour/outcome_model.py`, `latency.py`, `action_provider.py`, `attempt_loop.py`,
+`decisions.py`, `pipeline/pilot*.py`. Flagged the trap that `pipeline/session.py` looks reusable
+but runs a whole session in one function call with synthetic actions — production must re-implement
+it as persisted, resumable, request-driven state and keep only its decision ordering.
+
+**Two governance findings worth acting on independently of this plan:**
+- The Cold-Start Assessment is `DRAFT FOR OWNER REVIEW` with a blank signature table, yet
+  `selection/config.py` transcribes its worked window values `{2: 2, 3: 3}` into shipped code and
+  `selection/phase.py` implements its rule as "FROZEN". Code depends on an unsigned document.
+- `R26-IT-138_Component_C_Final_Approval_Memo_v1.0_**APPROVED**.md` has a status line reading
+  "PROPOSED FOR COMPONENT-OWNER AND SUPERVISOR APPROVAL", a blank §18 sign-off block, and its own
+  opening warning that it "does not become 'approved' merely because it has been drafted." A viva
+  or handover pack must quote the status line, never the filename.
+
+**Recommended build order:** governance correction → kernel wheel + parity harness → schema →
+adapter → session/task lifecycle → telemetry + server-side evaluation → policy/safety →
+aggregation + outbox → frontend shell + 8 renderers → B→C exporter + combined ordering → unified
+Home → hardening. Packaging is first because the parity harness is what proves production runs the
+same science the research validated; schema is early because append-only guarantees are painful to
+retrofit. Also recorded what the team should refuse to build until a decision exists (any
+difficulty cap, the streak mechanism, any B→C evidence field, any RL policy, any client-side
+difficulty or safety logic).
+
+**Files touched:** `backend/buildLog1.md` only. No source file, parameter, contract, or
+specification was modified in either repository; the review was read-only throughout.
+
+---
+
+## 2026-08-09 — Component C build plan v2.0: merged and hardened, planning only
+
+Revised the Component C production build plan against two documents surfaced after the first
+draft: `Upadya/Component_C_Backend_Frontend_Build_Plan_v1.0.md` (2026-08-08) and
+`ResearchProject/R26-IT-138_Component_C_Supervisor_Intake_Report_and_Phase_1_Work_Order_v1.0.html`.
+Planning only — no production code, no BKT parameter, no contract, no specification modified in
+either repository, and no git state-changing command run. Output written to
+`Upadya/Component_C_Backend_Frontend_Build_Plan_v2.0.html`.
+
+**Both source documents were substantially better than my first draft on the packaging question,
+and the intake report found a defect my draft shared.** The v1.0 plan and my draft both excluded
+`behaviour/`, `pipeline/` and `audits/` as whole packages. That strands four pure, live-required
+files: `behaviour/summary.py` (the only implementation of the C3 §15 derived task summary),
+`pipeline/evidence.py` (the SPEC §14.2 evidence window and the Params §14 `c_rolling_strain`
+formula, transcribed verbatim), `pipeline/config.py`, and a trimmable `pipeline/session_state.py`.
+Per-package exclusion forces either re-implementing those formulas in the backend (guaranteed
+drift, in the exact fields that feed Component 3) or copying them into `app/` (a locally-modified
+science file outside the wheel and outside the parity chain — the thing BF-4 explicitly refused
+when it upstreamed `number_sense.py`). The correction is per-module exclusion, which is also what
+B actually does: B ships `behaviour/hints.py` with an emptied `behaviour/__init__.py`. Adopted;
+v2.0 §5 carries the corrected 10-file never-ship list.
+
+**Adopted the intake report's other findings as baseline**, notably: two wheels cannot both own a
+top-level `models` package (C's wheel vendors none and depends on B's, so the two pins are now
+coupled and a test must assert both manifests record the same SHA); **eight** pin locations rather
+than five (`requirements.in` and two more bundle fixtures were missing); the AST guard matches
+import *roots* only, so `component_c_generator.pipeline.session` would pass it; the
+prohibited-column guard bans `latency`, `correct`, `answer` and `mastery`, all four unavoidable in
+C's own schema; and pause pairing in the summary derivation is *positional*, so overlapping pauses
+pass every check while producing wrong durations.
+
+**Three findings added in v2.0 that neither source document caught:**
+
+- **C-16 (High) — the entire cold-start/familiarization mechanism is absent from the v1.0 plan.**
+  Verified: zero matches for `familiariz`, `session_phase`, `cold-start` or `handoff` in that
+  document. Its §5.8 describes `lowest_mastery_then_coverage` with no phase gate. A builder
+  implementing v1.0 faithfully would wire mastery-driven selection from session 1, silently
+  dropping a mechanism that is implemented and tested in the generator (`selection/phase.py`,
+  `selection/config.py`) — reintroducing the defect the cold-start assessment exists to prevent and
+  breaking generator parity. Now carried as a Phase 4 requirement plus a `session_phase` column and
+  the eligible-handoff counter.
+- **C-17 (Medium) — initial difficulty.** v1.0 §5.7 states `clamp(round(1 + 4 × mastery), 1, 5)`
+  with no risk note. Restated the verified finding that 1–3 correct first attempts saturate it at
+  level 5, and added the structural cause found by tracing the call graph: `apply_safety` already
+  computes ceilings but **never runs on task 1**. Fix split into a parameter-free part (route the
+  opening pick through the existing chokepoint) and an owner decision (the ceiling value, three
+  candidates, none recommended).
+- **C-18 (Medium) — renderer routing.** Extracted all 30 `valid_action_space` declarations. v1.0's
+  family routing gives 8 renderers each hiding an internal switch (Count-and-Collect alone spans
+  four different action shapes); my earlier draft's key-shape routing gives ~26, because key naming
+  is inconsistent — `submitted_total`/`sum`/`remainder`/`difference`/`product`/`quotient`,
+  `selected_numeral` and `selected_value` are eight names for one widget. Resolution: route on an
+  explicit template→**interaction archetype** table (8 archetypes), composed with representation
+  primitives. The mapping must be a table, never inferred from key names.
+
+**Corrections to my own earlier published plan:** the generator is **81 files / 9,182 lines**, not
+"84 modules" as I wrote — the v1.0 plan's figure was right and mine was wrong. Test counts restated
+honestly as static `def test_` counts (384 across 14 C phase files; 1,216 repo-wide), with an
+explicit note that the suite was not run and parametrisation makes collected counts higher; the
+"1,595 tests passing" figure could not be verified without running it.
+
+**Carried forward as the highest-risk item in the whole build (C-4, the intake report's):** nothing
+currently asserts that the safety controller *actually fires*. Both its severe triggers read fields
+produced by `build_policy_evidence`; if the backend assembles evidence from a truncated history,
+`compute_rolling_strain` collapses toward 0.0, the consecutive-error max collapses to the current
+task, and the hard safety layer silently never triggers while the suite stays green. This is B-1 in
+Component C form. Phase 6 acceptance now requires safety positive controls and estimator-input
+parity, not code-identity parity.
+
+**Blocking item, unchanged and owner-owned:** the `Upadya/Dev` working tree is not clean (7 modified
+files, 875 insertions, 78 deletions, 8 untracked paths — all Component B frontend work on
+`B_frontend`). Phase 1 cannot start under the plan's own load-bearing rule. Not mine to resolve; no
+commit or stash command was run or recommended.
+
+**Files touched:** `Upadya/Component_C_Backend_Frontend_Build_Plan_v2.0.html` (new) and
+`backend/buildLog1.md`. No source file, parameter, contract, or specification document was modified;
+the review was read-only throughout.

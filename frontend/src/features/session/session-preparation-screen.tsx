@@ -279,7 +279,9 @@ export function SessionPreparationScreen() {
   useEffect(() => {
     mountedRef.current = true;
     if (fixture) {
-      setLearner({ displayName: 'Yass' });
+      // Neutral placeholder, not a person's name. This used to hardcode a real person's first name,
+      // which in a fixture run means a child could be addressed as someone else.
+      setLearner({ displayName: 'Math Explorer' });
       void checkReadiness();
     } else if (status === 'authorized' && me?.learnerProfile) {
       setLearner({
@@ -375,19 +377,23 @@ export function SessionPreparationScreen() {
               loading={busy}
               title={readiness.title}
             />
+            {/* KEPT, and re-verified rather than assumed. This claim was false when written: only 2
+                of the 36 templates carried hint content, so ~94% of the time asking for help
+                returned a neutral 409. BE-C1 ported the governed L1/L2/L3 hints from R26-IT-138 §11
+                to all 36, and every one of the 108 lookups now resolves through
+                `LiveEngineAdapter.get_hint` (checked against the live catalogue for this batch). The
+                claim is now true, so it stays.
+                A third item used to follow, promising unlimited retries at the learner's own pace. It
+                was REMOVED: attempt limits are Gate-B unresolved, so the app cannot promise that.
+                Nothing replaces it — the card is flex: 1 and absorbs the space rather than needing
+                filler. (Its wording is not quoted here; a grep guard in
+                home-session-progress.test.ts enforces its absence.) */}
             <PreparationItem
               color="#ffb000"
               compact={compact}
               detail="Get helpful hints anytime"
               icon="bulb-outline"
               title="Hints available"
-            />
-            <PreparationItem
-              color="#9466e8"
-              compact={compact}
-              detail="Learn at your own pace"
-              icon="refresh"
-              title="You can try again"
             />
           </View>
 

@@ -80,8 +80,15 @@ function presentation(
   };
 }
 
+// planPresentation takes the request id separately (see its own comment): the inline question on
+// an advance response is an OpportunityPresentationFields with no request_id of its own. These
+// cases all come from POST /opportunities, so they pass that response's own request id.
+function planFor(response: OpportunityPresentationResponse) {
+  return planPresentation(response, response.request_id);
+}
+
 test('planPresentation renders a known format with its stem, skill label and spec', () => {
-  const plan = planPresentation(presentation());
+  const plan = planFor(presentation());
   assert.equal(plan.kind, 'render');
   if (plan.kind !== 'render') return;
   assert.equal(plan.stem, 'Which number is largest?');
@@ -94,21 +101,21 @@ test('planPresentation renders a known format with its stem, skill label and spe
 test('planPresentation preserves server-given choice order, unsorted', () => {
   // The server sorts lexicographically, so 10, 3, 9 is what a child legitimately sees. Re-sorting
   // here would be the client transforming server data (backend Risk 1, tracked separately).
-  const plan = planPresentation(presentation({ presented_choices: ['10', '3', '9', '100'] }));
+  const plan = planFor(presentation({ presented_choices: ['10', '3', '9', '100'] }));
   assert.equal(plan.kind, 'render');
   if (plan.kind !== 'render' || plan.spec.kind !== 'choice') return;
   assert.deepEqual(plan.spec.choices, ['10', '3', '9', '100']);
 });
 
 test('planPresentation does not branch on representation_type', () => {
-  const numeral = planPresentation(presentation({ representation_type: 'numeral' }));
-  const other = planPresentation(presentation({ representation_type: 'some_future_form' }));
+  const numeral = planFor(presentation({ representation_type: 'numeral' }));
+  const other = planFor(presentation({ representation_type: 'some_future_form' }));
   assert.equal(numeral.kind, 'render');
   assert.equal(other.kind, 'render');
 });
 
 test('planPresentation fails closed on an unknown response_format', () => {
-  const plan = planPresentation(presentation({ response_format: 'not_a_real_format' }));
+  const plan = planFor(presentation({ response_format: 'not_a_real_format' }));
   assert.equal(plan.kind, 'unrenderable');
   if (plan.kind !== 'unrenderable') return;
   assert.equal(plan.reason, 'unsupported-format');
@@ -116,31 +123,31 @@ test('planPresentation fails closed on an unknown response_format', () => {
 });
 
 test('planPresentation fails closed on a choice-count mismatch', () => {
-  const plan = planPresentation(
+  const plan = planFor(
     presentation({ response_format: 'relation_choice', presented_choices: ['a', 'b', 'c', 'd'] }),
   );
   assert.equal(plan.kind, 'unrenderable');
 });
 
 test('planPresentation fails closed on a non-choice format that arrived with choices', () => {
-  const plan = planPresentation(
+  const plan = planFor(
     presentation({ response_format: 'expanded_form', presented_choices: ['100 + 20 + 3'] }),
   );
   assert.equal(plan.kind, 'unrenderable');
 });
 
 test('planPresentation fails closed on a missing stem, distinguishably from a format problem', () => {
-  const plan = planPresentation(presentation({ prompt: { numbers: [1, 2] } }));
+  const plan = planFor(presentation({ prompt: { numbers: [1, 2] } }));
   assert.equal(plan.kind, 'unrenderable');
   if (plan.kind !== 'unrenderable') return;
   assert.equal(plan.reason, 'missing-stem');
 });
 
 test('planPresentation renders the free-entry and count-selection formats', () => {
-  const freeEntry = planPresentation(
+  const freeEntry = planFor(
     presentation({ response_format: 'expanded_form', presented_choices: [] }),
   );
-  const countSelection = planPresentation(
+  const countSelection = planFor(
     presentation({ response_format: 'interactive_set_selection', presented_choices: [] }),
   );
   assert.equal(freeEntry.kind === 'render' && freeEntry.spec.kind, 'free-entry');
@@ -155,7 +162,7 @@ test('initialAnswerState seeds each surface as not-yet-answered, so submit start
     ['expanded_form', []],
     ['interactive_set_selection', []],
   ] as const) {
-    const plan = planPresentation(presentation({ response_format: responseFormat, presented_choices: [...choices] }));
+    const plan = planFor(presentation({ response_format: responseFormat, presented_choices: [...choices] }));
     assert.equal(plan.kind, 'render');
     if (plan.kind !== 'render') return;
     const seed = initialAnswerState(plan.spec);
@@ -168,7 +175,7 @@ test('initialAnswerState seeds each surface as not-yet-answered, so submit start
 });
 
 test('a count of 0 is a real, submittable answer — only the -1 seed is not', () => {
-  const plan = planPresentation(
+  const plan = planFor(
     presentation({ response_format: 'interactive_set_selection', presented_choices: [] }),
   );
   assert.equal(plan.kind, 'render');
