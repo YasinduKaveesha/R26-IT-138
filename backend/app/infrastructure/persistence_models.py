@@ -678,4 +678,505 @@ class CRuntimeBundleRecord(ProvenanceMixin, Base):
     immutable_after_publication: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
 
 
+# =====================================================================================
+# Component C Phase 3a — the ten tables (Component_C_Master_Build_Plan_v3.0.md §11 Phase 3).
+# Tables only: no cross-row invariant (terminal-event uniqueness, event_index continuity,
+# timestamp monotonicity, attempt-count bounds) is enforced here — that is Phase 3b, per the
+# owner's scope split (Phase 3a work order, "SCOPE" / "OUT OF SCOPE" sections). Two exceptions
+# land in 3a because they are genuinely single-row/single-table, not cross-row: the UNIQUE on
+# c_sessions(student_id, intervention_session_id), and the single-row CHECK
+# event_timestamp_relative_ms >= 0 on c_gameplay_events — both BUILDER JUDGMENT, ratified as
+# "R-E" in the Phase 3a work order ("UNIQUE(student_id, intervention_session_id) on c_sessions
+# and the single-row CHECK event_timestamp_relative_ms >= 0 LAND IN 3a under scope item 2.
+# Every other invariant in your Q6 table is 3b. Do not build a trigger this phase.").
+#
+# Every enum-style CHECK below cites its source: either a Literal type verified directly against
+# the installed component_c_generator wheel during Phase 1b/3a planning (named per column), or
+# an existing structural constant already in this file (SESSION_STATES, the grade-2/3 convention
+# already used by RuntimeBundleRecord's B sibling TaskInstanceRecord). No CHECK constraint in
+# this block contains an invented numeric threshold (Phase 3a work order, R-G).
+# =====================================================================================
+
+
+class CSessionRecord(ProvenanceMixin, Base):
+    """Component C Phase 3a. Session lifecycle, pinned catalogue/config versions,
+    ``mastery_context_mode``, ``session_phase`` (Component_C_Master_Build_Plan_v3.0.md §11
+    Phase 3 table purpose). ``state`` is left without an enum CHECK deliberately — BUILDER
+    JUDGMENT, UNRATIFIED: the exact C session-lifecycle vocabulary is Phase 4's ("session
+    lifecycle... modes... cold-start gate") to define; the column exists now so Phase 4 needs no
+    migration just to add a foundational session column."""
+
+    __tablename__ = "c_sessions"
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id", "intervention_session_id", name="uq_c_sessions_student_intervention_session"
+        ),
+        CheckConstraint("session_mode IN ('combined', 'c_only')", name="ck_c_sessions_session_mode"),
+        CheckConstraint(
+            "session_phase IN ('familiarization', 'mastery_driven', 'c_only')",
+            name="ck_c_sessions_session_phase",
+        ),
+        CheckConstraint(
+            "mastery_context_mode IN ('same_session_fresh', 'unavailable_fallback')",
+            name="ck_c_sessions_mastery_context_mode",
+        ),
+        CheckConstraint("grade IN (2, 3)", name="ck_c_sessions_grade"),
+        *ProvenanceMixin.provenance_constraints("c_sessions"),
+    )
+
+    c_session_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    student_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False
+    )
+    intervention_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    session_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    session_phase: Mapped[str] = mapped_column(String(32), nullable=False)
+    # ALLOW-LISTED (AUTHORIZED_C_COLUMN_EXCEPTIONS) -- false-positive-name class (R-C): contains
+    # "mastery" but its domain is exactly the two values in the CHECK above, never a mastery
+    # scalar.
+    mastery_context_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    catalogue_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    catalogue_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    c_runtime_bundle_record_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("c_runtime_bundle_records.c_runtime_bundle_record_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    grade: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    global_seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    started_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
+class CTaskOpportunityRecord(ProvenanceMixin, Base):
+    """Component C Phase 3a. One row per offered task; selection evidence; terminal result
+    (v3.0 §11 Phase 3)."""
+
+    __tablename__ = "c_task_opportunities"
+    __table_args__ = (
+        CheckConstraint(
+            "session_phase IN ('familiarization', 'mastery_driven', 'c_only')",
+            name="ck_c_task_opportunities_session_phase",
+        ),
+        CheckConstraint(
+            "mastery_context_mode IN ('same_session_fresh', 'unavailable_fallback')",
+            name="ck_c_task_opportunities_mastery_context_mode",
+        ),
+        *ProvenanceMixin.provenance_constraints("c_task_opportunities"),
+    )
+
+    c_task_opportunity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    c_session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_sessions.c_session_id", ondelete="RESTRICT"), nullable=False
+    )
+    task_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    selected_skill_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    selected_template_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    initial_difficulty_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    # ALLOW-LISTED -- false-positive-name class, same reasoning as c_sessions above.
+    mastery_context_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    # ALLOW-LISTED -- carries-real-content class (R-D): SelectionResult's own returned
+    # provenance for the governed clamp(round(1 + 4 x mastery), 1, 5) initial-difficulty
+    # decision (C-17). C auditing its own reviewed calculation, not re-storing B's contract.
+    mastery_selected_skill: Mapped[float | None] = mapped_column(Float, nullable=True)
+    session_phase: Mapped[str] = mapped_column(String(32), nullable=False)
+    terminal_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    task_offered_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CTaskInstanceRecord(ProvenanceMixin, Base):
+    """Component C Phase 3a. PRIVATE. Instance, difficulty vector, correct answer, seed lineage
+    (v3.0 §11 Phase 3). No projection to a public DTO exists in this codebase yet -- building
+    one (mirroring B's BE3c ``project_task_instance_to_presentation`` allow-list pattern) is
+    Phase 5's job, not this batch's. Mirrors B's ``TaskInstanceRecord`` minimal-FK style: reached
+    only via ``c_task_opportunity_id``, no denormalized session/student id."""
+
+    __tablename__ = "c_task_instances"
+    __table_args__ = (
+        UniqueConstraint("c_task_opportunity_id", name="uq_c_task_instances_opportunity"),
+        CheckConstraint("grade_scope IN (2, 3)", name="ck_c_task_instances_grade_scope"),
+        CheckConstraint(
+            "scaffold_state IN ('C0', 'C1', 'C2', 'C3', 'C4')", name="ck_c_task_instances_scaffold_state"
+        ),
+        CheckConstraint("technical_status IN ('OK', 'FAILED')", name="ck_c_task_instances_technical_status"),
+        *ProvenanceMixin.provenance_constraints("c_task_instances"),
+    )
+
+    c_task_instance_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    c_task_opportunity_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("c_task_opportunities.c_task_opportunity_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    game_family_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    game_task_template_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    template_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    catalogue_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    generator_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    task_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    skill_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    curriculum_node_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    grade_scope: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    difficulty_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    difficulty_vector: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    functional_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    representation_mode: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    interactive_assets: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    # ALLOW-LISTED -- carries-real-content class: the private, never-public correct answer.
+    correct_answer_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    # ALLOW-LISTED -- carries-real-content class: not named by v3.0 §8, found by this batch's
+    # own term-by-term derivation (Phase 3a work order R-B): "correctness_function_id" contains
+    # "correct".
+    correctness_function_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    valid_action_space: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    completion_condition: Mapped[str] = mapped_column(String(255), nullable=False)
+    failure_condition: Mapped[str] = mapped_column(String(255), nullable=False)
+    scaffold_state: Mapped[str] = mapped_column(String(8), nullable=False)
+    recovery_parent_instance_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_task_instances.c_task_instance_id", ondelete="RESTRICT"), nullable=True
+    )
+    technical_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    seed_lineage_global_seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    seed_lineage_path: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+    seed_lineage_seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class CGameplayEventRecord(ProvenanceMixin, Base):
+    """Component C Phase 3a. The canonical stream (C3 §14). Table shape only -- append-only /
+    immutable enforcement (no UPDATE after insert) and every cross-row invariant (exactly one
+    terminal event per task, event_index continuity, timestamp monotonicity) are Phase 3b, not
+    built here (v3.0 §11 Phase 3 names these as DB-level constraints, but the Phase 3a work
+    order's own scope split reserves every cross-row invariant for 3b)."""
+
+    __tablename__ = "c_gameplay_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ("
+            "'game_task_offered', 'game_task_started', 'action_performed', 'answer_submitted', "
+            "'answer_evaluated', 'retry_started', 'pause_started', 'pause_ended', "
+            "'scaffold_requested', 'scaffold_shown', 'technical_issue', 'game_task_completed', "
+            "'game_task_skipped', 'game_task_quit')",
+            name="ck_c_gameplay_events_event_type",
+        ),
+        CheckConstraint("event_timestamp_relative_ms >= 0", name="ck_c_gameplay_events_timestamp_non_negative"),
+        CheckConstraint(
+            "scaffold_code IS NULL OR scaffold_code IN ('C0', 'C1', 'C2', 'C3', 'C4')",
+            name="ck_c_gameplay_events_scaffold_code",
+        ),
+        CheckConstraint(
+            "terminal_reason IS NULL OR terminal_reason IN ("
+            "'completed_correct', 'completed_incorrect', 'skipped', 'quit_after_error', "
+            "'quit_without_recent_error', 'technical_issue', 'attempt_cap_exhausted', "
+            "'timeout_no_response', 'safe_session_stop')",
+            name="ck_c_gameplay_events_terminal_reason",
+        ),
+        *ProvenanceMixin.provenance_constraints("c_gameplay_events"),
+    )
+
+    c_gameplay_event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    c_session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_sessions.c_session_id", ondelete="RESTRICT"), nullable=False
+    )
+    game_task_instance_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_task_instances.c_task_instance_id", ondelete="RESTRICT"), nullable=False
+    )
+    task_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    event_timestamp_relative_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    action_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    evaluation_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    scaffold_code: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    technical_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    terminal_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    seed_lineage_global_seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    seed_lineage_path: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+    seed_lineage_seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    generator_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    config_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class CTaskOpportunitySummaryRecord(ProvenanceMixin, Base):
+    """Component C Phase 3a. Derived per-task rollup (C3 §15). Derived only, never sampled --
+    exactly one summary per task instance (UNIQUE below)."""
+
+    __tablename__ = "c_task_opportunity_summaries"
+    __table_args__ = (
+        UniqueConstraint("game_task_instance_id", name="uq_c_task_opportunity_summaries_instance"),
+        CheckConstraint(
+            "highest_scaffold_level IS NULL OR highest_scaffold_level IN ('C0', 'C1', 'C2', 'C3', 'C4')",
+            name="ck_c_task_opportunity_summaries_highest_scaffold_level",
+        ),
+        CheckConstraint(
+            "terminal_reason IS NULL OR terminal_reason IN ("
+            "'completed_correct', 'completed_incorrect', 'skipped', 'quit_after_error', "
+            "'quit_without_recent_error', 'technical_issue', 'attempt_cap_exhausted', "
+            "'timeout_no_response', 'safe_session_stop')",
+            name="ck_c_task_opportunity_summaries_terminal_reason",
+        ),
+        *ProvenanceMixin.provenance_constraints("c_task_opportunity_summaries"),
+    )
+
+    c_task_opportunity_summary_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    c_session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_sessions.c_session_id", ondelete="RESTRICT"), nullable=False
+    )
+    game_task_instance_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_task_instances.c_task_instance_id", ondelete="RESTRICT"), nullable=False
+    )
+    task_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    task_offered: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    task_started: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    task_completed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    task_skipped: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    task_quit: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    technical_issue: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # ALLOW-LISTED -- carries-real-content class.
+    correct_task: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    total_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    scaffold_requested: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    scaffold_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    highest_scaffold_level: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # ALLOW-LISTED -- carries-real-content class.
+    c_answer_changes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # ALLOW-LISTED -- carries-real-content class.
+    task_latency_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    inactive_time_sec: Mapped[float] = mapped_column(Float, nullable=False)
+    inactivity_periods: Mapped[int] = mapped_column(Integer, nullable=False)
+    quit_after_error: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    terminal_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # ALLOW-LISTED -- carries-real-content class.
+    first_attempt_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # ALLOW-LISTED -- carries-real-content class.
+    final_attempt_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # NOT allow-listed -- verified this batch (R-B) to NOT collide: the prohibited term is
+    # "error_class", and this column contains "error_max", not "error_class". v3.0 §8 names this
+    # column as colliding; that is a documented error in v3.0, not reproduced here.
+    consecutive_error_max_within_task: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class CSessionAggregateResultRecord(ProvenanceMixin, Base):
+    """Component C Phase 3a. PRIVATE. Aggregate + C-COMP-v1 + C-LS-v1 (v3.0 §11 Phase 3). No
+    projection to a public DTO exists in this codebase yet -- Phase 5's job, not this batch's."""
+
+    __tablename__ = "c_session_aggregate_results"
+    __table_args__ = (
+        UniqueConstraint("c_session_id", name="uq_c_session_aggregate_results_session"),
+        CheckConstraint(
+            "difficulty_trend IN ('increasing', 'stable', 'decreasing')",
+            name="ck_c_session_aggregate_results_difficulty_trend",
+        ),
+        CheckConstraint(
+            "telemetry_quality_status IS NULL OR telemetry_quality_status IN "
+            "('complete', 'insufficient_evidence', 'technical_issue')",
+            name="ck_c_session_aggregate_results_telemetry_quality_status",
+        ),
+        CheckConstraint(
+            "learner_state IS NULL OR learner_state IN "
+            "('engaged', 'productive_struggle', 'overloaded', 'disengaged')",
+            name="ck_c_session_aggregate_results_learner_state",
+        ),
+        CheckConstraint(
+            "state_reason IS NULL OR state_reason IN ("
+            "'technical_issue', 'insufficient_session_evidence', 'safety_override_with_error_burst', "
+            "'quit_after_error', 'repeated_floor_hits_with_low_completion', 'high_behavioral_friction', "
+            "'low_engagement_score', 'inactivity_with_low_completion', 'high_engagement_low_friction', "
+            "'sustained_participation_under_challenge', 'insufficient_sustained_participation')",
+            name="ck_c_session_aggregate_results_state_reason",
+        ),
+        *ProvenanceMixin.provenance_constraints("c_session_aggregate_results"),
+    )
+
+    c_session_aggregate_result_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    c_session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_sessions.c_session_id", ondelete="RESTRICT"), nullable=False
+    )
+    task_opportunity_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    completed_task_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # ALLOW-LISTED -- carries-real-content class.
+    correct_task_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    accuracy_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_attempts_per_task: Mapped[float | None] = mapped_column(Float, nullable=True)
+    task_completion_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    inactivity_periods: Mapped[int] = mapped_column(Integer, nullable=False)
+    inactive_time_sec: Mapped[float] = mapped_column(Float, nullable=False)
+    inactive_time_available: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    session_duration_sec: Mapped[float] = mapped_column(Float, nullable=False)
+    time_in_target_band_sec: Mapped[float] = mapped_column(Float, nullable=False)
+    consecutive_error_max: Mapped[int] = mapped_column(Integer, nullable=False)
+    difficulty_floor_hits: Mapped[int] = mapped_column(Integer, nullable=False)
+    quit_after_error: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    safety_override_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # ALLOW-LISTED -- carries-real-content class.
+    c_mean_game_task_latency_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # ALLOW-LISTED -- carries-real-content class.
+    c_median_game_task_latency_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_difficulty_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    difficulty_trend: Mapped[str] = mapped_column(String(16), nullable=False)
+    session_technical_issue_flag: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    engagement_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    engagement_completion_component: Mapped[float | None] = mapped_column(Float, nullable=True)
+    engagement_activity_component: Mapped[float | None] = mapped_column(Float, nullable=True)
+    engagement_target_band_component: Mapped[float | None] = mapped_column(Float, nullable=True)
+    engagement_accuracy_component: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frustration_index: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frustration_error_run_component: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frustration_excess_attempt_component: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frustration_inactivity_burden_component: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frustration_floor_hit_component: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frustration_quit_after_error_component: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frustration_safety_override_component: Mapped[float | None] = mapped_column(Float, nullable=True)
+    telemetry_quality_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    learner_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    state_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class CLearnerLocalStateRecord(ProvenanceMixin, Base):
+    """Component C Phase 3a. Longitudinal: ``eligible_combined_handoffs_completed`` (N),
+    per-skill ``sessions_since_last_practice``, ``prior_session_end_state`` (v3.0 §11 Phase 3).
+    One row per learner."""
+
+    __tablename__ = "c_learner_local_state"
+    __table_args__ = (
+        UniqueConstraint("student_id", name="uq_c_learner_local_state_student"),
+        CheckConstraint(
+            "prior_session_end_state IS NULL OR prior_session_end_state IN "
+            "('engaged', 'productive_struggle', 'overloaded', 'disengaged')",
+            name="ck_c_learner_local_state_prior_session_end_state",
+        ),
+        *ProvenanceMixin.provenance_constraints("c_learner_local_state"),
+    )
+
+    c_learner_local_state_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    student_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("b_learners.learner_id", ondelete="RESTRICT"), nullable=False
+    )
+    eligible_combined_handoffs_completed: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    sessions_since_last_practice: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    prior_session_end_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+
+class CPolicyDecisionRecord(ProvenanceMixin, Base):
+    """Component C Phase 3a. Every proposal and applied action, versioned, incl.
+    ``increase_block_remaining`` (v3.0 §11 Phase 3). ``evidence_snapshot`` holds the
+    ``PolicyObservableEvidence`` the decision was based on as JSONB rather than flattened
+    columns -- BUILDER JUDGMENT, UNRATIFIED: flattening would add more prohibited-term columns
+    (e.g. ``recent_correctness_rate``) without changing what is stored."""
+
+    __tablename__ = "c_policy_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "policy_mode IN ('rule_based_baseline', 'q_learning_offline', 'frozen_q_evaluation')",
+            name="ck_c_policy_decisions_policy_mode",
+        ),
+        CheckConstraint(
+            "selected_action IN ('decrease_difficulty', 'hold', 'increase_difficulty')",
+            name="ck_c_policy_decisions_selected_action",
+        ),
+        CheckConstraint(
+            "applied_action IN ('decrease_difficulty', 'hold', 'increase_difficulty')",
+            name="ck_c_policy_decisions_applied_action",
+        ),
+        CheckConstraint(
+            "rolling_strain_bucket IN ('low', 'moderate', 'high', 'severe')",
+            name="ck_c_policy_decisions_rolling_strain_bucket",
+        ),
+        CheckConstraint(
+            "session_start_state_bucket IS NULL OR session_start_state_bucket IN "
+            "('engaged', 'productive_struggle', 'overloaded', 'disengaged')",
+            name="ck_c_policy_decisions_session_start_state_bucket",
+        ),
+        *ProvenanceMixin.provenance_constraints("c_policy_decisions"),
+    )
+
+    c_policy_decision_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    c_session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_sessions.c_session_id", ondelete="RESTRICT"), nullable=False
+    )
+    c_task_opportunity_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("c_task_opportunities.c_task_opportunity_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    policy_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    rl_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    selected_action: Mapped[str] = mapped_column(String(32), nullable=False)
+    applied_action: Mapped[str] = mapped_column(String(32), nullable=False)
+    action_overridden: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    safety_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    difficulty_before: Mapped[int] = mapped_column(Integer, nullable=False)
+    difficulty_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    rolling_strain_bucket: Mapped[str] = mapped_column(String(16), nullable=False)
+    session_start_state_bucket: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    increase_block_remaining: Mapped[int] = mapped_column(Integer, nullable=False)
+    internal_reward: Mapped[float | None] = mapped_column(Float, nullable=True)
+    seed_lineage_global_seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    seed_lineage_path: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+    seed_lineage_seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    evidence_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class CSafetyEventRecord(ProvenanceMixin, Base):
+    """Component C Phase 3a. Every intervention, with trigger and action (v3.0 §11 Phase 3).
+    ``trigger_reason``/``action_taken`` are left without an enum CHECK -- BUILDER JUDGMENT,
+    UNRATIFIED: no verified package Literal names the closed vocabulary for these two fields the
+    way it does for e.g. ``policy_mode``; adding an invented enum would risk exactly the kind of
+    unsourced value R-G prohibits for numeric literals, applied here to strings instead."""
+
+    __tablename__ = "c_safety_events"
+    __table_args__ = (*ProvenanceMixin.provenance_constraints("c_safety_events"),)
+
+    c_safety_event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    c_session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_sessions.c_session_id", ondelete="RESTRICT"), nullable=False
+    )
+    c_policy_decision_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_policy_decisions.c_policy_decision_id", ondelete="RESTRICT"), nullable=True
+    )
+    trigger_reason: Mapped[str] = mapped_column(String(128), nullable=False)
+    action_taken: Mapped[str] = mapped_column(String(64), nullable=False)
+    difficulty_before: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    difficulty_after: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class CScaffoldEventRecord(ProvenanceMixin, Base):
+    """Component C Phase 3a. Requests and shows, C0-C4 (v3.0 §11 Phase 3). ``event_type`` is
+    left without an enum CHECK -- BUILDER JUDGMENT, UNRATIFIED: "requested"/"shown" is inferred
+    from v3.0's own prose ("Requests and shows"), not verified against a package Literal the way
+    ``scaffold_level`` is; not adding an unsourced enum here."""
+
+    __tablename__ = "c_scaffold_events"
+    __table_args__ = (
+        CheckConstraint(
+            "scaffold_level IN ('C0', 'C1', 'C2', 'C3', 'C4')", name="ck_c_scaffold_events_scaffold_level"
+        ),
+        *ProvenanceMixin.provenance_constraints("c_scaffold_events"),
+    )
+
+    c_scaffold_event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    c_session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_sessions.c_session_id", ondelete="RESTRICT"), nullable=False
+    )
+    c_task_opportunity_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("c_task_opportunities.c_task_opportunity_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    scaffold_level: Mapped[str] = mapped_column(String(8), nullable=False)
+    consecutive_incorrect_current_task: Mapped[int] = mapped_column(Integer, nullable=False)
+    safety_forces_recovery: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+
 AUTHORIZED_TABLES = frozenset(Base.metadata.tables)

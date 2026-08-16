@@ -47,6 +47,11 @@ EXPECTED_TABLES = {
     "b_session_aggregate_results", "b_skill_certification_results",
     # Component C Phase 2 — mirrors b_runtime_bundle_records for Component C's own wheel pin.
     "c_runtime_bundle_records",
+    # Component C Phase 3a (v3.0 §11 Phase 3) — the ten tables, created by their own migration
+    # (20260816_0002), not BE2's 0002.
+    "c_sessions", "c_task_opportunities", "c_task_instances", "c_gameplay_events",
+    "c_task_opportunity_summaries", "c_session_aggregate_results", "c_learner_local_state",
+    "c_policy_decisions", "c_safety_events", "c_scaffold_events",
 }
 BE2_BASE_TABLES = EXPECTED_TABLES - {
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
@@ -57,6 +62,10 @@ BE2_BASE_TABLES = EXPECTED_TABLES - {
     "b_session_aggregate_results", "b_skill_certification_results",
     # Component C Phase 2 — created by its own migration (20260816_0001), not BE2's 0002.
     "c_runtime_bundle_records",
+    # Component C Phase 3a — created by their own migration (20260816_0002), not BE2's 0002.
+    "c_sessions", "c_task_opportunities", "c_task_instances", "c_gameplay_events",
+    "c_task_opportunity_summaries", "c_session_aggregate_results", "c_learner_local_state",
+    "c_policy_decisions", "c_safety_events", "c_scaffold_events",
 }
 PROHIBITED_COLUMN_TERMS = {
     "mastery", "bkt", "guess_guard", "certif", "sequenc", "hint", "answer",
@@ -75,15 +84,24 @@ AUTHORIZED_ANSWER_BEARING_COLUMNS = {
 
 
 def test_exact_authorized_model_table_set_and_no_scientific_columns() -> None:
+    """R-A (Phase 3a work order): this test's exemption sets are now
+    AUTHORIZED_ANSWER_BEARING_COLUMNS | AUTHORIZED_C_COLUMN_EXCEPTIONS. Phase 1b's "leave it
+    byte-identical" instruction is superseded for this test and this reason only, per the
+    Phase 3a work order's binding ruling R-A. AUTHORIZED_ANSWER_BEARING_COLUMNS itself keeps its
+    two B entries and its name, unchanged; C's pairs live in the separate, named
+    AUTHORIZED_C_COLUMN_EXCEPTIONS so provenance stays legible. Every assertion below stays
+    EXACT EQUALITY -- none relaxed to a subset check (R-A binding condition)."""
     assert AUTHORIZED_TABLES == EXPECTED_TABLES
     assert set(Base.metadata.tables) == EXPECTED_TABLES
 
-    # The allow-list itself must not be stale: both authorized columns must actually exist on
-    # b_task_instances, and no other table may have an answer/correct-bearing column at all.
+    exemptions = AUTHORIZED_ANSWER_BEARING_COLUMNS | AUTHORIZED_C_COLUMN_EXCEPTIONS
+
+    # The allow-list itself must not be stale: every exempted column must actually exist on its
+    # named table, and no other table may have an answer/correct-bearing column at all.
     table_columns = {
         table.name: {column.name for column in table.columns} for table in Base.metadata.tables.values()
     }
-    for table_name, column_name in AUTHORIZED_ANSWER_BEARING_COLUMNS:
+    for table_name, column_name in exemptions:
         assert column_name in table_columns.get(table_name, set()), (table_name, column_name)
     answer_bearing = {
         (table.name, column.name)
@@ -91,14 +109,17 @@ def test_exact_authorized_model_table_set_and_no_scientific_columns() -> None:
         for column in table.columns
         if any(term in column.name.lower() for term in ("answer", "correct"))
     }
-    assert answer_bearing == AUTHORIZED_ANSWER_BEARING_COLUMNS
+    answer_bearing_exemptions = {
+        pair for pair in exemptions if any(term in pair[1].lower() for term in ("answer", "correct"))
+    }
+    assert answer_bearing == answer_bearing_exemptions
 
     offenders = {
         (table.name, column.name)
         for table in Base.metadata.tables.values()
         for column in table.columns
         if any(term in column.name.lower() for term in PROHIBITED_COLUMN_TERMS)
-        and (table.name, column.name) not in AUTHORIZED_ANSWER_BEARING_COLUMNS
+        and (table.name, column.name) not in exemptions
     }
     assert not offenders, offenders
 
@@ -485,9 +506,48 @@ def test_prohibited_c_full_dotted_paths_matches_1a_never_ship_modules() -> None:
 # above stays byte-identical and its exact-equality assertion is never at risk.
 # =====================================================================================
 
-# Empty at Phase 1 -- Phase 3 is the first phase with real C tables to exempt anything on. See
-# test_prohibited_column_terms_allow_list_is_empty_for_phase_1 below.
-AUTHORIZED_C_COLUMN_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset()
+# Phase 3a: the 13 real collisions, derived term-by-term against PROHIBITED_COLUMN_TERMS from
+# the ten new C tables (Phase 3a work order R-B). Two classes, named per pair below:
+#   CARRIES-REAL-CONTENT -- a private column legitimately holding scientific content, same
+#     reasoning as AUTHORIZED_ANSWER_BEARING_COLUMNS's two B entries.
+#   FALSE-POSITIVE-NAME -- the term matches the column NAME but the column's value domain
+#     (enforced by a CHECK constraint) never actually contains that kind of content.
+AUTHORIZED_C_COLUMN_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset(
+    {
+        # FALSE-POSITIVE-NAME (R-C): domain is exactly ('same_session_fresh',
+        # 'unavailable_fallback'), enforced by ck_c_sessions_mastery_context_mode /
+        # ck_c_task_opportunities_mastery_context_mode -- never a mastery scalar.
+        ("c_sessions", "mastery_context_mode"),
+        ("c_task_opportunities", "mastery_context_mode"),
+        # CARRIES-REAL-CONTENT (R-D): SelectionResult's own returned provenance for the governed
+        # clamp(round(1 + 4 x mastery), 1, 5) initial-difficulty decision (C-17) -- C auditing
+        # its own reviewed calculation, not re-storing B's contract.
+        ("c_task_opportunities", "mastery_selected_skill"),
+        # CARRIES-REAL-CONTENT: the private, never-public correct answer (mirrors B's
+        # AUTHORIZED_ANSWER_BEARING_COLUMNS reasoning exactly).
+        ("c_task_instances", "correct_answer_payload"),
+        # CARRIES-REAL-CONTENT: not named by v3.0 Section 8 -- found by this batch's own
+        # term-by-term derivation (R-B). "correctness_function_id" contains "correct".
+        ("c_task_instances", "correctness_function_id"),
+        ("c_task_opportunity_summaries", "correct_task"),
+        ("c_task_opportunity_summaries", "c_answer_changes"),
+        ("c_task_opportunity_summaries", "task_latency_sec"),
+        ("c_task_opportunity_summaries", "first_attempt_correct"),
+        ("c_task_opportunity_summaries", "final_attempt_correct"),
+        ("c_session_aggregate_results", "correct_task_count"),
+        ("c_session_aggregate_results", "c_mean_game_task_latency_sec"),
+        ("c_session_aggregate_results", "c_median_game_task_latency_sec"),
+        # CARRIES-REAL-SCIENTIFIC-CONTENT (R-H): name-identical to
+        # component_c_generator.scaffolds.ladder.ScaffoldDecisionContext's
+        # consecutive_incorrect_current_task field -- the substring match ("incorrect" contains
+        # "correct") is incidental, but the semantics are not: this is a count of incorrect
+        # attempts, i.e. correctness-derived learner data, same class as correct_task /
+        # first_attempt_correct / final_attempt_correct above. Renaming it to dodge the guard
+        # would break parity with the governed scaffold-decision contract (R-H, extending R-B/G9).
+        # Do NOT reuse mastery_context_mode's false-positive-name justification for this entry.
+        ("c_scaffold_events", "consecutive_incorrect_current_task"),
+    }
+)
 
 
 def _offending_columns(tables, prohibited_terms, authorized_exceptions) -> set[tuple[str, str]]:
@@ -530,11 +590,28 @@ def test_prohibited_column_terms_mechanism_fires_on_synthetic_metadata() -> None
     assert set(Base.metadata.tables) == EXPECTED_TABLES  # untouched by the synthetic metadata above
 
 
-def test_prohibited_column_terms_allow_list_is_empty_for_phase_1() -> None:
-    """SIGNAL: AUTHORIZED_C_COLUMN_EXCEPTIONS is exactly empty right now. Would FAIL if a future
-    edit silently pre-populated this allow-list before Phase 3's real tables exist, hiding a
-    prohibited column behind an exemption nothing has reviewed yet."""
-    assert AUTHORIZED_C_COLUMN_EXCEPTIONS == frozenset()
+def test_prohibited_column_terms_allow_list_matches_the_14_computed_pairs() -> None:
+    """SIGNAL: AUTHORIZED_C_COLUMN_EXCEPTIONS is EXACTLY the C-side collision set COMPUTED live
+    from real Base.metadata against the real PROHIBITED_COLUMN_TERMS -- not a hand-maintained
+    list trusted on its own. R-I (Phase 3a UNBLOCK ruling): the 13-pair hand derivation missed
+    ("c_scaffold_events", "consecutive_incorrect_current_task"), found only when the guard ran
+    against real metadata. The fix is to compute the collision set from source every time this
+    test runs and compare AUTHORIZED_C_COLUMN_EXCEPTIONS against it -- never to hand-maintain the
+    count alone. Would FAIL if a future column collides and nobody adds its allow-list entry, or
+    if an entry is removed/added without a matching real collision, or if the computed set drifts
+    from 14 for any reason."""
+    computed_c_collisions = {
+        (table.name, column.name)
+        for table in Base.metadata.tables.values()
+        for column in table.columns
+        if any(term in column.name.lower() for term in PROHIBITED_COLUMN_TERMS)
+        and (table.name, column.name) not in AUTHORIZED_ANSWER_BEARING_COLUMNS
+    }
+    assert computed_c_collisions == AUTHORIZED_C_COLUMN_EXCEPTIONS
+    assert len(AUTHORIZED_C_COLUMN_EXCEPTIONS) == 14
+    assert ("c_task_opportunity_summaries", "consecutive_error_max_within_task") not in (
+        AUTHORIZED_C_COLUMN_EXCEPTIONS
+    ), "this column does not collide (R-B) and must never need an exemption"
 
 
 # =====================================================================================

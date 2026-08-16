@@ -3587,3 +3587,138 @@ staged or committed.
 into a real call (Phase 5); the seed-lineage gap (unchanged, still flagged, still unwired);
 `validate_payload`'s missing implementation (Phase 4); the mastery-payload provisional ruling's
 owner confirmation (unchanged).
+
+## 2026-08-16 — Component C Phase 3a: the ten tables, tables only
+
+Built the ten v3.0 §11 Phase 3 tables (`c_sessions`, `c_task_opportunities`, `c_task_instances`,
+`c_gameplay_events`, `c_task_opportunity_summaries`, `c_session_aggregate_results`,
+`c_learner_local_state`, `c_policy_decisions`, `c_safety_events`, `c_scaffold_events`), one
+migration, and every DECISION PROVENANCE tag the Phase 3a work order required. Table shape only:
+no cross-row invariant (terminal-event uniqueness, `event_index` continuity, timestamp
+monotonicity, attempt-count bounds, any trigger) is built here — all Phase 3b, per the work
+order's own scope split.
+
+**STOP-CHECK, run for real, quoted:**
+```
+git rev-parse HEAD          -> a4f27b76a110ba566c5ecd3a706b6d39966d4971
+git status --porcelain      -> M backend/app/infrastructure/persistence_models.py
+                                M backend/tests/test_be2_architecture_guards.py
+                                M backend/tests/test_be2_persistence.py
+                                ?? backend/migrations/versions/20260816_0002_c3a_ten_tables.py
+docker version               -> 29.2.1
+```
+
+**v3.0 corrections, recorded per R-B, not silently reproduced.** Cite: R-B, "The derived
+collision set of 13 is accepted. v3.0's two errors ... are recorded as corrections to v3.0."
+`consecutive_error_max_within_task` does **not** collide with `PROHIBITED_COLUMN_TERMS` — the
+prohibited term is `error_class`, this column contains `error_max`, not `error_class` — even
+though v3.0 §8 names it as colliding. `correctness_function_id` **does** collide (contains
+`correct`) even though v3.0 §8 never names it. Neither column was renamed to dodge or manufacture
+a match; both facts are recorded as corrections to v3.0, not to the code.
+
+**R-A (work-order text, quoted): "OPTION (b) IS RULED. Extend
+test_exact_authorized_model_table_set_and_no_scientific_columns so its exemption sets are
+AUTHORIZED_ANSWER_BEARING_COLUMNS | AUTHORIZED_C_COLUMN_EXCEPTIONS."** Implemented as a union
+inside that test's two internal exact-equality checks (the narrow answer/correct-only equality
+and the broad offenders-must-be-empty check), both still exact equality, no subset relaxation.
+`AUTHORIZED_ANSWER_BEARING_COLUMNS` (B's, 2 entries) kept byte-identical.
+
+**R-C (quoted): "mastery_context_mode gets an allow-list entry PAIRED with
+CheckConstraint(...IN ('same_session_fresh','unavailable_fallback'))."** Done on both
+`c_sessions` and `c_task_opportunities`; the exact two-value set is asserted directly (A5).
+
+**R-D (quoted): "mastery_selected_skill STAYS ... C auditing its own reviewed calculation, not
+re-storing B's contract."** Landed on `c_task_opportunities` as carries-real-content, not
+false-positive-name; docstring records it as `SelectionResult`'s own returned provenance for the
+governed `clamp(round(1 + 4 x mastery), 1, 5)` initial-difficulty decision.
+
+**R-E (quoted): "ONLY UNIQUE(student_id, intervention_session_id) on c_sessions and the
+single-row CHECK event_timestamp_relative_ms >= 0 LAND IN 3a ... Every other invariant in your
+Q6 table is 3b."** Both, and only both, landed as R-E-scoped invariants. Every other CHECK/UNIQUE
+added this batch is either an enum-style single-row CHECK or a single-table UNIQUE, both
+authorized directly by scope item 2 (not Q6), or an inherited `ProvenanceMixin` constraint (same
+mechanism B already uses on every table, not new this batch) — enumerated and verified
+programmatically against the real `Base.metadata` before S6 was written.
+
+**R-F (quoted, accepted as stated): "Exercise migration against a database already populated
+with Component B data ... report as exactly 'runs cleanly on a non-empty database'."** Verified:
+`alembic upgrade head` / `downgrade -1` / `upgrade head` cycle succeeded against the same
+Postgres instance B's own tests had already populated via `test_be2_persistence.py`'s fixtures.
+Reported as exactly that — no claim of legacy-row *coverage* is made.
+
+**R-G (quoted): "DO NOT INVENT A NUMERIC ATTEMPT BOUND ... No new CHECK constraint may contain a
+numeric literal whose source cannot be named."** No CHECK on `total_attempts`, `retry_count`,
+`scaffold_count`, `event_index`, `initial_difficulty_level`, or `difficulty_level` was added.
+`grade`/`grade_scope IN (2, 3)` is not a new invented bound — it mirrors the grade domain already
+established on `b_learners`/`b_task_instances`.
+
+**R-H / R-I — UNBLOCK ruling, the reason this batch stopped mid-way.** Running
+`test_exact_authorized_model_table_set_and_no_scientific_columns` against the real
+`Base.metadata` (not synthetic) surfaced a 14th collision the Q1 planning-turn hand derivation
+had missed: `('c_scaffold_events', 'consecutive_incorrect_current_task')` — "incorrect" contains
+"correct". Reported BLOCKED rather than resolving it unilaterally, per the work order's DECISION
+PROVENANCE clause. Supervisor ruling R-H (quoted): **"IS A 14TH ALLOW-LIST ENTRY. Classification:
+CARRIES-REAL-SCIENTIFIC-CONTENT, not false-positive-name ... name-identical to the reviewed
+engine input it persists [component_c_generator.scaffolds.ladder.ScaffoldDecisionContext].
+Renaming it would break parity with the governed scaffold-decision contract."** Added as the
+14th entry, tagged accordingly, `mastery_context_mode`'s justification not reused for it. R-I
+(quoted): **"STOP HAND-DERIVING THE COLLISION SET ... COMPUTE the collision set
+programmatically ... AUTHORIZED_C_COLUMN_EXCEPTIONS is still an explicit, enumerated constant —
+the point is that you VERIFY it against the computed set, never that you generate it at
+runtime."** `test_prohibited_column_terms_allow_list_matches_the_14_computed_pairs` now computes
+the C-side collision set live from `Base.metadata`/`PROHIBITED_COLUMN_TERMS` every run and
+asserts it equals `AUTHORIZED_C_COLUMN_EXCEPTIONS` exactly — the constant itself is unchanged as
+a hand-authored, explicit list; only its verification is no longer trust-on-its-own. A second,
+independent witness of the same fact was added in `test_c3a_persistence.py`
+(`test_c3a_allow_list_mechanism_fires_against_real_ten_tables`, A4) rather than importing the
+guard test's result.
+
+**BUILDER JUDGMENT — UNRATIFIED (recorded per the DECISION PROVENANCE clause, not attributed
+upward):** `c_sessions.state` left without an enum CHECK (Phase 4's session-lifecycle vocabulary
+to define); `c_safety_events.trigger_reason`/`action_taken` left without an enum CHECK (no
+verified package Literal source); `c_scaffold_events.event_type` left without an enum CHECK
+("requested"/"shown" inferred from v3.0 prose, not verified against a package Literal);
+`c_policy_decisions.evidence_snapshot` stored as one JSONB blob rather than flattened columns (to
+avoid manufacturing more prohibited-term collisions, e.g. `recent_correctness_rate`, without
+changing what is stored).
+
+**Migration up/down/up, verified against the real Postgres instance.** `alembic upgrade head`
+created exactly the ten tables (confirmed via async engine query — 11 `c_*` tables total,
+including Phase 2's `c_runtime_bundle_records`); `alembic downgrade -1` dropped exactly those
+ten; `alembic upgrade head` (re-upgrade) succeeded. Full cycle, no partial state.
+
+**Test suite, real numbers, real runs.** `docker compose build api` succeeded (all layers built
+or cached correctly, new migration and both edited test files copied into the image). Then
+`docker compose run --rm api python -m pytest -q`: **393 passed, 70 skipped, 0 failed,
+360.70s.** `--collect-only`: **463 collected.** Reconciles against the prior 354/70/424:
+`354 + 39 − 0 = 393` passed; `70` skipped unchanged (Phase 3a is pure DB/migration work, no new
+host-only test needed, matching the work order's own expectation); `424 + 39 = 463` collected —
+exactly the 39 tests in the new `tests/test_c3a_persistence.py` (10 round-trip + 26 CHECK
+provocation + 1 UNIQUE provocation + 1 real-metadata allow-list witness + 1 migration-content
+guard), all real, all passing in-container. No existing test weakened, skipped, xfailed, or
+deleted; one existing test renamed
+(`test_prohibited_column_terms_allow_list_is_empty_for_phase_1` →
+`..._matches_the_14_computed_pairs`, Phase 1b's own docstring had named Phase 3 as exactly when
+this would change).
+
+**Files created:** `backend/migrations/versions/20260816_0002_c3a_ten_tables.py`,
+`backend/tests/test_c3a_persistence.py`. **Files modified:**
+`backend/app/infrastructure/persistence_models.py` (the ten model classes),
+`backend/tests/test_be2_architecture_guards.py` (`AUTHORIZED_C_COLUMN_EXCEPTIONS` populated to
+14 entries; the R-A union logic; the renamed/recomputed allow-list-matches test;
+`EXPECTED_TABLES`/`BE2_BASE_TABLES` +10), `backend/tests/test_be2_persistence.py` (its own
+separate `EXPECTED_TABLES` +10), `backend/buildLog1.md` (this entry). No file under Phase 1's
+packaging tree, wheel, or provenance manifest; no frontend file; no Yass commit; no file
+belonging to Component B's wheel/pin/adapter/manifest/packaging tree or its fixtures; no route on
+`app.main:app`; no endpoint/service/session-lifecycle/selection/evaluation/policy/safety/
+scaffold/telemetry/aggregation logic; no adapter change; no cross-row invariant; no trigger. No
+git command beyond read-only verification (`status`, `rev-parse`) was run this batch; nothing was
+staged or committed.
+
+**Open for a future phase (Phase 3b and later):** every cross-row invariant reserved by the
+Phase 3a work order's scope split — exactly one terminal event per offered task, `event_index`
+consecutive from 1, `event_timestamp_relative_ms` non-decreasing per task, attempt counts
+bounded, and any trigger enforcing them; `c_sessions.state`'s enum vocabulary (Phase 4);
+`c_safety_events`/`c_scaffold_events`'s unratified enum gaps if a package Literal source is later
+found; any endpoint, service, or selection/evaluation/policy/safety/scaffold/telemetry/
+aggregation logic against these tables; any adapter change; any frontend file.

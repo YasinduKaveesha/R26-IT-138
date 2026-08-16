@@ -51,6 +51,10 @@ EXPECTED_TABLES = {
     "b_session_aggregate_results", "b_skill_certification_results",
     # Component C Phase 2 — mirrors b_runtime_bundle_records for Component C's own wheel pin.
     "c_runtime_bundle_records",
+    # Component C Phase 3a (v3.0 §11 Phase 3) — the ten tables.
+    "c_sessions", "c_task_opportunities", "c_task_instances", "c_gameplay_events",
+    "c_task_opportunity_summaries", "c_session_aggregate_results", "c_learner_local_state",
+    "c_policy_decisions", "c_safety_events", "c_scaffold_events",
 }
 COMMON_COLUMNS = {
     "created_at_utc", "updated_at_utc", "actor_user_id", "system_actor", "request_id",
