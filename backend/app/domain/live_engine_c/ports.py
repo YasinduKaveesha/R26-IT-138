@@ -58,6 +58,11 @@ class CataloguePort(Protocol):
 
     def checksum(self, catalogue_path: str) -> str: ...
 
+    def supported_template_ids(self) -> tuple[str, ...]:
+        """Code-sourced (``component_c_generator.tasks.registry``), not catalogue-file-sourced
+        -- the 21st adapter method (Phase 2)."""
+        ...
+
 
 class ActivationPort(Protocol):
     """Activation and grade eligibility (v3.0 §7, Phase 5). ``decide_activation`` takes the

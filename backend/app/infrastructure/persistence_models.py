@@ -648,4 +648,34 @@ class SkillCertificationResultRecord(ProvenanceMixin, Base):
     threshold_met_flag: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
 
+class CRuntimeBundleRecord(ProvenanceMixin, Base):
+    """Component C Phase 2: mirrors ``RuntimeBundleRecord``'s (b_runtime_bundle_records)
+    column set and constraint style exactly, pinning Component C's own
+    (``prabathi-component-c-live-engine``) runtime-bundle manifests rather than B's. No
+    relationship to ``b_runtime_bundle_records`` or any other B table."""
+
+    __tablename__ = "c_runtime_bundle_records"
+    __table_args__ = (
+        UniqueConstraint("bundle_version", name="uq_c_runtime_bundle_records_version"),
+        UniqueConstraint("manifest_checksum", name="uq_c_runtime_bundle_records_checksum"),
+        CheckConstraint("manifest_checksum ~ '^[0-9a-f]{64}$'", name="ck_c_runtime_bundle_records_checksum"),
+        CheckConstraint(
+            "publication_state IN ('DRAFT', 'PUBLISHED', 'RETIRED')",
+            name="ck_c_runtime_bundle_records_publication_state",
+        ),
+        CheckConstraint(
+            "publication_state <> 'PUBLISHED' OR immutable_after_publication",
+            name="ck_c_runtime_bundle_records_published_immutable",
+        ),
+        *ProvenanceMixin.provenance_constraints("c_runtime_bundle_records"),
+    )
+
+    c_runtime_bundle_record_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    bundle_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    manifest_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    publication_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    approval_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    immutable_after_publication: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+
+
 AUTHORIZED_TABLES = frozenset(Base.metadata.tables)

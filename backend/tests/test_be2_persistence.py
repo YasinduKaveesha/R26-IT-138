@@ -49,6 +49,8 @@ EXPECTED_TABLES = {
     "b_hint_events",
     # BE4e (BEplan §9 BE4.6) — private, immutable session-aggregate + skill-certification results.
     "b_session_aggregate_results", "b_skill_certification_results",
+    # Component C Phase 2 — mirrors b_runtime_bundle_records for Component C's own wheel pin.
+    "c_runtime_bundle_records",
 }
 COMMON_COLUMNS = {
     "created_at_utc", "updated_at_utc", "actor_user_id", "system_actor", "request_id",

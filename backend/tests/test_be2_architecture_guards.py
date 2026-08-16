@@ -45,6 +45,8 @@ EXPECTED_TABLES = {
     "b_hint_events",
     # BE4e (BEplan §9 BE4.6) — private, immutable session-aggregate + skill-certification results.
     "b_session_aggregate_results", "b_skill_certification_results",
+    # Component C Phase 2 — mirrors b_runtime_bundle_records for Component C's own wheel pin.
+    "c_runtime_bundle_records",
 }
 BE2_BASE_TABLES = EXPECTED_TABLES - {
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
@@ -53,6 +55,8 @@ BE2_BASE_TABLES = EXPECTED_TABLES - {
     "b_attempts", "b_skill_state_transitions",
     "b_hint_events",
     "b_session_aggregate_results", "b_skill_certification_results",
+    # Component C Phase 2 — created by its own migration (20260816_0001), not BE2's 0002.
+    "c_runtime_bundle_records",
 }
 PROHIBITED_COLUMN_TERMS = {
     "mastery", "bkt", "guess_guard", "certif", "sequenc", "hint", "answer",

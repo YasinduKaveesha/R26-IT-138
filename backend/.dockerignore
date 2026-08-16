@@ -67,6 +67,9 @@ provenance/wheels/*
 # provenance/ stay excluded exactly as before.
 !provenance/wheels/prabathi_component_c_live_engine-0.1.0+c1.09267ab-py3-none-any.whl
 !provenance/runtime-bundle.schema.json
+# Phase 2: Component C's own minimal runtime-bundle schema (validated at test/run time by
+# app.infrastructure.runtime_bundle_c.loader). Same carve-out pattern as B's schema above.
+!provenance/c-runtime-bundle.schema.json
 # BE3c exception: the implemented/deferred template partition provenance is read by the
 # characterization test suite to cross-check the TEST-FIXTURE-ONLY catalogue against the
 # reviewed coverage report. Contains no generator source, no wheel, no research artifacts.

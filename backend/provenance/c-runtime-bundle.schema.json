@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upadya.local/schemas/component-c-runtime-bundle-v1.0.schema.json",
+  "title": "Component C Runtime Bundle (Phase 2, minimal)",
+  "description": "Manifest for the Component C runtime artefacts a session would pin to. Deliberately minimal: Phase 2 needs only the generator wheel pin, the catalogue artefact pin, the bundle's own approval status, and compatibility metadata. Every Component B-only block (bkt_configuration, certification_configuration, guess_guard_configuration, sequencing_configuration, safe_progress_policy, attempt_policy, timeout_policy, completion_policy, cold_start_policy) is intentionally absent -- none of those are Component C concepts, and copying their structure (or B's frozen sequencing weights) here would record meaning that does not exist for C. Later phases (policy/safety/scaffold config pins) extend this schema when they actually need to, under their own authorization -- this file is not a forward-looking template.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "bundle_version",
+    "publication_state",
+    "immutable_after_publication",
+    "backend_code_version",
+    "database_schema_revision",
+    "generator",
+    "catalogue",
+    "approval_status",
+    "activation_date",
+    "compatibility"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "bundle_version": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "publication_state": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "PUBLISHED",
+        "RETIRED"
+      ]
+    },
+    "immutable_after_publication": {
+      "const": true,
+      "description": "The persistence and promotion layers must reject mutation after publication. JSON Schema records but cannot itself enforce storage immutability."
+    },
+    "backend_code_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "database_schema_revision": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Alembic revision when available; an explicit unresolved placeholder is permitted only while the bundle remains DRAFT."
+    },
+    "generator": {
+      "$ref": "#/$defs/sourceArtifact"
+    },
+    "catalogue": {
+      "$ref": "#/$defs/versionedArtifact"
+    },
+    "approval_status": {
+      "$ref": "#/$defs/approvalStatus"
+    },
+    "activation_date": {
+      "description": "Null while a bundle is an unapproved draft; a published active bundle requires an externally enforced non-null date-time.",
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend_api_major",
+        "generator_interface_version",
+        "python_specifier",
+        "database_schema_minimum",
+        "supported_grades",
+        "skills",
+        "required_catalogue_template_count"
+      ],
+      "properties": {
+        "backend_api_major": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generator_interface_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "python_specifier": {
+          "type": "string",
+          "minLength": 1
+        },
+        "database_schema_minimum": {
+          "type": "string",
+          "minLength": 1
+        },
+        "supported_grades": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": 2
+            },
+            {
+              "const": 3
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "skills": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "counting"
+            },
+            {
+              "const": "number_sense"
+            },
+            {
+              "const": "place_value"
+            },
+            {
+              "const": "addition"
+            },
+            {
+              "const": "subtraction"
+            },
+            {
+              "const": "multiplication"
+            },
+            {
+              "const": "division"
+            }
+          ],
+          "items": false,
+          "minItems": 7,
+          "maxItems": 7
+        },
+        "required_catalogue_template_count": {
+          "const": 30,
+          "description": "Component C's own EXPECTED_TEMPLATE_COUNT (component_c_generator.catalogue.loader), not B's 36 -- the two catalogues are unrelated artefacts."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "approvalStatus": {
+      "type": "string",
+      "enum": [
+        "APPROVED",
+        "APPROVED_FOR_PROVISIONAL_IMPLEMENTATION",
+        "PROVISIONAL",
+        "ENGINEERING_ASSUMPTION",
+        "CALIBRATION_PENDING",
+        "DISABLED",
+        "UNRESOLVED"
+      ]
+    },
+    "checksum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "value"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "sha256"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "sourceArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_identifier",
+        "source_path",
+        "checksum",
+        "interface_version"
+      ],
+      "properties": {
+        "source_identifier": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checksum": {
+          "$ref": "#/$defs/checksum"
+        },
+        "interface_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "versionedArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "checksum",
+        "approval_status"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checksum": {
+          "$ref": "#/$defs/checksum"
+        },
+        "approval_status": {
+          "$ref": "#/$defs/approvalStatus"
+        }
+      }
+    }
+  },
+  "x-runtime-invariants": [
+    "Published bundles are immutable",
+    "Existing sessions remain pinned to their original bundle",
+    "Activating a new bundle affects only new sessions",
+    "Missing or incompatible required artefacts fail readiness closed"
+  ]
+}

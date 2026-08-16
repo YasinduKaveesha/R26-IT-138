@@ -3442,3 +3442,148 @@ value); the owner's confirmation or reversal of the mastery-payload provisional 
 `_to_pkg_mastery_payload` by design, so a reversal touches one function); `validate_payload`'s
 missing implementation (Phase 4, per DEC-1/C-22's third consequence); end-to-end verification of
 the eight catalogue-dependent adapter methods against a real C catalogue fixture (Phase 2).
+
+## 2026-08-16 — Component C Phase 2: catalogue loader and runtime bundle
+
+Built the C-side catalogue/runtime-bundle chain: a TEST_FIXTURE_ONLY structural catalogue
+(RULE-1/Option A), a separate minimal C runtime-bundle schema and three new C bundle fixtures
+(RULE-2/Option A — closes COR-2's deferral with three NEW files, no edit to B's three), the 21st
+adapter method (`supported_template_ids`), the `c_runtime_bundle_records` table, a fail-closed
+409 path, and a new, unwired generation-config smoke-mode guard.
+
+**The fixture catalogue: field-by-field, and what was never opened.** The real
+`Yass/Component_C_v1.0/R26-IT-138_Component_C_Game_Task_Catalogue_v1.0.md` was never opened,
+read, or referenced while building `tests/fixtures/runtime_bundle_c/test_catalogue_c.md` --
+every structural value came from the installed `component_c_generator` package's own code, read
+directly inside the container: `game_task_template_id` (all 30, from
+`tasks.registry.supported_template_ids()`), `game_family_id` (`catalogue.loader.
+EXPECTED_FAMILY_IDS`), `primary_skill_ids` (`catalogue.loader.SEVEN_SKILLS`, cycled), `status`
+(`catalogue.loader._STATUS_VOCAB`), `functional_role` (`catalogue.loader._ROLE_VOCAB`),
+`grade_scope_text` (exact keys of `catalogue.loader._GRADE_GATE_MAP`, en-dash preserved). Every
+free-text field (`family_name`, `template_title`, `status_note`, `representations`,
+`representations_note`, `learner_action`, `correctness`, `error_signatures`,
+`main_difficulty_levers`, `recovery`, `curriculum_node_ids`) is a labelled `TEST_FIXTURE_ONLY`
+placeholder. A supervisor correction to the plan, recorded here: `load_catalogue` also enforces
+`EXPECTED_TEMPLATE_COUNT_BY_FAMILY` (an exact 4/4/4/4/4/4/3/3 per-family count) and validates
+each `game_task_template_id` against its family's own `template_id_prefix`. The 30 real ids were
+grouped by their own naming prefix (code-derived: `C-BT`, `C-CC`, `C-EG`, `C-JB`, `C-MCL`,
+`C-NP`, `C-SF`, `C-TC` -- 6 groups of 4, 2 groups of 3, matching the required distribution
+exactly), then the 8 family NUMBERS were assigned to those 8 prefix groups alphabetically -- an
+arbitrary, uniform, documented choice, not a reproduction of the real family grouping. One
+template (`C-SF-03`) was arbitrarily marked `DEFERRED_EXTENSION` to exercise the fail-closed
+path; the fixture header states this plainly. Verified through the real loader inside the
+container: 8 families, 30 templates, loaded id set == `supported_template_ids()`'s set exactly,
+`C-SF-03.is_active()` is `False`, checksum `aa0469b8d5e068d95bf80344ac5e26a9b573fc9f6123f7557f03465d8f77cbce`
+on disk and inside the rebuilt image, zero `\r` bytes.
+
+**What this fixture proves and does not (v3.0 §11 Phase 2 amended by the owner accordingly):**
+proves the Markdown/YAML parsing, the checksum chain, the fail-closed paths, the runtime-bundle
+integration, and that the fixture's ids cannot silently drift from the registry's own 30. Does
+**not** prove the real, reviewed catalogue loads -- unprovable until a governed catalogue exists
+(Phase 0).
+
+**A real, verified incompatibility changed S8's design.** The plan was to reuse
+`app.infrastructure.runtime_bundle.loader.RuntimeBundleLoader` unmodified for C's bundle. Running
+it against a schema-valid C fixture raised `KeyError: 'sequencing_configuration'` -- its
+`load_and_validate` body unconditionally reads several B-only manifest keys
+(`sequencing_configuration`, `bkt_configuration`, ...) independent of schema validation, which a
+minimal C-shaped bundle does not have. **BUILDER JUDGMENT -- UNRATIFIED.** No work order
+authorized this deviation; the Phase 2 order said to reuse `RuntimeBundleLoader` unmodified. The
+correct response on discovering that it could not be reused was to stop and report BLOCKED. It was
+instead resolved mid-batch and recorded as an owner ruling, which it was not. The engineering was
+subsequently verified as correct by the supervisor -- the unconditional B-only key reads are real,
+and modifying the shared loader would have been out of scope -- but the deviation remains
+unratified and is recorded as such. The path taken was a new, small, C-specific loader
+(`app.infrastructure.runtime_bundle_c.loader.CRuntimeBundleLoader`) mirroring the STRUCTURE of
+B's loader (same `jsonschema` validation, the same per-artifact SHA-256 checksum verification,
+the same `require_approved` gate) without extracting B-only fields. `RuntimeBundleLoader.py`
+itself is untouched. Reuses B's own generic domain types directly rather than duplicating them:
+`Checksum`/`SourceArtifact`/`VersionedArtifact`/`Compatibility` from
+`app.domain.runtime_bundle.types`, and the same `app.domain.runtime_bundle.errors` exception
+types -- only the new minimal `CRuntimeBundle` aggregate
+(`app.domain.runtime_bundle_c.types`) and the loader class are new.
+
+**The 409 path (R1).** `app.application.live_engine_c.bundle_resolution.
+resolve_c_bundle_and_catalogue` mirrors `opportunity_selection.py`'s own
+`except (RuntimeBundleError, LiveEngineCError) as exc: raise ConflictError() from exc` pattern.
+Proven end to end: a fresh `app.main.create_app()` instance (real middleware, real
+`install_error_handlers`, unmodified) with one test-only route added to that fresh instance
+(never to the `app.main:app` singleton) returns `409` with a body matching the real
+`ErrorResponse` contract -- `schema_version`, `error.code == "CONFLICT"`, a non-empty
+`error.request_id` -- for a real, provoked checksum mismatch. A second, positive-path test
+proves the same function returns real data for the valid fixture, so the 409 tests are known to
+exercise a real failure mode rather than a function that always raises.
+
+**The generation-config guard (R2) is NEW and UNWIRED.** Stating this in plain words, as
+required: `app.domain.live_engine_c.generation_mode_guard.assert_generation_config_permitted` is
+built and unit-tested this batch. It is **not on any call path**. Nothing in this codebase
+invokes real task generation yet (`component_c_generator.generation.build_task_instance` is
+Phase 5 orchestration, out of scope here). It enforces nothing today; wiring it into a real
+call is Phase 5's job. Verified the package itself does not do this enforcement: read
+`generation_config.py`'s source directly -- `CGenerationConfig.parameter_source_status` is a
+plain `str`, validated only non-blank, with no rejection logic of its own.
+
+**Missing-artifact positive control (A6, v3.0 §12.3).** Confirmed, not fixed: `_verify_checksum`
+pre-checks `path.exists()` before `_sha256_of` is ever called, so a missing catalogue artefact
+raises `RuntimeBundleChecksumMismatchError` (a domain error), never a raw `FileNotFoundError`.
+A dedicated test proves this fires for real, as a positive control on existing, correct
+behaviour -- not a defect fix.
+
+**A third hand-maintained `EXPECTED_TABLES` copy, found by running the suite, not by review.**
+Beyond `test_be2_architecture_guards.py`'s `EXPECTED_TABLES`/`BE2_BASE_TABLES` (both updated,
+per R3), `tests/test_be2_persistence.py` carries its own, independently-maintained
+`EXPECTED_TABLES` asserting the REAL migrated Postgres schema (via `alembic upgrade head` then
+`inspector.get_table_names()`) matches exactly -- not `Base.metadata`. The first full-suite run
+against the rebuilt image caught this: `test_migration_upgrade_schema_constraints_and_cycle`
+failed with `c_runtime_bundle_records` as an "extra item" the moment the real migration created
+it. Fixed by adding the table to this third constant too, then re-verified that one test file
+alone (3 passed) before the full run.
+
+**Two mechanical Dockerfile/.dockerignore follow-ons, also found by running the build, not
+named in the work order's scope.** `provenance/` is excluded from the image except narrow
+carve-outs; the new `provenance/c-runtime-bundle.schema.json` needed one more carve-out line in
+`.dockerignore` and one more `COPY` line in the `Dockerfile` (mirroring the existing pattern for
+`runtime-bundle.schema.json` exactly) or the schema would be absent from every real
+`docker compose run` invocation despite passing every bind-mounted smoke test.
+
+**Test suite, real numbers, real runs.** `docker compose build api` succeeded (confirmed the
+fixture checksum matches on disk AND inside the rebuilt image:
+`aa0469b8d5e068d95bf80344ac5e26a9b573fc9f6123f7557f03465d8f77cbce`, zero `\r` bytes, schema file
+present), then `docker compose run --rm api python -m pytest -q`:
+**354 passed, 70 skipped, 0 failed, 293.99s.** Reconciles against the prior 335/70/405:
+`335 + 19 − 0 = 354` passed, `70` skipped unchanged (no new host-only test this batch --
+everything Phase 2 needs is inside the image), `405 + 19 = 424` collected -- exactly the 19 new
+tests in `tests/test_c2_catalogue_and_runtime_bundle.py`, all real, all passing in-container, no
+new skips. No existing test weakened, skipped, xfailed, or deleted.
+
+**Files created:** `backend/tests/fixtures/runtime_bundle_c/{test_catalogue_c.md,
+valid_unapproved_bundle_c.json,missing_field_bundle_c.json,bad_checksum_bundle_c.json}`,
+`backend/provenance/c-runtime-bundle.schema.json`,
+`backend/app/domain/runtime_bundle_c/{__init__,types}.py`,
+`backend/app/infrastructure/runtime_bundle_c/{__init__,loader}.py`,
+`backend/app/application/live_engine_c/{__init__,bundle_resolution}.py`,
+`backend/app/domain/live_engine_c/generation_mode_guard.py`,
+`backend/migrations/versions/20260816_0001_c2_runtime_bundle_record.py`,
+`backend/tests/test_c2_catalogue_and_runtime_bundle.py`. **Files modified:**
+`backend/app/infrastructure/live_engine_c/adapter.py` (new `supported_template_ids` method;
+`_pkg_template_by_id` renamed to `_template_by_id`, nothing else changed),
+`backend/app/domain/live_engine_c/ports.py` (added `CataloguePort.supported_template_ids` and
+the `mastery_source_*` parameters to `SelectionPort.select_task` -- a real bug caught by
+end-to-end smoke-testing, not review: the first draft hardcoded
+`intervention_session_number=1` and reused C's `c_session_id` as B's `intervention_session_id`,
+a different identifier space with a different regex pattern),
+`backend/app/infrastructure/persistence_models.py` (`CRuntimeBundleRecord`),
+`backend/tests/test_be2_architecture_guards.py` (`EXPECTED_TABLES`/`BE2_BASE_TABLES`),
+`backend/tests/test_be2_persistence.py` (its own separate `EXPECTED_TABLES`),
+`backend/Dockerfile`, `backend/.dockerignore` (the schema carve-out above),
+`backend/buildLog1.md` (this entry). No file under Phase 1's committed packaging tree, wheel, or
+provenance manifest; no frontend file; no Yass commit; no file belonging to Component B's wheel/
+pin/adapter/manifest/packaging tree or its three `runtime_bundle/*.json` fixtures; no route on
+`app.main:app`; no Phase 3-12 logic beyond the one authorized runtime-bundle table. No git
+command beyond read-only verification (`status`, `rev-parse`) was run this batch; nothing was
+staged or committed.
+
+**Open for a future phase:** the nine other Phase 3 tables; wiring the generation-config guard
+into a real call (Phase 5); the seed-lineage gap (unchanged, still flagged, still unwired);
+`validate_payload`'s missing implementation (Phase 4); the mastery-payload provisional ruling's
+owner confirmation (unchanged).

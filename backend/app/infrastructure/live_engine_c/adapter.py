@@ -106,6 +106,9 @@ from component_c_generator.selection.selector import (
     SelectionInputError as _PkgSelectionInputError,
     select_task as _pkg_select_task,
 )
+from component_c_generator.tasks.registry import (
+    supported_template_ids as _pkg_supported_template_ids,
+)
 
 from models.contracts import BToCMasteryPayload as _PkgBToCMasteryPayload
 
@@ -175,7 +178,7 @@ def _load_package_catalogue(source_path: str):
         raise CatalogueUnavailableError(str(exc)) from exc
 
 
-def _pkg_template_by_id(pkg_catalogue, game_task_template_id: str):
+def _template_by_id(pkg_catalogue, game_task_template_id: str):
     template = pkg_catalogue.by_id(game_task_template_id)
     if template is None:
         raise UnknownTemplateError(f"unknown game_task_template_id: {game_task_template_id!r}")
@@ -807,6 +810,13 @@ class LiveEngineCAdapter:
         except _PkgCatalogueValidationError as exc:
             raise CatalogueUnavailableError(str(exc)) from exc
 
+    def supported_template_ids(self) -> tuple[str, ...]:
+        """The 21st adapter method (Phase 2). Argument-free pass-through to
+        ``component_c_generator.tasks.registry.supported_template_ids`` -- code-sourced, not
+        catalogue-file-sourced; already a plain ``tuple[str, ...]``, so no type mapping is
+        needed."""
+        return _pkg_supported_template_ids()
+
     # ---- ActivationPort ---------------------------------------------------------------
 
     def decide_activation(
@@ -817,7 +827,7 @@ class LiveEngineCAdapter:
         grade: Grade,
     ) -> ActivationDecision:
         pkg_catalogue = _load_package_catalogue(catalogue.source_path)
-        template = _pkg_template_by_id(pkg_catalogue, game_task_template_id)
+        template = _template_by_id(pkg_catalogue, game_task_template_id)
         decision = _pkg_decide_activation(
             template, supported_template_ids, grade, pkg_catalogue.catalogue_status
         )
@@ -907,7 +917,7 @@ class LiveEngineCAdapter:
         config: GenerationConfig,
     ) -> TaskInstance:
         pkg_catalogue = _load_package_catalogue(catalogue.source_path)
-        template = _pkg_template_by_id(pkg_catalogue, game_task_template_id)
+        template = _template_by_id(pkg_catalogue, game_task_template_id)
         try:
             instance = _pkg_build_task_instance(
                 template,
