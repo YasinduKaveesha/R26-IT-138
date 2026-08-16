@@ -3104,3 +3104,229 @@ commit or stash command was run or recommended.
 **Files touched:** `Upadya/Component_C_Backend_Frontend_Build_Plan_v2.0.html` (new) and
 `backend/buildLog1.md`. No source file, parameter, contract, or specification document was modified;
 the review was read-only throughout.
+
+## 2026-08-15 — Component C Phase 1 batch 1a: hash-pinned wheel, packaging, and provenance
+
+Built `prabathi-component-c-live-engine` at `backend/packaging/component_c_internal/`, pinned to
+Yass `09267abfe83829168b8b4817eb4c59d10f54e311` (independently re-verified this batch as
+`origin/main`'s tip via `git rev-parse origin/main` and `git merge-base --is-ancestor`). Packaging
+and provenance only — no adapter, nothing under `backend/app/`, no architecture-guard change; that
+is Batch 1b, a separate, later work order.
+
+**Inventory re-derived, not assumed.** `git ls-tree -r --name-only <sha>
+Implementation_v1.0/component_c_generator` gives 81 files. Partition: 64 verbatim + 1 trimmed
+(`pipeline/session_state.py`) + 16 never-ship = 81. The 16 is the plan's original 15
+(`behaviour/{action_provider,attempt_loop,decisions,latency,outcome_model,seeds}.py`,
+`pipeline/{session,pilot,pilot_cohort}.py`, `audits/*` — 6 files) plus one addition, DEC-1/C-22:
+`c_to_3/emit.py`.
+
+**DEC-1/C-22 (owner-resolved before this batch): `c_to_3/emit.py` omitted, `validators/` not
+vendored.** At the pin, `emit.py` is the only shipped-list file importing a top-level package
+neither this wheel nor `upadya-component-b-live-engine` provides —
+`validators.contract_validators` (`validate_payload`, `validate_payload_against_mapping`).
+`validators/`'s `PayloadKind` also covers `b_to_c`/`b_to_3`, so it is genuinely shared with
+Component B, not C-specific; vendoring it here would make C an owner of code that also governs B's
+contracts. Verified safe to omit: the only importers of `c_to_3.emit` anywhere in
+`component_c_generator/` are `pipeline/session.py` (never-ship) and, via `c_to_3.inputs` rather
+than `emit` directly, `pipeline/pilot.py` (also never-ship); `c_to_3/__init__.py` is 35 bytes of
+`from __future__ import annotations` and needed no trim. Consequence, recorded in the manifest: this
+wheel provides neither `NoRealCSessionError` nor `emit_c_to_3`, both named in
+Component_C_Master_Build_Plan_v3.0 §11 Phase 9's acceptance criteria — a Phase 9 rebuild/re-pin is
+*scheduled*, not merely possible.
+
+**Trim scope decision (asked, not assumed).** `pipeline/session_state.py` doesn't just import
+`run_c_session` — `advance_session()` calls it and returns `RunCSessionResult`. Two ways to satisfy
+"drop `run_c_session` and its import" existed: (a) remove only the one import line, leaving
+`advance_session`/`decide_next_session_phase` byte-identical including their still-present
+`run_c_session` call (a landmine if ever invoked, but nothing in Phase 1 calls it); (b) also strip
+both functions, matching how B trimmed `task_instances.py` (function + its unique imports removed
+together). Put to the owner; answer was (a) — matches the plan's literal "nothing else in that file
+changes." `T7`'s "does not contain `run_c_session`" is therefore a **namespace**-level assertion
+(`hasattr(module, "run_c_session")` is `False`), mirroring how B's own trimmed-file tests use
+`set(dir(module))`, not a source-text-substring search — the string still appears in this file's
+docstrings and at the `advance_session` call site, by design.
+
+**Two environment constraints found and resolved, both put to the owner rather than papered over:**
+
+1. The test container (`docker compose run --rm api pytest`) has no `.git` at all (`.dockerignore`
+   line 1) and cannot run `git show`. B's own suite has no live-git test either — its byte-identity
+   claim is a one-time, build-time attestation. Resolution: the pin-vs-packaged byte comparison was
+   performed once this batch (every one of the 64 verbatim files' full SHA-256 checked against
+   `git show <sha>:path>` — output, not just size — zero mismatches) and is recorded PASSED in
+   `component-c-live-engine-manifest.json`'s `verification` block. The new test suite's T1 instead
+   asserts repeatable drift detection: packaged-file SHA-256 == `SOURCE_MANIFEST.txt`'s recorded
+   value, per file.
+2. `.dockerignore` excludes `packaging/` and `provenance/` from the application image wholesale
+   (narrow carve-outs only for wheel files and two small JSON/schema files, both pre-existing B
+   patterns); the work order's Dockerfile change is explicitly scoped to one new `COPY` line for
+   the wheel, not for packaging/provenance source. So `backend/packaging/component_c_internal/`,
+   both `component-*-live-engine-manifest.json` files, `requirements.in`, `Dockerfile`, and
+   `.dockerignore` itself are genuinely absent inside the container. Resolution: T1, T4, T5, T7 are
+   host-checkout-only (same 71-item collected count in every environment; SKIP with an explicit,
+   file-existence-driven reason inside the container rather than silently vanishing from the
+   collected count); T2/T3/T6 (wheel-content and installed-package checks) run for real in-container
+   because the `.whl` file itself has its own `.dockerignore` carve-out + `Dockerfile` `COPY` line
+   (same pattern B already uses), and the wheel is now installed via `requirements.lock`.
+
+**Real build.** Inside `python:3.11.15-slim-bookworm@sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba`,
+packaging tree bind-mounted read-only at `/src`, copied to a writable `/build_src` inside the
+container (never bind-mounted) so `python -m build`'s own `build/`/`*.egg-info/` artefacts never
+touch the host, `--outdir` pointed at a bind-mounted `/dist` = `backend/provenance/wheels/`:
+`pip install setuptools==80.10.2 wheel==0.46.3 build==1.2.2.post1 && python -m build --wheel
+--no-isolation --outdir /dist`. Result: `prabathi_component_c_live_engine-0.1.0+c1.09267ab-py3-none-any.whl`,
+`sha256:a5673ecefd6c1e0978272f2fde74fd41bd101346fe13f83145e6cc14ad498df6`, 65 files inside (64+1),
+`top_level.txt` == `component_c_generator` exactly, confirmed via `unzip -l`/`unzip -p` — no
+root-level `models/` or `validators/` entry, none of the 16 never-ship modules present. Confirmed
+zero build artefacts leaked onto the host packaging tree.
+
+**Five pin locations (COR-2), not eight — reasoned, not assumed carried-over from B.**
+`requirements.in`, `requirements.lock`, `Dockerfile`, `.dockerignore`,
+`provenance/component-c-live-engine-manifest.json`. B's eight includes three
+`tests/fixtures/runtime_bundle/*.json` files that pin B's wheel inside B's own runtime-bundle
+schema, verified this batch to declare `"generator"` as a single object (not an array); Component
+C's own runtime-bundle chain doesn't exist until Phase 2, so there is nothing there to update in
+this batch. All five updated: `requirements.in`/`Dockerfile`/`.dockerignore` reference the wheel by
+filename only (no hash, matching this repo's existing convention for B's own local-path wheel line);
+`requirements.lock` and the manifest carry the real sha256.
+
+**Test suite.** `docker compose build api` then `docker compose run --rm api python -m pytest -q`:
+**323 passed, 71 skipped, 0 failed, 372.40s.** Baseline of record was 301 passed / 0 failed
+(2026-08-15). Reconciles: `301 + 22 − 0 = 323`. `backend/tests/test_c1a_wheel_provenance.py` adds
+93 collected cases — T1 (64, host-only, skip in-container), T2 (2, real), T3 (2, real), T4 (1,
+host-only), T5 (5, host-only), T6 (18, real), T7 (1, host-only): `93 = 64+1+5+1` skipped-in-container
+`(71)` `+ 2+2+18` passed-in-container `(22)`. Separately verified the skipped 71 actually execute
+and pass when the full host tree is visible: bind-mounted `backend/` over the built image and ran
+`pytest tests/test_c1a_wheel_provenance.py` alone — **93 passed, 0 skipped, 0 failed** (10.62s first
+pass, caught a real bug: the PACKAGING NOTE's own backticked prose quoting the removed import line
+tripped a naive substring check in T7; fixed to a line-anchored check for an actual import
+statement, re-ran clean at **93 passed**). No existing test weakened, skipped, or modified.
+
+**Files created:** `backend/packaging/component_c_internal/component_c_generator/**` (64 verbatim
++ 1 trimmed), `backend/packaging/component_c_internal/{SOURCE_MANIFEST.txt,pyproject.toml,
+IMPORT_POLICY.md}`, `backend/provenance/component-c-live-engine-manifest.json`,
+`backend/provenance/wheels/prabathi_component_c_live_engine-0.1.0+c1.09267ab-py3-none-any.whl`,
+`backend/tests/test_c1a_wheel_provenance.py`. **Files modified:** `backend/requirements.in`,
+`backend/requirements.lock`, `backend/Dockerfile`, `backend/.dockerignore` (one new line/block
+each; every existing Component B line in all four left untouched), `backend/buildLog1.md` (this
+entry). No file under `backend/app/`, no frontend file, no Yass commit, no file belonging to
+Component B's wheel/pin/adapter/manifest/packaging tree or its three `runtime_bundle/*.json`
+fixtures. No git command beyond read-only verification (`status`, `rev-parse`, `ls-tree`, `show`,
+`merge-base --is-ancestor`) was run; nothing was staged or committed.
+
+**Open for Batch 1b (separate work order):** the adapter at
+`app/infrastructure/live_engine_c/adapter.py`, the full-dotted-path AST guard extension to
+`test_be2_architecture_guards.py` with its negative control, and the
+`PROHIBITED_COLUMN_TERMS` allow-list mechanism. **Open for Phase 2:** Component C's own
+runtime-bundle chain (the three fixture-location pins COR-2 deferred). **Open for Phase 9:** the
+`c_to_3/emit.py` rebuild/re-pin DEC-1 scheduled, most likely via a shared wheel owning
+`models/`+`validators/`+`schemas/`.
+
+## 2026-08-16 — Component C Phase 1 batch 1a rework: three tests recovered, trim scope corrected
+
+Supervisor verification of the 2026-08-15 batch 1a entry above found it accepted on substance (64
+verbatim files independently re-confirmed byte-identical, wheel current, top_level.txt correct, 16
+never-ship modules absent, pin coupling correct, no leaked build artefacts, no governance/
+AI-attribution violation, 323 passed / 71 skipped / 0 failed independently reproduced) but ordered
+two owner-ruled changes. Recorded here, factually:
+
+**Attribution correction 1 -- the trim-scope analysis.** The 2026-08-15 entry's account of why
+`advance_session()` had to be considered at all was accurate on the facts (the function calls
+`run_c_session` and returns `RunCSessionResult`, so a literal "remove one import line" trim leaves
+a dangling reference) but described the resulting two-option choice as resolved by a question put
+to the owner, without crediting that the underlying dependency analysis identifying
+`advance_session` as the blocking function was the BUILDER's own work, separate from the owner's
+original "drop `run_c_session` and its import" instruction (`Component_C_Master_Build_Plan_v3.0`
+§6.2). The owner reviewed and endorsed that analysis before ruling.
+
+**Attribution correction 2 -- §6.2's required-symbols list was incomplete, and this was the
+owner's defect, not the builder's.** `Component_C_Master_Build_Plan_v3.0` §6.2 named only
+`CLearnerSessionState` and `is_eligible_combined_handoff` as required. Both are live-required, but
+so are `initial_learner_session_state` and `decide_next_session_phase` -- the latter is the
+reviewed implementation of the C-16 Phase 4 phase-gate step and depends on nothing never-ship.
+Neither the 2026-08-15 entry nor the batch 1a work order it followed caught this; the previous
+entry's trim rationale rested on the incomplete two-symbol list throughout. The owner has now
+corrected §6.2 and issued a four-symbol trim authorization (adds `initial_learner_session_state`
+and `decide_next_session_phase` to the retained set); this batch trims against the corrected list,
+not the original.
+
+**Attribution correction 3 -- the host-only test-skip design.** The 2026-08-15 entry describes the
+71-item host-checkout-only skip split (T1/T4/T5/T7 skip in-container; T2/T3/T6 run for real) as
+resolved by a question put to the owner, which is accurate for THAT turn, but the previous entry did not
+make clear this design had not yet had owner review -- the supervisor adopted it on inspection
+without an owner ruling. It is now PARTIALLY REVERTED: three of the four host-only groups had at
+least one case that does not actually need the host checkout (T4's installed-metadata pin
+coupling, T5's `requirements.lock` hash, T7's namespace assertions), and those cases are recovered
+into the container in this batch. T1 (SOURCE_MANIFEST self-consistency against source files) and
+the remaining T4/T5/T7 cases genuinely need files `.dockerignore` excludes from the image and stay
+host-only; this is now the FINAL split, not a provisional one.
+
+**Change 2 -- extended trim, against the corrected symbol list.** Removed exactly three things
+from `pipeline/session_state.py` relative to the pin (verified via `git show
+09267abfe83829168b8b4817eb4c59d10f54e311:...` diff, binary): the `from .session import
+RunCSessionResult, run_c_session` line (already removed in the prior pass); the whole
+`advance_session()` function; and `_DRIVER_OWNED_SESSION_KWARGS`, checked and confirmed referenced
+only inside `advance_session`'s body, hence dead once that function is gone. Kept, all
+byte-identical to the pin: `CLearnerSessionState`, `initial_learner_session_state`,
+`is_eligible_combined_handoff`, `decide_next_session_phase`, `PIPELINE_SESSION_STATE_VERSION`.
+Two items retained DELIBERATELY despite losing their only in-file caller, each recorded in the
+rewritten PACKAGING NOTE with its reason: `SessionStateInputError` (public API; the owner's
+authorization named three items to remove, not four) and the
+`from typing import Annotated, Any, Dict, Mapping, Tuple` import line (three of five names become
+unused, but the line itself depends on no never-ship module, so minimal-diff discipline leaves it
+untouched). `_SEVEN_SKILLS` was checked, not assumed, to remain live: it is the sole thing
+`CLearnerSessionState._spacing_uses_known_skills` (a validator on a KEPT class) reads.
+
+**Regeneration chain, all five artefacts, in order:**
+1. `component_c_generator/pipeline/session_state.py` -- new sha256
+   `24dc78bb74c814d4e29b8b78be5a6376cccdb0527a4a3448ae8373b56c17c2ac`.
+2. `SOURCE_MANIFEST.txt` -- that one line updated to the new hash; manifest's own self-hash
+   (`package_source_manifest.sha256`) recomputed to
+   `5e6df7b3f61c098b17425a189ea062f3560ccfdc2bbdb13eb9e580e4b994010f`.
+3. Wheel rebuilt with the IDENTICAL command, base image
+   (`python:3.11.15-slim-bookworm@sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba`)
+   and toolchain (`setuptools==80.10.2 wheel==0.46.3 build==1.2.2.post1`) as the first build, same
+   `cp -r /src /build_src` artefact-isolation step. Filename unchanged (version stays
+   `0.1.0+c1.09267ab` per the owner's fixed parameter); new sha256
+   `586bc156c808747a30f031ab4ac0db6d82911bd0c84544d0bd8471b156287ee2`, replacing the prior
+   `a5673ecefd6c1e0978272f2fde74fd41bd101346fe13f83145e6cc14ad498df6` in place -- confirmed exactly
+   one `prabathi_component_c_live_engine-*.whl` file exists in `provenance/wheels/` afterward, and
+   zero `build/`/`*.egg-info/` artefacts leaked onto the host packaging tree. Wheel still contains
+   65 `.py` files (64 unchanged verbatim + 1 smaller trimmed file); `top_level.txt` still exactly
+   `component_c_generator`; `pipeline/session_state.py` present, `pipeline/session.py` absent.
+4. `requirements.lock` -- the C wheel's `--hash=sha256:` line updated to the new value.
+5. `component-c-live-engine-manifest.json` -- `package.wheel_sha256`,
+   `package_source_manifest.sha256`, and `trimmed_files[0].reason` all rewritten to describe the
+   final state (not the prior pass's).
+`requirements.in`, `Dockerfile`, and `.dockerignore` needed NO edit -- confirmed rather than
+assumed: the wheel filename is unchanged (only its bytes and hash moved), and all three reference
+the wheel by filename only.
+
+**Test suite, real numbers, real runs.** Baseline immediately prior to this batch: 323 passed / 71
+skipped / 0 failed / 394 collected (2026-08-15, itself `301 + 22 - 0 = 323` against the original
+301/0 baseline of record). This batch: `docker compose build api` succeeded (itself a positive
+signal for requirements.lock's new hash -- `pip install --require-hashes` would have refused a
+mismatch outright) then `docker compose run --rm api python -m pytest -q`:
+**328 passed, 70 skipped, 0 failed, 285.71s.** Reconciles against the prior 323/71/394: `323 + 5 =
+328` passed, `71 - 1 = 70` skipped, `394 + 4 = 398` collected. The +4 collected are `T4-live`,
+`test_requirements_lock_hash_matches_wheel_on_disk`, `T7-live`, `T8`, `T9` (five new test
+functions) minus one parametrized case removed from the old T5 (`requirements.lock`'s case moved
+out of the host-only group into its own always-run test) = net +4. All five new/moved cases run
+and PASS in-container (the whole point of the recovery); the -1 skip is that same moved case no
+longer sitting in the host-only bucket. Separately re-verified with the full host tree
+bind-mounted over the built image (proving the 70 in-container skips are not dead code, same
+verification pattern as the prior entry): **398 passed, 0 skipped, 0 failed, 481.90s.** No existing
+test weakened, skipped, or deleted; the two positive controls (T8: `_SEVEN_SKILLS`'s validator
+actually raises on an unknown skill key; T9: `decide_next_session_phase("c_only", ...)` actually
+returns `"c_only"` without touching `selection_config`) are new assertions, not replacements.
+
+**Files modified this batch:** `backend/packaging/component_c_internal/component_c_generator/
+pipeline/session_state.py`, `backend/packaging/component_c_internal/SOURCE_MANIFEST.txt`,
+`backend/provenance/wheels/prabathi_component_c_live_engine-0.1.0+c1.09267ab-py3-none-any.whl`
+(rebuilt in place), `backend/requirements.lock`, `backend/provenance/component-c-live-engine-
+manifest.json`, `backend/tests/test_c1a_wheel_provenance.py`, `backend/buildLog1.md` (this entry).
+**Confirmed untouched:** `requirements.in`, `Dockerfile`, `.dockerignore` (no edit needed -- see
+above); all 64 verbatim files; the 16-module never-ship list; Batch 1b scope (no `app/` file, no
+`test_be2_architecture_guards.py` change, no `PROHIBITED_COLUMN_TERMS` work); Phases 2-12; any
+frontend file; any Yass commit; any file belonging to Component B's wheel/pin/adapter/manifest/
+packaging tree or its three `runtime_bundle/*.json` fixtures. No git command beyond read-only
+verification (`status`, `rev-parse`) was run this batch; nothing was staged or committed.

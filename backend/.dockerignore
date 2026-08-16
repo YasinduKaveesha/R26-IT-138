@@ -61,6 +61,11 @@ provenance/wheels/*
 # to reproduce the BE3-era manifest entry; it is never installed today (nothing in
 # requirements.lock references it) so keeping it in the build context is inert.
 !provenance/wheels/upadya_component_b_live_engine-0.1.0+bf4.09267ab-py3-none-any.whl
+# Phase 1 batch 1a: Component C packaging only, no adapter wiring yet (see
+# backend/provenance/component-c-live-engine-manifest.json). Excludes nothing else new — the
+# full research generator tree, the prohibited full research wheel, and the rest of
+# provenance/ stay excluded exactly as before.
+!provenance/wheels/prabathi_component_c_live_engine-0.1.0+c1.09267ab-py3-none-any.whl
 !provenance/runtime-bundle.schema.json
 # BE3c exception: the implemented/deferred template partition provenance is read by the
 # characterization test suite to cross-check the TEST-FIXTURE-ONLY catalogue against the
