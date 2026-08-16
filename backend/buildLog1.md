@@ -3722,3 +3722,130 @@ bounded, and any trigger enforcing them; `c_sessions.state`'s enum vocabulary (P
 `c_safety_events`/`c_scaffold_events`'s unratified enum gaps if a package Literal source is later
 found; any endpoint, service, or selection/evaluation/policy/safety/scaffold/telemetry/
 aggregation logic against these tables; any adapter change; any frontend file.
+
+## 2026-08-16 — Component C Phase 3b: I1 at-most-one, I2/I3 triggers, I4's structural sub-rule
+
+Built three of Phase 3a's four deferred cross-row invariants on `c_gameplay_events`: I1's
+at-most-one-terminal-event half (partial UNIQUE index), I2 (event_index consecutive from 1, a
+trigger), I3 (event_timestamp_relative_ms non-decreasing within a task, a trigger). I4's numeric
+attempt bound is BLOCKED, ESCALATED TO THE OWNER and was not built in any form; its number-free
+structural sub-rule (attempt_number only on attempt-scoped event types) was built instead and is
+named for what it is, never described as satisfying I4.
+
+**STOP-CHECK, run for real at the start of planning and again before implementation, quoted:**
+```
+git rev-parse HEAD                              -> 175e2cdcb6325db8e2573a24fb441c688fdd12f1
+git status --porcelain                          -> (empty)
+docker version --format "{{.Server.Version}}"   -> 29.2.1
+```
+
+**Correction to the work order, on the record, per the supervisor's own instruction.** The
+Phase 3b planning prompt asserted triggers are "unprecedented here" and "an architectural first
+for this repository." That was verified false before any plan was built around it:
+`migrations/versions/20260722_0003_bundle_integrity_guards.py` already creates two triggers
+(`trg_b_sessions_active_bundle_eligible`, `trg_b_runtime_bundle_integrity`) with a
+`SELECT ... FOR UPDATE` row-locking pattern, and the existing test asserting their names are
+present is a positive requirement, not a prohibition. The two no-trigger guards
+(`test_be2_architecture_guards.py:322`/`:364` and their C-side analogues) are each scoped to one
+specific named migration file via `Path(...).read_text(...)` — none scans the `migrations/`
+directory. This is recorded as a correction to the work order's premise, not as true.
+
+**R-J — the two triggers, mirroring 20260722_0003's structure exactly.** Named
+`CREATE FUNCTION`/`CREATE TRIGGER` pairs, `downgrade()` drops trigger then function in reverse
+order. Both lock the **`c_task_instances`** row identified by `NEW.game_task_instance_id` via
+`SELECT 1 FROM c_task_instances WHERE c_task_instance_id = ... FOR UPDATE` before reading sibling
+`c_gameplay_events` rows — chosen over locking `c_task_opportunities` because
+`game_task_instance_id` is the event's actual immediate FK (no extra join needed) and
+`c_task_instances` is the true parent the event stream describes. No numeric literal appears in
+either trigger body — I2 compares to `MAX(event_index)`, I3 to `MAX(event_timestamp_relative_ms)`,
+both computed from sibling rows, never a constant.
+
+**R-K — I1 split, named every time.** Built: a partial UNIQUE index,
+`uq_c_gameplay_events_at_most_one_terminal_per_instance`, on `game_task_instance_id` WHERE
+`event_type IN (...)` over the package-sourced `TERMINAL_EVENT_TYPES`, mirroring
+`uq_classroom_memberships_one_approved_per_learner`'s `postgresql_where` pattern exactly. This is
+**at most one**, never "exactly one" (R-N) — the docstring, migration, test names, and this entry
+all say so explicitly. **At least one is DEFERRED, not blocked-forever, home named**: the
+task-completion path (Phase 5) and the telemetry validator (Phase 8, which v3.0 Section 11
+already requires to check "exactly one terminal event per offered task" on arrival) — recorded in
+`persistence_models.py`'s `CGameplayEventRecord` docstring and here, not built anywhere in this
+migration.
+
+**R-L — I4's numeric bound: BLOCKED CONFIRMED, ESCALATED TO THE OWNER, and not laundered
+through a different door.** `component_c_generator.gameplay_config.AttemptConfig.max_attempts`
+carries `Field(ge=1, le=10)` and defaults to 10; the module's own docstring cites the Component C
+Empirical & Statistical Parameters document, whose `max_attempts=10` value traces to
+`parameter_source_status="TEST_FIXTURE_ONLY"`/`CALIBRATION_PENDING`. No CHECK constraint, no
+comment-only reference, and no application-layer enforcement implying the invariant is satisfied
+was written anywhere this batch. The package's own `Field(le=10)` was explicitly NOT mirrored
+into a DB CHECK on the reasoning "the package already validates it" — that reasoning was
+identified and rejected in the work order (R-L) as laundering the same unsigned number through a
+different door; the value's provenance, not its location, disqualifies it. **Built instead**: the
+structural sub-rule — `ck_c_gameplay_events_attempt_number_scope`
+(`attempt_number IS NULL OR event_type IN ('action_performed', 'answer_submitted',
+'answer_evaluated')`), sourced live from `component_c_generator.models.gameplay
+.ATTEMPT_SCOPED_EVENT_TYPES`. This says only WHICH event types may carry an attempt number, never
+HOW MANY attempts are allowed, and is named that way everywhere it appears (R-N).
+
+**R-M — the concurrency proof gap, recorded, not closed.** Every constraint/trigger has a
+sequential provocation test (10 tests total, see below) proving the rule fires. None of them
+proves either trigger survives concurrent writers. This suite has no precedent anywhere for
+driving two real concurrent database connections from pytest (checked; none exists), and none was
+introduced this batch. The mechanism is the same row-lock pattern Component B's own trigger
+already uses for the same reason; that similarity is the basis for the design, not a substitute
+for a concurrent-writer test. Flagged forward as pilot-readiness work, not silently closed.
+
+**R-O — migration location and guard.** New migration,
+`backend/migrations/versions/20260816_0003_c3b_gameplay_event_invariants.py`, chained off
+`20260816_0002` (3a's migration is committed at `175e2cd`; amending it was not an option).
+`test_c3b_migration_creates_no_table_and_adds_only_the_named_objects` asserts no
+`op.create_table(...)`, asserts every index/CHECK/function/trigger name added this batch is
+present by exact string, and asserts `"component_c_generator"`/`"yass"` absent from the migration
+text — which required rewording the migration's own docstring away from the literal package
+import path (it originally read `component_c_generator.models.gameplay`, tripping that same
+assertion; reworded to describe the source without naming the package literally, matching every
+prior migration's convention, confirmed by grep before rewording rather than after).
+
+**Migration up/down/up, verified against the real Postgres instance.** `alembic upgrade head`
+created the index, the structural CHECK, and both triggers (confirmed via
+`information_schema.triggers` and `inspector.get_indexes`/`get_check_constraints` against
+`c_gameplay_events`); `alembic downgrade -1` dropped all four cleanly; `alembic upgrade head`
+(re-upgrade) succeeded. The first upgrade attempt failed with
+`IdentifierError: Identifier 'ck_c_gameplay_events_attempt_number_only_on_attempt_scoped_event_types'
+exceeds maximum length of 63 characters` (Postgres's identifier limit) — the transaction rolled
+back cleanly (`alembic current` still showed `20260816_0002` afterward, confirming no partial
+DDL survived), the name was shortened to `ck_c_gameplay_events_attempt_number_scope` in both the
+migration and the ORM model, and the full cycle was re-run and passed.
+
+**Test suite, real numbers, real runs.** `docker compose build api` succeeded. Then
+`docker compose run --rm api python -m pytest -q`: **403 passed, 70 skipped, 0 failed, 562.10s.**
+`--collect-only`: **473 collected.** Reconciles against the prior 393/70/463: `393 + 10 − 0 = 403`
+passed; `70` skipped unchanged (pure DB/trigger work, no host-only test needed); `463 + 10 = 473`
+collected — exactly the 10 tests in the new `tests/test_c3b_gameplay_event_invariants.py` (2
+positive-control + 1 rejection for I1's at-most-one; 1 positive-control + 2 rejection for I2; 1
+positive-control + 1 rejection for I3; 1 positive-control + 1 rejection for I4's structural
+sub-rule; 1 migration-content guard). All real, all passing in-container. No existing test
+weakened, skipped, xfailed, or deleted; `test_c3a_persistence.py` (39 tests) and both guard files
+re-run standalone after the model/migration changes and confirmed unaffected (65 passed) before
+the full-suite run.
+
+**Files created:**
+`backend/migrations/versions/20260816_0003_c3b_gameplay_event_invariants.py`,
+`backend/tests/test_c3b_gameplay_event_invariants.py`. **Files modified:**
+`backend/app/infrastructure/persistence_models.py` (`CGameplayEventRecord`'s `__table_args__` —
+the partial unique `Index` and the structural `CheckConstraint`; triggers are pure DDL and are
+not represented in the ORM model, matching how B's own two triggers are absent from
+`SessionRecord`/`RuntimeBundleRecord`), `backend/buildLog1.md` (this entry). No table created or
+altered structurally beyond the named additions above. No endpoint, service, or
+selection/evaluation/policy/safety/scaffold logic touched. No frontend file. No adapter change.
+`c_sessions`' R-E-scoped unique-per-(learner, intervention_session) not re-touched. No approval,
+approver, date, signature, scientific decision, difficulty threshold, safety threshold, or
+`CALIBRATION_PENDING` resolution recorded anywhere. No git command beyond read-only verification
+(`status`, `rev-parse`) was run this batch; nothing was staged or committed.
+
+**Open for a future phase:** I1's at-least-one half (Phase 5's task-completion path, Phase 8's
+telemetry validator); I4's numeric bound (owner escalation, unresolved); append-only/
+immutable-after-insert enforcement on `c_gameplay_events` (still out of every batch's named scope
+so far); a real concurrent-writer test for I2/I3's triggers, if this suite ever gains the
+infrastructure to drive two real database connections from pytest (R-M, currently no precedent);
+every table/logic item already open from Phase 3a's own entry.

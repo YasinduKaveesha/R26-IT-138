@@ -845,11 +845,20 @@ class CTaskInstanceRecord(ProvenanceMixin, Base):
 
 
 class CGameplayEventRecord(ProvenanceMixin, Base):
-    """Component C Phase 3a. The canonical stream (C3 §14). Table shape only -- append-only /
-    immutable enforcement (no UPDATE after insert) and every cross-row invariant (exactly one
-    terminal event per task, event_index continuity, timestamp monotonicity) are Phase 3b, not
-    built here (v3.0 §11 Phase 3 names these as DB-level constraints, but the Phase 3a work
-    order's own scope split reserves every cross-row invariant for 3b)."""
+    """Component C Phase 3a/3b. The canonical stream (C3 §14). Phase 3b (R-J/R-K/R-L/R-O) added:
+    a partial UNIQUE index enforcing AT MOST ONE terminal event per task (never "exactly one" --
+    R-N language discipline; "at least one" is a lifecycle-completeness rule, DEFERRED to the
+    task-completion path (Phase 5) and the telemetry validator (Phase 8, which v3.0 Section 11
+    already requires to check this on arrival) -- not a table constraint, not built here or
+    anywhere in this migration); two triggers enforcing event_index consecutiveness and
+    event_timestamp_relative_ms non-decreasing order within a task, each locking the parent
+    c_task_instances row via SELECT ... FOR UPDATE (same pattern as B's
+    enforce_b_session_active_bundle_eligibility) -- proven by sequential provocation only; this
+    suite has no precedent for driving two real concurrent connections, so concurrent-writer
+    safety is NOT tested, only the row-lock mechanism itself (R-M); and a structural CHECK tying
+    attempt_number to ATTEMPT_SCOPED_EVENT_TYPES -- NOT "attempt counts bounded" (I4's numeric
+    bound is BLOCKED, ESCALATED TO THE OWNER, R-L, and is not built in any form). Still no
+    append-only/immutable-after-insert enforcement -- out of this batch's named scope."""
 
     __tablename__ = "c_gameplay_events"
     __table_args__ = (
@@ -872,6 +881,23 @@ class CGameplayEventRecord(ProvenanceMixin, Base):
             "'quit_without_recent_error', 'technical_issue', 'attempt_cap_exhausted', "
             "'timeout_no_response', 'safe_session_stop')",
             name="ck_c_gameplay_events_terminal_reason",
+        ),
+        # Phase 3b, R-L: structural only -- WHICH event types may carry an attempt_number, never
+        # HOW MANY attempts are allowed. Sourced live from
+        # component_c_generator.models.gameplay.ATTEMPT_SCOPED_EVENT_TYPES.
+        CheckConstraint(
+            "attempt_number IS NULL OR event_type IN ('action_performed', 'answer_submitted', 'answer_evaluated')",
+            name="ck_c_gameplay_events_attempt_number_scope",
+        ),
+        # Phase 3b, R-K: AT MOST ONE terminal event per task -- never "exactly one". Sourced live
+        # from component_c_generator.models.gameplay.TERMINAL_EVENT_TYPES.
+        Index(
+            "uq_c_gameplay_events_at_most_one_terminal_per_instance",
+            "game_task_instance_id",
+            unique=True,
+            postgresql_where=text(
+                "event_type IN ('game_task_completed', 'game_task_skipped', 'game_task_quit')"
+            ),
         ),
         *ProvenanceMixin.provenance_constraints("c_gameplay_events"),
     )
