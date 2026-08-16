@@ -99,6 +99,11 @@ from component_c_generator.scaffolds.recovery import (
     RecoveryPreconditionError as _PkgRecoveryPreconditionError,
     build_recovery_task as _pkg_build_recovery_task,
 )
+from component_c_generator.pipeline.session_state import (
+    CLearnerSessionState as _PkgCLearnerSessionState,
+    decide_next_session_phase as _pkg_decide_next_session_phase,
+    is_eligible_combined_handoff as _pkg_is_eligible_combined_handoff,
+)
 from component_c_generator.selection.phase import (
     decide_session_phase as _pkg_decide_session_phase,
 )
@@ -132,6 +137,7 @@ from app.domain.live_engine_c.types import (
     ActivationDecision,
     AdaptationDecision,
     AggregationConfig,
+    AttendanceStatus,
     Catalogue,
     ChildFacingReward,
     CompositeFormulaVersion,
@@ -143,6 +149,7 @@ from app.domain.live_engine_c.types import (
     GameTaskTemplate,
     GenerationConfig,
     Grade,
+    LearnerSessionState,
     LearnerState,
     PolicyConfig,
     PolicyMode,
@@ -681,7 +688,17 @@ def _to_pkg_mastery_payload(
     try:
         return _pkg_validate_payload(payload, "b_to_c")
     except _PkgContractValidationError as exc:
-        raise MasteryPayloadContractValidationError(str(exc)) from exc
+        # Phase 4 work order, Q2: never str(exc) -- a pydantic ValidationError's default message
+        # echoes the rejected input value verbatim, which would put B mastery values in a
+        # client-visible error. Extract ONLY (loc, type) pairs from the chained pydantic
+        # ValidationError (never `msg`, never `input`); if no such chain exists (e.g. a
+        # prohibited-field rejection, already identified by exact field name), carry no
+        # field_errors at all rather than falling back to str(exc).
+        pydantic_cause = exc.__cause__
+        field_errors: list[tuple[tuple[object, ...], str]] = []
+        if hasattr(pydantic_cause, "errors"):
+            field_errors = [(tuple(e["loc"]), e["type"]) for e in pydantic_cause.errors()]
+        raise MasteryPayloadContractValidationError(field_errors) from exc
 
 
 def _to_pkg_evidence_window_config(config: EvidenceWindowConfig):
@@ -864,6 +881,59 @@ class LiveEngineCAdapter:
 
     def decide_session_phase(self, eligible_combined_handoffs_completed: int, window_w: int) -> str:
         return _pkg_decide_session_phase(eligible_combined_handoffs_completed, window_w)
+
+    def decide_next_session_phase(
+        self,
+        *,
+        session_mode: SessionMode,
+        grade: Grade,
+        state: LearnerSessionState,
+        selection_config: SelectionConfig,
+    ) -> SessionPhase:
+        pkg_state = _PkgCLearnerSessionState(
+            eligible_combined_handoffs_completed=state.eligible_combined_handoffs_completed,
+            sessions_since_last_practice=dict(state.sessions_since_last_practice),
+            prior_session_end_state=state.prior_session_end_state,
+        )
+        phase = _pkg_decide_next_session_phase(
+            session_mode=session_mode,
+            grade=grade,
+            state=pkg_state,
+            selection_config=_to_pkg_selection_config(selection_config),
+        )
+        return phase  # type: ignore[return-value]
+
+    def is_eligible_combined_handoff(
+        self,
+        session_mode: SessionMode,
+        b_payload_valid: bool,
+        attendance_status: AttendanceStatus,
+        technical_blocked_bootstrap: bool,
+    ) -> bool:
+        return _pkg_is_eligible_combined_handoff(
+            session_mode, b_payload_valid, attendance_status, technical_blocked_bootstrap
+        )
+
+    def validate_mastery_payload(
+        self,
+        mastery_by_skill: Mapping[str, float],
+        *,
+        mastery_source_student_id: str,
+        mastery_source_intervention_session_id: str,
+        mastery_source_intervention_session_number: int,
+    ) -> None:
+        """Phase 4's own public entry point to the SF-043 gate at session-creation time --
+        distinct from ``select_task``'s internal call to the same private helper (Phase 5).
+        Raises ``MasteryPayloadContractValidationError`` on an invalid payload; returns nothing
+        on success (Phase 4 does not need or keep the validated instance -- it exists only to
+        prove SF-043 ordering and derive ``mastery_context_mode``; R3 forbids caching it, so it
+        is discarded, not returned to a caller who might carry it forward)."""
+        _to_pkg_mastery_payload(
+            mastery_by_skill,
+            mastery_source_student_id=mastery_source_student_id,
+            mastery_source_intervention_session_id=mastery_source_intervention_session_id,
+            mastery_source_intervention_session_number=mastery_source_intervention_session_number,
+        )
 
     # ---- SelectionPort ---------------------------------------------------------------
 

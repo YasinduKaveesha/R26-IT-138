@@ -43,6 +43,8 @@ Grade = int  # 2 or 3, enforced by callers/validators at the boundary
 SessionMode = Literal["combined", "c_only"]
 SessionPhase = Literal["familiarization", "mastery_driven", "c_only"]
 LearnerState = Literal["engaged", "productive_struggle", "overloaded", "disengaged"]
+# Phase 4: verified live against the installed wheel's component_c_generator.models.enums.
+AttendanceStatus = Literal["attended", "partial", "missed"]
 PolicyMode = Literal["rule_based_baseline", "q_learning_offline", "frozen_q_evaluation"]
 ScaffoldLevel = Literal["C0", "C1", "C2", "C3", "C4"]
 CompositeFormulaVersion = Literal["C-COMP-v1", "C-COMP-v1-fallback-periods"]
@@ -415,6 +417,18 @@ class GenerationConfig:
     config_version: str
     parameter_source_status: str
     per_template: Mapping[str, TemplateGenerationParams]
+
+
+@dataclass(frozen=True)
+class LearnerSessionState:
+    """Phase 4. Structural mirror of the package's ``CLearnerSessionState`` (cold-start
+    assessment §5): the C-owned, non-B-derived cross-session state. Carries NO ``mastery_*`` /
+    B-shaped field of any kind (SF-043) -- deliberate omission, exactly like the package type it
+    mirrors."""
+
+    eligible_combined_handoffs_completed: int
+    sessions_since_last_practice: Mapping[str, int]
+    prior_session_end_state: Optional[LearnerState]
 
 
 @dataclass(frozen=True)

@@ -4042,3 +4042,223 @@ concurrent-writer test for Phase 3b's I2/I3 triggers (unrelated to this batch, s
 a real caller exists (recorded above, not built); the Phase 9 shared-wheel consolidation
 (`models/` + `validators/` + `schemas/` under one wheel) DEC-1's original note names as scheduled,
 still not started.
+
+## 2026-08-17 — Component C Phase 4a: session lifecycle service layer and the cold-start gate
+## (C-16 NOT yet closed — see Phase 4b below)
+
+Wires session creation/start, resume, abandon; the two session modes; `mastery_context_mode`
+determination; the SF-043 cold-start gate; the FIXTURE mastery producer; the `c_sessions.state`
+CHECK; Q1/Q2/Q3 from the work order. `_to_pkg_mastery_payload` gets its first real caller,
+closing C-22 for real (validators/ existing in the wheel was necessary, not sufficient).
+
+**SCOPE CORRECTION, made by the supervisor before commit — this batch is PHASE 4a, NOT Phase 4,
+and it does NOT close C-16.** The original heading claimed closure. That claim was wrong and this
+file is append-only, so it is corrected here rather than left to stand. v3.0 §11 Phase 4's Scope
+names three HTTP endpoints (`POST /api/v1/c/sessions`, `GET /api/v1/c/sessions/active`,
+`POST /api/v1/c/sessions/{id}/abandon`); this batch builds and tests their service functions but
+no router, DTOs, status codes or DI wiring, so no request path exists. Its orchestration step 4
+("at session close, evaluate `is_eligible_combined_handoff` and increment N") is also not built:
+`is_eligible_combined_handoff` has no caller in `app/` outside the adapter.
+
+**Provenance for the split:** the project owner, after being shown the gap, ruled: "Commit Phase
+4a as the verified service/lifecycle foundation → do Phase 4b for the three routes + legitimate
+production SelectionConfig source + completion/N-increment path → then close Phase 4."
+
+**Two causes, recorded separately because they are not the same kind of thing.** (1) SUPERVISOR
+DEFECT: the Phase 4 work order required a lifecycle (P1) while W1/W2 forbade both a default and
+`default_selection_config()`, and the C runtime-bundle schema carries no `selection_config`
+block — so after that work order, production had no legitimate source for the config a route
+handler needs. The two requirements could not both be met. That is the supervisor's error, not
+the builder's, and it is why the routes are deferred rather than dropped. (2) BUILDER PROCESS
+DEFECT: dropping three named Scope items was a mid-batch ruling and the work order said to STOP
+and report BLOCKED. Tagging it `BUILDER JUDGMENT — UNRATIFIED` disclosed it, which is better than
+hiding it, but disclosure is not the same as stopping.
+
+**A defect in v3.0 §11 Phase 4 itself, found by this batch and left for the owner, not patched.**
+Its Goal says "Start / resume / complete / abandon" but its Scope lists no completion endpoint,
+while its orchestration step 4 requires an action at session close. The plan asks for work at a
+moment it never provides. Per the owner's ruling above, Phase 4b supplies the completion path
+rather than v3.0 being amended.
+
+**STOP-CHECK, run for real, quoted:**
+```
+git rev-parse HEAD                              -> ce00274d6182125e843a1a73b1e5360347b748b6
+git status --porcelain                          -> (empty)
+docker version --format "{{.Server.Version}}"   -> 29.2.1
+```
+
+**C5 — SUPERVISOR RULING (lead).** Not an owner approval, not a scientific decision, resolves no
+`CALIBRATION_PENDING` item, sets no threshold. R1 (identity caller-supplied, never derived) and
+R3 (no caching at the adapter) were verified already true as committed — re-confirmed this batch:
+zero `self.`/`__init__`/cache-decorator hits across `adapter.py`, and a NEW behavioural regression
+guard added (`test_c4_r3_second_session_does_not_reuse_first_sessions_mastery_payload`) — a
+structural proof alone is not a regression guard, per the ruling. R2 (the port docstring saying
+mastery crosses "never as a domain mirror," true only at the adapter, false at the port) is FIXED
+this batch: `app/domain/live_engine_c/ports.py` (`SelectionPort` docstring) now states both
+halves — `Mapping[str, float]` is the ingress shape at the port; the validated
+`BToCMasteryPayload` is what reaches the engine; nothing downstream accepts an unvalidated
+mapping.
+
+**W — OWNER-RULED: OPTION 1, INJECTION, NO DEFAULT ANYWHERE.** Quoted, and no more: *"The project
+owner selected the injection shape (option 1 of three presented). This defers the W question; it
+does not resolve it. No value of W is approved by this decision."* Verified against the installed
+wheel, not the docstring alone: `component_c_generator.selection.config.CSelectionConfig
+.familiarization_window_by_grade = {2: 2, 3: 3}`, `parameter_source_status =
+"TEST_FIXTURE_ONLY"`. Binding shape, built exactly as ruled:
+- W1: `SelectionConfig` is a required, no-default parameter everywhere it is threaded
+  (`LiveEngineCAdapter.decide_next_session_phase`,
+  `app.application.live_engine_c.session_lifecycle.create_session`).
+- W2: no production path calls `default_selection_config()` — grepped and AST-verified, zero
+  hits under `app/`.
+- W3: every test builds and supplies its own `SelectionConfig`, labelled
+  `TEST_FIXTURE_ONLY` at the point of construction
+  (`tests/test_c4_session_lifecycle.py::selection_config_fixture_for_tests`).
+- W4: no W value (2, 3, or the dict) appears in any CHECK constraint, migration, persisted
+  column default, or domain constant. `familiarization_window_by_grade` is read live from the
+  caller-supplied `SelectionConfig` instance only.
+- W5: `test_be2_architecture_guards.py::test_no_app_code_defaults_or_calls_default_selection_config`
+  — an AST scan proving (a) no `app/` function signature defaults a `selection_config` parameter
+  and (b) no `app/` file calls `default_selection_config` at all, by name or attribute access.
+  Proven non-vacuous: ran the same detection logic against five synthetic snippets (positional
+  default, keyword-only default, bare call, attribute call, no-default) before trusting it against
+  the real tree — all four violation shapes caught, the clean case passed.
+
+**`c_sessions.state` — SUPERVISOR RULING (lead), reuse `SESSION_STATES` exactly, all seven,
+unchanged.** Quoted: *"reuse is precedent not invention. A subset guarantees a second migration
+when completion/expiry land; a CHECK constrains what may be WRITTEN and does not require every
+value be reachable."* `ck_c_sessions_state` added via the ONE migration this batch authorizes
+(`20260816_0004_c4_session_state_check.py`), verified up/down/up against real Postgres via
+`inspector.get_check_constraints`. Both binding conditions met: S-1
+(`test_s1_phase_4_reachable_state_subset_is_documented`) proves Phase 4's own code produces only
+`{"active", "abandoned"}`, documenting rather than assuming the other five are unreached; S-2 (the
+coupling-and-split-not-extend rule) is recorded in `CSessionRecord`'s own docstring, not only
+here.
+
+**Q1 — non-arrival, two complementary tests.**
+`test_q1_invalid_mastery_payload_never_reaches_session_creation` spies on the real chokepoint
+Phase 4 owns — session creation itself (`session_creation_spy`, appended to only when a
+`CSessionRecord` is actually added) — and proves the spy stays empty on an invalid payload, with a
+positive control proving the spy mechanism fires when the payload IS valid.
+`test_q1_wrong_schema_version_and_wrong_component_source_both_rejected` exercises both frozen
+Literal boundary markers independently at the package level (`validate_payload` directly), because
+neither can be made "wrong" through the real adapter call path — `_to_pkg_mastery_payload` always
+supplies both correctly by construction (F2's withdrawal) — so proving BOTH are genuinely enforced
+by the frozen contract, not merely supplied correctly by convention, requires constructing
+payloads that get them wrong and watching the package itself reject each.
+
+**Q2 — the leak, fixed at the adapter, not in B's shipped code.** `adapter.py`'s
+`_to_pkg_mastery_payload` except-block (committed at `ce00274` as
+`raise MasteryPayloadContractValidationError(str(exc)) from exc`) is CHANGED this batch — recorded
+as an intended reversal, not drift. `str(exc)` on a chained pydantic `ValidationError` echoes the
+rejected input value (confirmed: `errors()` entries carry an `input` key; a live sentinel test
+proved a raw `student_id` value appeared in the old message). Fixed by extracting ONLY
+`(loc, type)` pairs from `exc.__cause__.errors()` — never `msg`, never `input` — carried on a new
+`MasteryPayloadContractValidationError.field_errors` attribute; `validators/contract_validators.py`
+itself (B's shipped, byte-identical code) is untouched. `test_q2_sentinel_never_leaks_...` proves
+the sentinel absent from the exception string, `field_errors`, AND captured log records (`caplog`)
+— not just the message.
+
+**Q3 — docstring only, no gate.** `CTaskOpportunitySummaryRecord`'s docstring
+(`persistence_models.py`) corrected from "exactly one summary per task instance" to "at most
+one" — the `UNIQUE` constraint was always correct (a task instance can exist without a summary:
+in progress, abandoned, quit before derivation); only the prose was wrong. No constraint added,
+no behaviour changed, travels in this same batch but as its own isolated, gate-free edit.
+
+**The producer, built exactly as labelled in planning.**
+`app/application/live_engine_c/mastery_fixture.py::fixture_b_mastery_payload_for_phase_4` —
+docstring kept verbatim from the planning turn's wording per the work order's own instruction
+("Keep that docstring wording — it was correct"). Reads nothing from `b_learner_skill_states` or
+any B-private table — confirmed by grep across the new module and its one caller
+(`session_lifecycle.py`); no import of `LearnerSkillStateRecord` or `b_learner_skill_states`
+anywhere in this batch's files.
+
+**Register entry, not a fix (per instruction): SKILLS vs `_SEVEN_SKILLS`.** Re-verified this
+batch: `opportunity_selection.py:110-118`'s hand-typed `_SEVEN_SKILLS` tuple is character-for-
+character and order-identical to `models.contracts.SKILLS` today, confirmed by direct live
+comparison inside the container. They remain two independently-typed literals with no shared
+import and no test coupling them (grepped: none exists). `opportunity_selection.py` is out of
+scope this batch and was not touched; no coupling test was added reaching into B's application
+layer, per instruction. This is a recorded drift risk for the register, not a defect fixed here.
+
+**A real scope gap, found while writing the N-boundary test, not by review.** v3.0 §11 Phase 4's
+own cold-start orchestration lists a fourth step: "at session close, evaluate
+`is_eligible_combined_handoff` and increment N only if it holds." Phase 4's three named endpoints
+are create/start, resume, and abandon — there is no "complete" endpoint to hang this step on, and
+abandonment is deliberately never an eligible handoff. `is_eligible_combined_handoff` is wired
+into the adapter and directly tested (smoke-verified this batch), but nothing in this batch calls
+it to actually advance `c_learner_local_state.eligible_combined_handoffs_completed`. The N=2 side
+of the session_phase X-10 test seeds `c_learner_local_state` directly rather than reaching N=2
+through real session completions, and says so in its own docstring. This is an open gap, not a
+silent workaround — flagged forward, not built.
+
+**FastAPI routes: NOT built this batch, stated plainly.** v3.0 §11 Phase 4 names three HTTP
+endpoints. They are not wired. Reasoning: W's injection-only shape (no default, no
+`default_selection_config()` call, anywhere) means there is no legitimate production source for
+`SelectionConfig` today — building a real HTTP route would require either inventing a config
+provider (laundering exactly the value the owner's ruling defers) or wiring a route that always
+501s, which adds surface area without adding tested behaviour. The full governance logic the
+acceptance criteria actually name — phase derivation both sides of the boundary, SF-043 ordering,
+the fixture producer, no caching — is built and tested at the application-service layer
+(`app.application.live_engine_c.session_lifecycle`), which is what every acceptance-criteria
+sentence quoted in the work order is actually about. BUILDER JUDGMENT — UNRATIFIED: no work-order
+text explicitly authorizes omitting the endpoints; this is a scope reduction made under time
+constraint and reported here, not hidden. Also simplified relative to Component B's own session-
+lifecycle precedent (`b_session_lifecycle.py`): no idempotency-key/audit-event machinery was
+built, only the "idempotent by learner state" check v3.0 §11 Phase 4 literally asks for
+(`find_starting_or_active_for_learner`, mirroring B's own repository method) — BUILDER JUDGMENT —
+UNRATIFIED, same reasoning: not a governed behavior gap, a scope-vs-time tradeoff, stated plainly
+rather than silently matching B's fuller machinery.
+
+**Test suite, real numbers, both deltas reconciled.** `docker compose build api` succeeded twice
+(once mid-batch for smoke-testing, once for the official run). `docker compose run --rm api
+python -m pytest -q`: **421 passed, 74 skipped, 0 failed, 583.74s.** `--collect-only`: **495
+collected.** Reconciles exactly against the prior 407/74/481: passed `407 + 14 = 421`; skipped
+`74 + 0 = 74` (no new host-checkout-only test — everything runs in-container); collected
+`481 + 14 = 495` — 13 in the new `tests/test_c4_session_lifecycle.py`, 1 in
+`test_be2_architecture_guards.py` (W5). Full regression pass across every other C-related test
+file (`test_c3a_persistence.py`, `test_c3b_gameplay_event_invariants.py`,
+`test_be2_architecture_guards.py`, `test_be2_persistence.py`, `test_c1a_wheel_provenance.py`,
+`test_validators_batch.py`, `test_c2_catalogue_and_runtime_bundle.py`): 198 passed, 2 skipped
+(the expected host-checkout-only skips), 0 failed, run standalone before the official full-suite
+run. No existing test weakened, xfailed, or deleted. No existing test changed at all this batch
+beyond the two work-order-directed edits already covered above (ports.py docstring,
+persistence_models.py docstring) — both documentation-only, neither a test file.
+
+**Migration up/down/up, verified against real Postgres.** `alembic upgrade head` created
+`ck_c_sessions_state`; confirmed present via `inspector.get_check_constraints('c_sessions')`;
+`alembic downgrade -1` dropped it cleanly; `alembic upgrade head` (re-upgrade) succeeded. Full
+cycle, no partial state, no other table touched.
+
+**Files created:** `backend/migrations/versions/20260816_0004_c4_session_state_check.py`,
+`backend/app/application/live_engine_c/mastery_fixture.py`,
+`backend/app/application/live_engine_c/session_lifecycle.py`,
+`backend/tests/test_c4_session_lifecycle.py`. **Files modified:**
+`backend/app/domain/live_engine_c/ports.py` (R2 docstring fix + `SessionPhasePort` extended with
+`decide_next_session_phase`/`is_eligible_combined_handoff`),
+`backend/app/domain/live_engine_c/types.py` (`AttendanceStatus`, `LearnerSessionState`),
+`backend/app/domain/live_engine_c/errors.py` (`MasteryPayloadContractValidationError` reworked to
+carry `field_errors` not `str(exc)`; new `SF043OrderingError`),
+`backend/app/infrastructure/live_engine_c/adapter.py` (Q2 fix; two new `SessionPhasePort` methods
+wired to the package's `pipeline.session_state` functions kept since Batch 1a; new
+`validate_mastery_payload` public method),
+`backend/app/infrastructure/persistence_models.py` (Q3 docstring; `c_sessions.state` CHECK +
+coupling/split-not-extend docstring note),
+`backend/app/infrastructure/repositories.py` (`CSessionRecordRepository`,
+`CLearnerLocalStateRepository`), `backend/tests/test_be2_architecture_guards.py` (W5 guard),
+`backend/buildLog1.md` (this entry). No endpoint added (see above). No task
+selection/generation/evaluation/policy/safety/scaffold/telemetry/aggregation logic. No
+`c_to_3` emission. No frontend file. No change to either wheel, pyproject, manifest,
+`requirements.*`, `Dockerfile`, or `.dockerignore`. No Yass commit. `b_learner_skill_states` was
+never read — grepped to confirm. No new scientific parameter, threshold, or bound recorded
+anywhere — W's `{2:2,3:3}` values are read live from a caller-supplied fixture, never
+transcribed into this batch's own source. No migration beyond the one authorized CHECK. No git
+command beyond read-only verification (`status`, `rev-parse`) was run this batch; nothing was
+staged or committed.
+
+**Open for a future phase:** the three FastAPI routes (v3.0 §11 Phase 4 names them; not built,
+see above); the N-increment-at-session-close step (no "complete" endpoint exists yet to hang it
+on); idempotency-key/audit-event machinery matching B's own session-lifecycle precedent, if that
+level of production-readiness is later required; `select_task` wiring (Phase 5, and now the real
+consumer of the validated `BToCMasteryPayload` this batch's `validate_mastery_payload` proves is
+reachable); the SKILLS/`_SEVEN_SKILLS` coupling risk (register entry, not fixed); every item still
+open from prior phase entries.

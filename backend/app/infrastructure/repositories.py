@@ -8,10 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence_models import (
     AppUser, AppUserLearnerLink, AttemptRecord, AuditEvent, Base, Classroom, ClassroomInvite,
-    ClassroomMembership, HintEventRecord, IdempotencyRecord, ItemOpportunityRecord, Learner,
-    LearnerSkillStateRecord, PresentationTokenRecord, RuntimeBundleRecord,
-    SessionAggregateResultRecord, SessionEvent, SessionRecord, SkillCertificationResultRecord,
-    SkillStateTransitionRecord, TaskInstanceRecord, TeacherProfile,
+    ClassroomMembership, CLearnerLocalStateRecord, CSessionRecord, HintEventRecord,
+    IdempotencyRecord, ItemOpportunityRecord, Learner, LearnerSkillStateRecord,
+    PresentationTokenRecord, RuntimeBundleRecord, SessionAggregateResultRecord, SessionEvent,
+    SessionRecord, SkillCertificationResultRecord, SkillStateTransitionRecord, TaskInstanceRecord,
+    TeacherProfile,
 )
 
 
@@ -101,6 +102,43 @@ class SessionRecordRepository(SqlAlchemyNeutralRepository[SessionRecord]):
                 SessionRecord.session_id == session_id,
                 SessionRecord.learner_id == learner_id,
             )
+        )
+
+
+class CSessionRecordRepository(SqlAlchemyNeutralRepository[CSessionRecord]):
+    model_type = CSessionRecord
+
+    async def find_starting_or_active_for_learner(self, student_id: UUID) -> CSessionRecord | None:
+        return await self.session.scalar(
+            select(CSessionRecord).where(
+                CSessionRecord.student_id == student_id,
+                CSessionRecord.state.in_(("starting", "active")),
+            )
+        )
+
+    async def find_active_for_learner(self, student_id: UUID) -> CSessionRecord | None:
+        return await self.session.scalar(
+            select(CSessionRecord).where(
+                CSessionRecord.student_id == student_id,
+                CSessionRecord.state == "active",
+            )
+        )
+
+    async def get_owned(self, c_session_id: UUID, student_id: UUID) -> CSessionRecord | None:
+        return await self.session.scalar(
+            select(CSessionRecord).where(
+                CSessionRecord.c_session_id == c_session_id,
+                CSessionRecord.student_id == student_id,
+            )
+        )
+
+
+class CLearnerLocalStateRepository(SqlAlchemyNeutralRepository[CLearnerLocalStateRecord]):
+    model_type = CLearnerLocalStateRecord
+
+    async def find_by_student(self, student_id: UUID) -> CLearnerLocalStateRecord | None:
+        return await self.session.scalar(
+            select(CLearnerLocalStateRecord).where(CLearnerLocalStateRecord.student_id == student_id)
         )
 
 

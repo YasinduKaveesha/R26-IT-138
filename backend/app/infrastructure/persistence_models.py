@@ -699,12 +699,21 @@ class CRuntimeBundleRecord(ProvenanceMixin, Base):
 
 
 class CSessionRecord(ProvenanceMixin, Base):
-    """Component C Phase 3a. Session lifecycle, pinned catalogue/config versions,
+    """Component C Phase 3a/4. Session lifecycle, pinned catalogue/config versions,
     ``mastery_context_mode``, ``session_phase`` (Component_C_Master_Build_Plan_v3.0.md §11
-    Phase 3 table purpose). ``state`` is left without an enum CHECK deliberately — BUILDER
-    JUDGMENT, UNRATIFIED: the exact C session-lifecycle vocabulary is Phase 4's ("session
-    lifecycle... modes... cold-start gate") to define; the column exists now so Phase 4 needs no
-    migration just to add a foundational session column."""
+    Phase 3 table purpose). ``state`` REUSES ``SESSION_STATES`` (this file's module-level
+    constant, already B's own session-lifecycle vocabulary) exactly, unchanged, all seven values
+    (SUPERVISOR RULING (lead), Phase 4 work order, c_sessions.state section: "Reuse SESSION_STATES
+    exactly — all seven, unchanged... reuse is precedent not invention. A subset guarantees a
+    second migration when completion/expiry land; a CHECK constrains what may be WRITTEN and does
+    not require every value be reachable."). This deliberately COUPLES Component C's lifecycle
+    vocabulary to a constant Component B also uses — if C later needs a state B does not have,
+    THE CONSTANT MUST BE SPLIT into a C-specific one, never extended in place, because extending
+    it silently widens B's own ``ck_b_sessions_state`` CHECK too (same ruling, S-2). Phase 4 does
+    not reach every one of the seven states from its own scope (create/start, resume, abandon) --
+    see ``test_phase4_c_sessions_state_reachable_subset_is_documented`` for exactly which subset
+    Phase 4's own code paths can produce (S-1); the unreached values are not dead, they are simply
+    not this phase's job to produce."""
 
     __tablename__ = "c_sessions"
     __table_args__ = (
@@ -721,6 +730,10 @@ class CSessionRecord(ProvenanceMixin, Base):
             name="ck_c_sessions_mastery_context_mode",
         ),
         CheckConstraint("grade IN (2, 3)", name="ck_c_sessions_grade"),
+        CheckConstraint(
+            "state IN ('starting', 'active', 'completing', 'completed', 'abandoned', 'expired', 'technical_failed')",
+            name="ck_c_sessions_state",
+        ),
         *ProvenanceMixin.provenance_constraints("c_sessions"),
     )
 
@@ -928,7 +941,12 @@ class CGameplayEventRecord(ProvenanceMixin, Base):
 
 class CTaskOpportunitySummaryRecord(ProvenanceMixin, Base):
     """Component C Phase 3a. Derived per-task rollup (C3 §15). Derived only, never sampled --
-    exactly one summary per task instance (UNIQUE below)."""
+    AT MOST ONE summary per task instance (UNIQUE below), never "exactly one" -- a task instance
+    can exist without a summary (in progress, abandoned, quit before derivation runs). Fixed from
+    "exactly one" (Phase 4 work order, Q3): the constraint was always correct; only the prose was
+    wrong. If a genuine exactly-one invariant is later needed for COMPLETED task instances
+    specifically, that is a check on the completion path, a later phase's item, not this table's
+    schema."""
 
     __tablename__ = "c_task_opportunity_summaries"
     __table_args__ = (

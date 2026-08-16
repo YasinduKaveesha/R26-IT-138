@@ -16,6 +16,7 @@ from .types import (
     ActivationDecision,
     AdaptationDecision,
     AggregationConfig,
+    AttendanceStatus,
     Catalogue,
     ChildFacingReward,
     CompositeFormulaVersion,
@@ -27,6 +28,7 @@ from .types import (
     GameplayEvent,
     GenerationConfig,
     Grade,
+    LearnerSessionState,
     LearnerState,
     PolicyConfig,
     PolicyMode,
@@ -85,19 +87,57 @@ class ActivationPort(Protocol):
 
 
 class SessionPhasePort(Protocol):
-    """Cold-start / familiarization phase gate (v3.0 §7, Phase 4)."""
+    """Cold-start / familiarization phase gate (v3.0 §7, Phase 4).
+
+    ``selection_config`` is REQUIRED with NO DEFAULT on every method below (owner ruling, Phase 4
+    work order, "W — OWNER-RULED... W1: SelectionConfig is a REQUIRED parameter with NO DEFAULT on
+    every C application-layer path that needs it"). ``familiarization_window_by_grade`` is
+    ENGINEERING_ASSUMPTION + CALIBRATION_PENDING; this port's shape defers that question, it does
+    not resolve it — no value is approved by this port existing."""
 
     def decide_session_phase(
         self, eligible_combined_handoffs_completed: int, window_w: int
     ) -> str: ...
 
+    def decide_next_session_phase(
+        self,
+        *,
+        session_mode: SessionMode,
+        grade: Grade,
+        state: LearnerSessionState,
+        selection_config: SelectionConfig,
+    ) -> SessionPhase:
+        """Translates ``component_c_generator.pipeline.session_state.decide_next_session_phase``
+        (kept verbatim in the shipped wheel specifically for this call, per the master build
+        plan's Batch 1a trim table). ``c_only`` always maps to the literal ``"c_only"``; combined
+        calls ``decide_session_phase`` with the current N and ``selection_config``'s window for
+        this grade. Do not reimplement this branching in application code — call this instead."""
+        ...
+
+    def is_eligible_combined_handoff(
+        self,
+        session_mode: SessionMode,
+        b_payload_valid: bool,
+        attendance_status: AttendanceStatus,
+        technical_blocked_bootstrap: bool,
+    ) -> bool:
+        """Translates ``component_c_generator.pipeline.session_state.is_eligible_combined_handoff``
+        — the five-condition ELIGIBLE COMPLETED COMBINED B->C HANDOFF predicate (cold-start
+        assessment §5). Do not reimplement this predicate in application code — call this
+        instead."""
+        ...
+
 
 class SelectionPort(Protocol):
     """The cold-start chokepoint select_task (v3.0 §7.1, Phase 5).
 
-    ``mastery_payload`` crosses this boundary as a plain ``Mapping[str, float]`` keyed by the
-    seven frozen skill names, never as a domain mirror of ``BToCMasteryPayload`` (C5). Building
-    the package's ``BToCMasteryPayload`` also needs B's own identity fields
+    ``mastery_payload`` crosses THIS PORT boundary as a plain ``Mapping[str, float]`` keyed by
+    the seven frozen skill names — that is the INGRESS shape only (SUPERVISOR RULING (lead), R2,
+    Phase 4 work order). It is not the shape the engine consumes: internally, the adapter
+    assembles the full mapping into a payload and calls ``validate_payload(payload, "b_to_c")``,
+    and the VALIDATED ``BToCMasteryPayload`` — never the raw mapping — is what actually reaches
+    the package's engine functions. Nothing downstream of the adapter accepts an unvalidated
+    mapping. Building the package's ``BToCMasteryPayload`` also needs B's own identity fields
     (``mastery_source_student_id`` matches B's ``STU-####`` pattern,
     ``mastery_source_intervention_session_id`` matches B's ``STU-####-I-###`` pattern,
     ``mastery_source_intervention_session_number``) — these are B-owned identifiers, NOT the

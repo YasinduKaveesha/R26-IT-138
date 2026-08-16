@@ -722,3 +722,43 @@ def test_no_domain_config_field_carries_a_default() -> None:
             assert config_field.default_factory is dataclasses.MISSING, (
                 config_type.__name__, config_field.name,
             )
+
+
+# =====================================================================================
+# Phase 4 — W1/W2/W5: SelectionConfig is INJECTION ONLY, no default anywhere (owner ruling,
+# Phase 4 work order, "W — OWNER-RULED. OPTION 1: INJECTION, NO DEFAULT ANYWHERE"). Distinct from
+# test_no_domain_config_field_carries_a_default above, which checks the DATACLASS's own fields;
+# this checks CALL SITES and FUNCTION SIGNATURES across app/ -- a dataclass with no-default
+# fields can still be defaulted at a call site (`selection_config: SelectionConfig =
+# default_selection_config()`), which is exactly what this guard exists to catch.
+# =====================================================================================
+
+
+def test_no_app_code_defaults_or_calls_default_selection_config() -> None:
+    """SIGNAL: no function signature anywhere under app/ gives a `selection_config` parameter a
+    default value (W1), and no file under app/ calls `default_selection_config` at all (W2 --
+    reading the CALIBRATION_PENDING W value out of the wheel at runtime does not change its
+    provenance, it only hides the dependency). Would FAIL if a future edit added
+    `selection_config: SelectionConfig = default_selection_config()` to any application-layer
+    function, or called `default_selection_config()` anywhere in app/ even without assigning a
+    default (e.g. inline at a call site)."""
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                args = node.args
+                positional = args.posonlyargs + args.args
+                defaulted_positional = dict(
+                    zip(positional[len(positional) - len(args.defaults):], args.defaults)
+                )
+                defaulted_kwonly = {
+                    arg: default
+                    for arg, default in zip(args.kwonlyargs, args.kw_defaults)
+                    if default is not None
+                }
+                for arg_node, _default in {**defaulted_positional, **defaulted_kwonly}.items():
+                    assert arg_node.arg != "selection_config", (path, node.name)
+            if isinstance(node, ast.Call):
+                callee = node.func
+                name = callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", None)
+                assert name != "default_selection_config", (path, ast.dump(node)[:200])
