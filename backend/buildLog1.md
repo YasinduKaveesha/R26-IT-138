@@ -3330,3 +3330,115 @@ above); all 64 verbatim files; the 16-module never-ship list; Batch 1b scope (no
 frontend file; any Yass commit; any file belonging to Component B's wheel/pin/adapter/manifest/
 packaging tree or its three `runtime_bundle/*.json` fixtures. No git command beyond read-only
 verification (`status`, `rev-parse`) was run this batch; nothing was staged or committed.
+
+## 2026-08-16 — Component C Phase 1 batch 1b: the adapter and the import boundary guard
+
+Built the C-side import surface: `app/domain/live_engine_c/{types,errors,ports}.py` and the sole
+package-importing file, `app/infrastructure/live_engine_c/adapter.py` (`LiveEngineCAdapter`), plus
+seven new tests extending `test_be2_architecture_guards.py`. Import surface and DTO mapping only —
+no route, no service, no persistence, no session logic, no orchestration, no mutable instance
+state. Twenty adapter methods, each traceable to exactly one row of the §7 table verified this
+batch's planning turn (all 20 non-`emit_c_to_3` calls import cleanly from the installed wheel;
+`c_to_3.emit` confirmed `ModuleNotFoundError`).
+
+**Correction accepted from the supervisor on X-1.** The planning turn's stated reason for building
+the full 20-call surface now ("later phases would otherwise be barred from adding an import") was
+wrong — X-1 constrains which file may import the package, not when its surface may grow. The real
+reason, restated here so a future builder does not inherit the wrong constraint: v3.0 §11 Phase 1
+item 2 scopes the adapter as "import surface and DTO mapping" in full, and every later phase's own
+description ("through the adapter") presumes that surface already exists — that is why it is built
+now, not because later phases would be architecturally blocked from adding to it otherwise.
+
+**Seed derivation: flagged again, still not built.** The supervisor's independent scan found two
+more unnamed symbols beyond `derive_child_lineage`/`SeedManager` from the planning turn:
+`rng_from` and `SUBSTREAMS`. None of the four appear anywhere in `adapter.py`, checked by a real
+AST-based test (`test_adapter_references_no_seed_derivation_symbol`) that inspects
+`ast.Import`/`ast.ImportFrom`/`ast.Attribute`/`ast.Name` nodes specifically so the adapter's own
+module docstring — which names all four symbols in prose to explain their absence — cannot trip a
+naive text search. The domain `SeedLineage` type carries only the three verified package fields
+(`global_seed`, `path`, `seed`); obtaining a real seed value is left to a future, explicitly
+authorized phase.
+
+**A real bug found and fixed during implementation, not by review.** The first draft of
+`select_task`'s mastery-payload wiring hardcoded `intervention_session_number=1` and reused C's own
+`c_session_id` as B's `intervention_session_id` — invented values, and a pattern mismatch besides
+(B's `intervention_session_id` must match `^STU-[0-9]{4}-I-[0-9]{3}$`; C's `c_session_id` doesn't).
+Caught by end-to-end smoke-testing the adapter inside the container before the full suite run, not
+by manual read. Fixed by adding three explicit `mastery_source_*` parameters (student id,
+intervention session id, intervention session number) that the caller must supply — never derived
+or guessed from C's own identifiers — to both `ports.py`'s `SelectionPort.select_task` and the
+adapter's implementation.
+
+**`_to_pkg_mastery_payload` is confirmed the only place a mastery payload is constructed** — grep
+and read confirm no other function in `adapter.py` references `_PkgBToCMasteryPayload`/
+`BToCMasteryPayload`. Implements the supervisor's provisional ruling on the §5-vs-X-3 conflict: the
+seven mastery values cross the adapter boundary as a plain `Mapping[str, float]`; no domain mirror
+of the frozen B→C contract is declared anywhere under `app/domain/`. Provisional status recorded in
+both the function's docstring and `types.py`'s module docstring; owner confirmation still open.
+
+**`validate_payload` (§5's B→C validation call) is NOT implemented, approximated, or vendored** —
+per the work order, this is a documented consequence of DEC-1/C-22 (the third, after `emit_c_to_3`
+and `NoRealCSessionError`: `validators/` is unshipped, so no B→C payload-validation implementation
+exists in this wheel) and is left as Phase 4's problem, per the owner's own framing.
+
+**Config types carry zero defaults, asserted not reviewed.** All nine config-shaped domain
+dataclasses (`AggregationConfig`, `EvidenceWindowConfig`, `GenerationConfig`, `PolicyConfig`,
+`RecoveryConfig`, `SafetyConfig`, `ScaffoldConfig`, `SelectionConfig`, and the nested
+`TemplateGenerationParams`) were checked field-by-field against `dataclasses.fields()` by
+`test_no_domain_config_field_carries_a_default` — every field required, no default, no
+default_factory. `TemplateGenerationParams` was included even though it is nested (inside
+`GenerationConfig.per_template`) rather than one of the eight top-level configs the supervisor
+independently verified, on the same G1 reasoning: a retry-count/tuple default is still a parameter
+this codebase has no standing to choose.
+
+**Real end-to-end smoke testing, not just imports.** Before the full suite run, every adapter
+method that doesn't need a real catalogue file was exercised directly inside the container:
+`decide_session_phase`, seed-lineage round-trip, `decide_scaffold_level`,
+`decide_child_facing_reward`, `_to_pkg_mastery_payload`, `decide_adaptation`,
+`derive_task_opportunity_summary`, `compute_engagement`/`compute_frustration`,
+`decide_telemetry_quality_status`, `decide_learner_state`, `derive_session_aggregate`. Every
+failure encountered along the way was synthetic test data violating a genuine package business
+rule (cross-field validators inside the reviewed package itself — e.g. "a never-started task
+cannot be completed", "attempt_number must be set iff event_type is one of (...)") — never a
+`KeyError`/`TypeError`/`AttributeError` from the adapter's own mapping code, which is the signal
+that the mapping layer is faithful. Catalogue-dependent methods (`load`, `checksum`,
+`decide_activation`, `eligible_templates`, `build_task_instance`, `evaluate`, `select_task`,
+`build_recovery_task`) were verified by import and construction only, not end-to-end, since no C
+catalogue fixture exists yet (that is Phase 2 scope) — stated plainly as not verified beyond that.
+
+**Guard extension, B's two protected tests confirmed byte-identical.** `git diff` on
+`test_be2_architecture_guards.py` shows exactly one line removed (the module docstring, replaced)
+and everything else additive; `test_no_yass_research_or_scientific_imports` and
+`test_exact_authorized_model_table_set_and_no_scientific_columns` are untouched. Seven new tests
+added: full-dotted-path enforcement, its in-memory-AST negative control (with the required
+discrimination pair — `...pipeline.session` flagged, `...pipeline.evidence` not), a cross-check
+that `PROHIBITED_C_FULL_DOTTED_PATHS` (derived from, not hand-copied from) 1a's `NEVER_SHIP_MODULES`
+stays equal to it, the column-guard mechanism proof against a throwaway `sqlalchemy.MetaData()`/
+`Table` (never `Base.metadata` — `test_exact_authorized_model_table_set_and_no_scientific_columns`'s
+exact-equality assertion re-checked inside the same test as a guard against accidental
+interaction), the empty-allow-list assertion, the seed-derivation AST guard, and the no-default
+config guard. The `tests.test_c1a_wheel_provenance` cross-module import (C2c) was verified working
+before being relied on, not assumed.
+
+**Test suite, real numbers, real runs.** `docker compose build api` succeeded, then
+`docker compose run --rm api python -m pytest -q`: **335 passed, 70 skipped, 0 failed, 313.97s.**
+Reconciles against the prior 328/70/398: `328 + 7 − 0 = 335` passed, `70 skipped` unchanged (no
+host-only test added or removed this batch), `398 + 7 = 405` collected — exactly the seven new
+guard-file test functions, all real, all passing in-container, none skipped.
+
+**Files created:** `backend/app/domain/live_engine_c/{__init__,types,errors,ports}.py`,
+`backend/app/infrastructure/live_engine_c/{__init__,adapter}.py`. **Files modified:**
+`backend/tests/test_be2_architecture_guards.py` (extended only — see above),
+`backend/buildLog1.md` (this entry). No file under Batch 1a's committed packaging tree, wheel,
+provenance manifest, or `test_c1a_wheel_provenance.py` (imported from, per C2c, never edited); no
+frontend file; no Yass commit; no file belonging to Component B's wheel/pin/adapter/manifest/
+packaging tree or its three `runtime_bundle/*.json` fixtures; no Phase 2-12 logic (catalogue load,
+table, migration, endpoint, selection/evaluation/policy/safety/scaffold/telemetry/aggregation —
+only type-shape mirrors and stateless one-to-one mapping methods). No git command beyond read-only
+verification (`status`, `rev-parse`) was run this batch; nothing was staged or committed.
+
+**Open for a future phase:** seed-lineage derivation (whichever phase first needs a real seed
+value); the owner's confirmation or reversal of the mastery-payload provisional ruling (isolated to
+`_to_pkg_mastery_payload` by design, so a reversal touches one function); `validate_payload`'s
+missing implementation (Phase 4, per DEC-1/C-22's third consequence); end-to-end verification of
+the eight catalogue-dependent adapter methods against a real C catalogue fixture (Phase 2).

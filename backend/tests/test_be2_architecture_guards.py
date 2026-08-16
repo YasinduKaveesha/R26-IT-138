@@ -1,11 +1,27 @@
-"""Static guards for the BE2 Limited authorization boundary."""
+"""Static guards for the BE2 Limited authorization boundary, extended (Phase 1 batch 1b) with
+Component C's full-dotted-path import boundary and column-guard mechanism proof."""
 
 import ast
+import dataclasses
 import re
 from pathlib import Path
 
+from sqlalchemy import Column, Integer, MetaData, String, Table
+
+from app.domain.live_engine_c.types import (
+    AggregationConfig,
+    EvidenceWindowConfig,
+    GenerationConfig,
+    PolicyConfig,
+    RecoveryConfig,
+    SafetyConfig,
+    ScaffoldConfig,
+    SelectionConfig,
+    TemplateGenerationParams,
+)
 from app.infrastructure.persistence_models import AUTHORIZED_TABLES, Base
 from app.main import app
+from tests.test_c1a_wheel_provenance import NEVER_SHIP_MODULES
 
 
 EXPECTED_TABLES = {
@@ -348,3 +364,244 @@ def test_no_production_failure_injection_or_debug_mechanism() -> None:
             assert marker not in lowered, (path, marker)
     paths = set(app.openapi()["paths"])
     assert not any("debug" in path or "inject" in path or "/test" in path for path in paths)
+
+
+# =====================================================================================
+# Phase 1 batch 1b — Component C full-dotted-path import boundary (C-8).
+#
+# The B guard above (test_no_yass_research_or_scientific_imports) matches import ROOTS only via
+# `.split(".")[0]`, which is correct for B but insufficient for C: both the legitimate
+# `component_c_generator.pipeline.evidence` and the prohibited
+# `component_c_generator.pipeline.session` share the identical root `component_c_generator` --
+# a root-only check cannot distinguish them. B's guard, its prohibited_import_roots set, and its
+# exempt path are left completely untouched above; everything below is new, additive, and
+# independent.
+# =====================================================================================
+
+_ALLOWED_C_ADAPTER_PATH = Path("app/infrastructure/live_engine_c/adapter.py")
+
+# The 16 never-ship C module paths, sourced from 1a's own list rather than hand-copied here --
+# see test_prohibited_c_full_dotted_paths_matches_1a_never_ship_modules below, which proves this
+# derivation stays correct rather than merely asserting it once at import time.
+PROHIBITED_C_FULL_DOTTED_PATHS = frozenset(NEVER_SHIP_MODULES)
+
+
+def _full_dotted_import_candidates(node: ast.AST) -> set[str]:
+    """Every full dotted path a single Import/ImportFrom AST node could bind into scope.
+
+    For `ast.ImportFrom` this includes BOTH the bare `node.module` (covers
+    `from component_c_generator.pipeline.session import X`, where the prohibited path is
+    already the whole module) AND `f"{node.module}.{alias.name}"` for every imported name
+    (covers `from component_c_generator.pipeline import session`, where the prohibited path
+    only appears once the imported name is appended)."""
+    if isinstance(node, ast.Import):
+        return {alias.name for alias in node.names}
+    if isinstance(node, ast.ImportFrom) and node.module:
+        return {node.module} | {f"{node.module}.{alias.name}" for alias in node.names}
+    return set()
+
+
+def _matches_prohibited_full_path(candidate: str, prohibited: frozenset[str]) -> bool:
+    """Exact match or dot-bounded prefix match -- NEVER substring containment. This is what
+    lets `component_c_generator.pipeline.evidence` pass (it is neither equal to, nor a
+    dot-prefix of, any prohibited entry) while `component_c_generator.pipeline.session` and
+    `component_c_generator.audits.leakage` (a dot-prefix of the whole-package entry
+    `component_c_generator.audits`) are both caught."""
+    return any(candidate == p or candidate.startswith(p + ".") for p in prohibited)
+
+
+def test_component_c_generator_full_dotted_path_enforcement() -> None:
+    """SIGNAL: only app/infrastructure/live_engine_c/adapter.py may have `component_c_generator`
+    as an import root anywhere under app/ (root check, same style as B's guard); even inside
+    that one exempt file, none of the 16 never-ship full dotted paths may appear among its
+    import candidates (full-dotted-path check, matched via
+    _matches_prohibited_full_path -- exact-or-dot-prefix, never substring). Would FAIL if any
+    other file under app/ imported component_c_generator at all, or if the adapter itself
+    imported e.g. `component_c_generator.pipeline.session` or `component_c_generator.audits.*`."""
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            candidates = _full_dotted_import_candidates(node)
+            roots = {c.split(".")[0] for c in candidates}
+            if path != _ALLOWED_C_ADAPTER_PATH:
+                assert "component_c_generator" not in roots, (path, candidates)
+                continue
+            for candidate in candidates:
+                if candidate.split(".")[0] != "component_c_generator":
+                    continue
+                assert not _matches_prohibited_full_path(
+                    candidate, PROHIBITED_C_FULL_DOTTED_PATHS
+                ), (path, candidate)
+
+
+def test_full_dotted_path_guard_negative_control_catches_same_root_violation() -> None:
+    """POSITIVE PROOF the full-dotted-path matcher is doing real work, not merely inheriting B's
+    root-only check. Parses SYNTHETIC, in-memory module source -- never a file under app/, which
+    would be a real boundary breach waiting to be committed by accident -- containing
+    `from component_c_generator.pipeline import session`, a SAME-ROOT, DIFFERENT-FULL-PATH case
+    the OLD root-only matcher could not have distinguished from the legitimate
+    `from component_c_generator.pipeline import evidence` (both share root
+    `component_c_generator`, exempted for the adapter path). Would FAIL (silently) if the
+    matcher were reverted to root-only, since both cases share the same root and a root-only
+    check cannot discriminate them -- this is the discrimination pair the negative control
+    exists to prove."""
+    violating_source = "from component_c_generator.pipeline import session\n"
+    legitimate_source = "from component_c_generator.pipeline import evidence\n"
+
+    violating_tree = ast.parse(violating_source, filename="<synthetic-negative-control-violation>")
+    legitimate_tree = ast.parse(legitimate_source, filename="<synthetic-negative-control-legitimate>")
+
+    def _any_prohibited(tree: ast.AST) -> bool:
+        return any(
+            _matches_prohibited_full_path(candidate, PROHIBITED_C_FULL_DOTTED_PATHS)
+            for node in ast.walk(tree)
+            for candidate in _full_dotted_import_candidates(node)
+        )
+
+    assert _any_prohibited(violating_tree), "negative control failed to catch a real violation"
+    assert not _any_prohibited(legitimate_tree), (
+        "guard incorrectly flagged a legitimate sibling import -- it is not discriminating"
+    )
+
+
+def test_prohibited_c_full_dotted_paths_matches_1a_never_ship_modules() -> None:
+    """SIGNAL: PROHIBITED_C_FULL_DOTTED_PATHS (this file, used operationally by the guard above)
+    stays set-equal to NEVER_SHIP_MODULES (backend/tests/test_c1a_wheel_provenance.py, the
+    16-module never-ship list 1a's wheel-content tests assert against). Would FAIL the moment
+    the two lists diverge -- e.g. if a future Phase 1a revision adds a 17th never-ship module and
+    this file is not updated to match -- rather than silently leaving this guard one module
+    weaker than the wheel's own packaging boundary."""
+    assert PROHIBITED_C_FULL_DOTTED_PATHS == frozenset(NEVER_SHIP_MODULES)
+
+
+# =====================================================================================
+# Phase 1 batch 1b — PROHIBITED_COLUMN_TERMS mechanism, proven to fire (X-10), not merely
+# present. NEVER touches Base.metadata / EXPECTED_TABLES -- uses a throwaway
+# sqlalchemy.MetaData()/Table so test_exact_authorized_model_table_set_and_no_scientific_columns
+# above stays byte-identical and its exact-equality assertion is never at risk.
+# =====================================================================================
+
+# Empty at Phase 1 -- Phase 3 is the first phase with real C tables to exempt anything on. See
+# test_prohibited_column_terms_allow_list_is_empty_for_phase_1 below.
+AUTHORIZED_C_COLUMN_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset()
+
+
+def _offending_columns(tables, prohibited_terms, authorized_exceptions) -> set[tuple[str, str]]:
+    """Same offender-derivation LOGIC as
+    test_exact_authorized_model_table_set_and_no_scientific_columns's inline check above --
+    written as a standalone, independently-callable function so it can be run against a
+    throwaway MetaData/Table without touching that test's own code or Base.metadata."""
+    return {
+        (table.name, column.name)
+        for table in tables
+        for column in table.columns
+        if any(term in column.name.lower() for term in prohibited_terms)
+        and (table.name, column.name) not in authorized_exceptions
+    }
+
+
+def test_prohibited_column_terms_mechanism_fires_on_synthetic_metadata() -> None:
+    """SIGNAL: against a THROWAWAY sqlalchemy.MetaData()/Table (never Base.metadata), a
+    deliberately offending column name (`mastery_score`) is flagged, and a SIBLING column that
+    ALSO contains a prohibited term (`mastery_baseline_ok`) but is on the allow-list is
+    correctly exempted -- proving both halves of the mechanism (detection AND exemption) fire
+    against a real SQLAlchemy structure, not merely that an empty allow-list vacuously passes
+    against zero C tables. Would FAIL if the offender-derivation logic stopped matching a
+    genuinely prohibited term, or if it flagged an allow-listed column anyway."""
+    synthetic_metadata = MetaData()
+    Table(
+        "c_synthetic_test_table",
+        synthetic_metadata,
+        Column("id", Integer, primary_key=True),
+        Column("mastery_score", String),
+        Column("mastery_baseline_ok", String),
+    )
+    synthetic_exceptions = {("c_synthetic_test_table", "mastery_baseline_ok")}
+
+    offenders = _offending_columns(
+        synthetic_metadata.tables.values(), PROHIBITED_COLUMN_TERMS, synthetic_exceptions
+    )
+
+    assert offenders == {("c_synthetic_test_table", "mastery_score")}
+    assert set(Base.metadata.tables) == EXPECTED_TABLES  # untouched by the synthetic metadata above
+
+
+def test_prohibited_column_terms_allow_list_is_empty_for_phase_1() -> None:
+    """SIGNAL: AUTHORIZED_C_COLUMN_EXCEPTIONS is exactly empty right now. Would FAIL if a future
+    edit silently pre-populated this allow-list before Phase 3's real tables exist, hiding a
+    prohibited column behind an exemption nothing has reviewed yet."""
+    assert AUTHORIZED_C_COLUMN_EXCEPTIONS == frozenset()
+
+
+# =====================================================================================
+# Phase 1 batch 1b — seed-derivation symbols must never be reachable from the adapter (C3).
+# AST-based: a text grep would be defeated by this file's own module docstring, which names
+# these four symbols in prose to explain why they are absent.
+# =====================================================================================
+
+_PROHIBITED_SEED_DERIVATION_SYMBOLS = frozenset(
+    {"derive_child_lineage", "SeedManager", "rng_from", "SUBSTREAMS"}
+)
+
+
+def test_adapter_references_no_seed_derivation_symbol() -> None:
+    """SIGNAL: parses app/infrastructure/live_engine_c/adapter.py's AST and asserts none of
+    derive_child_lineage, SeedManager, rng_from, SUBSTREAMS appears as an imported name, an
+    attribute access, or a bare Name reference anywhere in the file -- checked via
+    ast.Import/ast.ImportFrom/ast.Attribute/ast.Name nodes, never a text search, so the
+    adapter's own module docstring (which names these four symbols in prose to explain their
+    absence) cannot trip this test. Would FAIL if a future edit added
+    `from component_c_generator.seeds import derive_child_lineage` (or called
+    `seeds.SeedManager(...)`/`seeds.rng_from(...)`/referenced `seeds.SUBSTREAMS`) to work around
+    the seed-lineage gap instead of waiting for an explicit future authorization (G3)."""
+    adapter_path = _ALLOWED_C_ADAPTER_PATH
+    tree = ast.parse(adapter_path.read_text(encoding="utf-8"), filename=str(adapter_path))
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            found |= {alias.name for alias in node.names} & _PROHIBITED_SEED_DERIVATION_SYMBOLS
+        elif isinstance(node, ast.Import):
+            found |= {
+                alias.name.split(".")[-1] for alias in node.names
+            } & _PROHIBITED_SEED_DERIVATION_SYMBOLS
+        elif isinstance(node, ast.Attribute) and node.attr in _PROHIBITED_SEED_DERIVATION_SYMBOLS:
+            found.add(node.attr)
+        elif isinstance(node, ast.Name) and node.id in _PROHIBITED_SEED_DERIVATION_SYMBOLS:
+            found.add(node.id)
+    assert not found, found
+
+
+# =====================================================================================
+# Phase 1 batch 1b — no domain config field may carry a default (G1: a default on a config
+# field is a recorded threshold). Asserted structurally, not reviewed.
+# =====================================================================================
+
+_DOMAIN_CONFIG_TYPES = (
+    AggregationConfig,
+    EvidenceWindowConfig,
+    GenerationConfig,
+    PolicyConfig,
+    RecoveryConfig,
+    SafetyConfig,
+    ScaffoldConfig,
+    SelectionConfig,
+    TemplateGenerationParams,
+)
+
+
+def test_no_domain_config_field_carries_a_default() -> None:
+    """SIGNAL: every field on every Component C domain config dataclass has no default value
+    and no default_factory, asserted via dataclasses.fields() -- not a style review. The pinned
+    package carries zero defaults across all eight top-level configs (independently verified);
+    a default here would be this codebase recording an unapproved scientific threshold, weight,
+    window, or cap (G1), since Component C is PROPOSED, not approved. Would FAIL the moment a
+    future edit added so much as one `field: float = 0.8`-style default to any of these nine
+    dataclasses."""
+    for config_type in _DOMAIN_CONFIG_TYPES:
+        for config_field in dataclasses.fields(config_type):
+            assert config_field.default is dataclasses.MISSING, (
+                config_type.__name__, config_field.name,
+            )
+            assert config_field.default_factory is dataclasses.MISSING, (
+                config_type.__name__, config_field.name,
+            )
