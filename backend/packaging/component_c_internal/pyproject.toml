@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prabathi-component-c-live-engine"
-version = "0.1.0+c1.09267ab"
+version = "0.1.0+c2.09267ab"
 description = "Minimal live-safe Component C engine closure for the Upadya backend (Phase 1 batch 1a packaging; no adapter wiring)"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-  "upadya-component-b-live-engine==0.1.0+bf4.09267ab",
+  "upadya-component-b-live-engine==0.1.0+bf5.09267ab",
   "pydantic==2.13.4",
   "PyYAML==6.0.3",
 ]

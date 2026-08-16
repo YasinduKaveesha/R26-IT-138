@@ -500,6 +500,42 @@ def test_prohibited_c_full_dotted_paths_matches_1a_never_ship_modules() -> None:
 
 
 # =====================================================================================
+# VALIDATORS BATCH — T6: only the C adapter may import ``validators`` (now shipped in B's wheel
+# at the same pin; see backend/provenance/component-b-live-engine-manifest.json's
+# validators_widened_closure). Same root-check style as B's own guard
+# (test_no_yass_research_or_scientific_imports) above, extended to a second exempt path rather
+# than folded into either existing prohibited_import_roots set -- B's guard's own prohibited set
+# and exempt path stay completely untouched (G9: this is additive, not a rewrite of an existing
+# assertion).
+# =====================================================================================
+
+
+def test_validators_import_root_restricted_to_the_c_adapter() -> None:
+    """SIGNAL: only app/infrastructure/live_engine_c/adapter.py may have `validators` as an
+    import root anywhere under app/. Would FAIL if any other file under app/ imported
+    `validators` at all, or if the adapter's own import of it were removed (the second assert
+    would then vacuously pass on a mistranslated/reverted conversion -- so it also asserts the
+    adapter DOES import it, a positive control that this guard is exercising a real, present
+    import, not an absent one)."""
+    adapter_path = Path("app/infrastructure/live_engine_c/adapter.py")
+    adapter_imports_validators = False
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                roots = {alias.name.split(".")[0] for alias in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                roots = {node.module.split(".")[0]}
+            else:
+                continue
+            if "validators" not in roots:
+                continue
+            assert path == adapter_path, (path, roots)
+            adapter_imports_validators = True
+    assert adapter_imports_validators, "adapter no longer imports validators -- guard is vacuous"
+
+
+# =====================================================================================
 # Phase 1 batch 1b — PROHIBITED_COLUMN_TERMS mechanism, proven to fire (X-10), not merely
 # present. NEVER touches Base.metadata / EXPECTED_TABLES -- uses a throwaway
 # sqlalchemy.MetaData()/Table so test_exact_authorized_model_table_set_and_no_scientific_columns

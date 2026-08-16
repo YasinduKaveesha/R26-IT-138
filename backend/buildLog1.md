@@ -3849,3 +3849,196 @@ immutable-after-insert enforcement on `c_gameplay_events` (still out of every ba
 so far); a real concurrent-writer test for I2/I3's triggers, if this suite ever gains the
 infrastructure to drive two real database connections from pytest (R-M, currently no precedent);
 every table/logic item already open from Phase 3a's own entry.
+
+## 2026-08-16 — VALIDATORS BATCH: validators/ shipped in B's wheel, C's mastery-payload
+## conversion to validate_payload
+
+Ships `validators/__init__.py` and `validators/contract_validators.py` in Component B's
+live-engine wheel at the SAME pin (`09267abfe83829168b8b4817eb4c59d10f54e311`), so Component C's
+adapter can call the frozen contract gate v3.0 §5 requires
+(`validate_payload(payload, "b_to_c")`). B re-versioned `0.1.0+bf4.09267ab` -> `0.1.0+bf5.09267ab`;
+C, whose `pyproject.toml` declares B's exact version as a dependency, rebuilt and re-versioned
+`0.1.0+c1.09267ab` -> `0.1.0+c2.09267ab` in lockstep. Neither wheel's Yass pin moved.
+
+**THE GATE, recorded exactly as required, no more than this:** "Authorised by the project owner,
+who states the Component B owner was notified of this change and agreed. Owner-relayed; no
+written sign-off record is cited." This is an engineering gate — permission to modify a shipped
+artifact belonging to another component — not a scientific approval. It carries no signature, no
+date, no approver name, and this entry does not upgrade it in the retelling.
+
+**STOP-CHECK, run for real, quoted, at both the planning and implementation turns:**
+```
+git rev-parse HEAD                              -> bc649542b29a2ad05609652fcb485c2db76d5f90
+git status --porcelain                          -> (empty)
+docker version --format "{{.Server.Version}}"   -> 29.2.1
+```
+
+**Version strings — owner-ruled, not derived, not varied.** B: `0.1.0+bf4.09267ab` ->
+`0.1.0+bf5.09267ab`. C: `0.1.0+c1.09267ab` -> `0.1.0+c2.09267ab`. The planning turn correctly
+refused to invent either value and reported BLOCKED; both were supplied by the owner's ruling
+before this implementation turn began. The Yass pin did not move for either wheel; per the owner,
+`test_c_manifest_git_commit_sha1_matches_b_manifest` needed no change because it couples on the
+Yass commit, not the wheel version — confirmed unchanged and still passing.
+
+**S1, byte-identity, verified two ways.** Both new files copied from
+`git show 09267abfe83829168b8b4817eb4c59d10f54e311:Implementation_v1.0/validators/<path>`, read in
+binary. Verified via exact git blob-hash equality (`git hash-object` of the packaged file ==
+`git rev-parse <pin>:<path>`) at build time, AND via a new host-checkout test
+(`test_validators_files_byte_identical_to_pinned_commit`, T1) that re-derives the same comparison
+independently. Verbatim — no trim, no edit, no PACKAGING NOTE (none was needed). schemas/ is not
+shipped, confirmed: `validate_payload` is pure pydantic `model_validate`, no file-loading call.
+
+**S2-S4, B rebuilt.** `pyproject.toml`'s `include` gained `"validators*"`; version bumped;
+`SOURCE_MANIFEST.txt` regenerated (52 -> 54 files, recomputed live, not hand-edited). Wheel
+rebuilt inside the pinned base image (`docker.io/library/python:3.11.15-slim-bookworm@sha256:
+b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba`), same build_command, same
+cp-to-writable-path artefact isolation as every prior batch. Real sha256:
+`ebcd287bf89737645d27af0f812f357db957f343140a5599a8ff731690a88402`. The bf4 binary is retained on
+disk, not deleted (BF-4's own precedent for be3).
+
+**S5, the manifest move — quoted as written.** `"validators (and validators/*)"` removed from
+`excluded_by_omission.modules`; the two files added to `verbatim_files_byte_identical_to_pinned_
+commit.files` (45 -> 47, count field updated). A new `validators_widened_closure` section records,
+verbatim: *"B's original omission was CORRECT for B's own live-safe closure: its only validators
+consumers were adapters/*, themselves excluded. The application-level need is NEW: v3.0 Section 5
+requires Component C to call validate_payload(payload, "b_to_c") and forbids re-declaring the
+contract, so the B->C boundary check had no implementation without it. This is a WIDENED CLOSURE
+AT THE SAME PIN: two files, no science change, no pin move, no new dependency... schemas/ is not
+shipped..."* — plus the gate sentence, plus a `superseded_package` block retaining bf4's own
+version/filename/sha256 and retention rationale. Nothing was silently deleted.
+
+**S6-S8, C rebuilt in lockstep.** `pyproject.toml`'s B dependency pin bumped to
+`0.1.0+bf5.09267ab`; `[tool.setuptools.packages.find].include` left UNCHANGED
+(`["component_c_generator*"]` only). Wheel rebuilt; real sha256:
+`62b85a051733b00f16791a04c019a229924bbae0144de3441c27666eff3c3b39`. C's own file inventory
+confirmed unchanged after rebuild: `package_source_manifest.file_count` stays 65 (`pyproject.toml`
+is not a `*.py` file, outside that algorithm's scope entirely), verbatim count stays 64,
+`c_to_3/emit.py` remains omitted (DEC-1 untouched). The c1 binary is retained on disk.
+
+**S9-S10, every pin location.** `requirements.in`/`requirements.lock`: wheel path + hash lines
+REPLACED (not both-kept — two versions of the same distribution cannot both install). `Dockerfile`:
+`COPY` lines REPLACED, matching the established be3->bf4/c1-only precedent (the Dockerfile has
+never COPYd a superseded wheel). `.dockerignore`: new carve-out lines ADDED, old ones KEPT,
+matching the documented bf4-retention comment's own stated rationale exactly. All SIX
+`tests/fixtures/runtime_bundle*/*.json` fixtures updated (three B-side, three C-side — see the
+gap below) — `valid_unapproved`/`missing_field` pairs carry the REAL new hash;
+`bad_checksum` pairs keep their deliberately wrong `ffff...` value, source_path only.
+
+**A real gap, found by running the suite, not by review.** The planning turn's Q2 traced the
+runtime-bundle fixture coupling for B's own three `tests/fixtures/runtime_bundle/*.json` files
+(via `_verify_checksum` reading the real referenced wheel file) and correctly predicted they'd
+only break if the old binary were deleted. It missed the parallel, C-side fixture set:
+`tests/fixtures/runtime_bundle_c/{valid_unapproved,missing_field,bad_checksum}_bundle_c.json`,
+which reference **C's own** wheel, not B's. These were NOT in the work order's S10 list (which
+named only the three B-side fixtures) and were not caught until the real, non-bind-mounted image
+build ran the full suite: `test_bundle_approval_gate_raises_by_default`,
+`..._does_not_raise_when_explicitly_opted_out`, and
+`test_resolve_c_bundle_and_catalogue_succeeds_on_the_valid_unapproved_bundle` all failed with
+`RuntimeBundleChecksumMismatchError: generator: referenced artifact file does not exist:
+provenance/wheels/prabathi_component_c_live_engine-0.1.0+c1.09267ab-py3-none-any.whl` — because
+the real Dockerfile only `COPY`s the CURRENT wheel version into the image (c2), never the retained
+c1 binary, unlike my bind-mounted smoke-testing which sees the whole host filesystem including
+every retained binary. Fixed by applying the identical S10 treatment (real new hash for
+`valid_unapproved_bundle_c.json`/`missing_field_bundle_c.json`, source_path-only for
+`bad_checksum_bundle_c.json`) to all three C-side fixtures, then re-verified: 19/19 passed in that
+file. This is a genuine cascade omission from the planning turn, recorded here rather than quietly
+folded into "S10 as originally scoped" — BUILDER JUDGMENT — UNRATIFIED to fix without stopping for
+a fresh ruling, on the reasoning that it is the mechanical, same-shaped completion of an
+already-ruled S10 step (identical fixture pattern, identical fix), not a new decision.
+
+**S11, the conversion, and F2's withdrawal.** `_to_pkg_mastery_payload` no longer constructs
+`models.contracts.BToCMasteryPayload` directly — it builds the same field values as a plain dict
+and calls `validate_payload(payload, "b_to_c")`, returning the validated instance. Per the owner's
+withdrawal of F2 as previously scoped: `schema_version="2.1"` and `component_source="B"` are KEPT
+in the dict, not removed — both are FROZEN `Literal` fields on the contract model itself, required
+for the payload to validate at all; no AST test forbidding the literal was written (the planning
+turn's proposed version of that test is explicitly withdrawn, per the owner's correction that it
+would forbid something that must exist). The real forward concern — rejecting a WRONG
+`schema_version` once a real caller exists, rather than normalising it — is recorded here for a
+future phase, not built. `ContractValidationError` is translated: a tenth member,
+`MasteryPayloadContractValidationError`, added to `app/domain/live_engine_c/errors.py`, mirroring
+exactly how the nine package exceptions were translated in batch 1b — verified live: a malformed
+`student_id` (failing B's own `^STU-[0-9]{4}$` pattern) raised the backend-owned type, never the
+package's `ContractValidationError`, confirmed via `isinstance` in the smoke test and again in T8.
+The PROVISIONAL/pending-owner-confirmation label in both the module docstring and the function's
+own docstring was left completely untouched — no ruling reached this batch overturning it.
+
+**T1-T8, real signals.** T1 (2 cases, byte-identity via git blob comparison): HOST-CHECKOUT +
+YASS-CHECKOUT ONLY, following this project's own established precedent (test_c1a_wheel_
+provenance.py's T1) of never running `git show` against Yass inside the containerized suite (no
+`.git`, no Yass checkout there at all) — verified for real on the host directly (not via
+`docker compose run`, which cannot reach the sibling Yass checkout), both files matched. T2
+(SOURCE_MANIFEST recomputed live, compared to the manifest's recorded hash/count): HOST-CHECKOUT
+ONLY, same reasoning. T3 (inline update to `test_c1a_wheel_provenance.py`'s `B_PINNED_VERSION`/
+`WHEEL_FILENAME`): UPDATE, not a signal — the three-way exact-equality assertion in
+`test_installed_c_distribution_requires_dist_pins_the_installed_b_version` is completely
+unchanged. T4 (NEW, owner-required): asserts C's declared B-wheel version (from the INSTALLED
+distribution's `Requires-Dist` metadata) equals the B wheel version actually pinned in
+`requirements.lock` — closes the exact gap `--no-deps` leaves open, since pip never cross-checks a
+declared dependency's version against what's actually installed. T5 (NEW): no dependency file
+declares a bare `validators` requirement, insurance against the real, popular PyPI package of that
+name shadowing B's vendored one. T6 (NEW, inline in `test_be2_architecture_guards.py`): only
+`app/infrastructure/live_engine_c/adapter.py` may import `validators` anywhere under `app/`,
+mirroring B's own root-check guard style, additive — B's `prohibited_import_roots` set and exempt
+path stay completely untouched. T7 (NEW): the manifest move asserted as three facts together
+(entry gone from `excluded_by_omission`, both files present in the verbatim list, the gate
+sentence present verbatim) — a test checking only removal would pass on a silent delete. T8 (NEW):
+the real, converted `_to_pkg_mastery_payload`, given a contract-invalid `student_id`, raises
+`MasteryPayloadContractValidationError`, never the package's own `ContractValidationError` — a
+real failure path through the actual conversion, not a synthetic call to `validate_payload` in
+isolation (the function's fixed field set never includes a `B_TO_C_PROHIBITED_FIELDS` member, so
+this is the only invalid-input path reachable through it today).
+
+**A second pre-existing test's premise changed, found the same way.** `test_c1a_wheel_
+provenance.py`'s `test_wheel_provides_no_top_level_models_or_validators_import` asserted
+`import validators` must raise `ModuleNotFoundError` "regardless of what installs it" — true only
+because nothing shipped `validators` yet, not because this package enforces it. Renamed to
+`test_wheel_itself_provides_no_top_level_models_or_validators_import` and rewritten to assert what
+remains true: `models` and `validators` are both importable in this shared environment (from B's
+wheel, a separate dependency), while `prabathi-component-c-live-engine` itself vendors neither —
+that second fact stays fully enforced, completely unweakened, by the sibling
+`test_wheel_has_no_root_level_models_or_validators_package` (reads the .whl archive directly,
+untouched by this batch). UPDATE, not a signal: the premise changed by a deliberate, ruled
+architecture decision, not by anything this batch weakened.
+
+**Test suite, real numbers, both deltas reconciled.** `docker compose build api` succeeded twice
+(once before the fixture gap above was found, once after). `docker compose run --rm api python -m
+pytest -q`: **407 passed, 74 skipped, 0 failed, 321.19s.** `--collect-only`: **481 collected.**
+Reconciles exactly against the prior 403/70/473: passed `403 + 4 = 407` (T4, T5, T8, T6 — the four
+new tests that need no host-checkout); skipped `70 + 4 = 74` (T1's 2 cases + T2 + T7 — all
+HOST-CHECKOUT-ONLY, because `backend/packaging/` and the `component-*-live-engine-manifest.json`
+files are excluded from the application image by `.dockerignore` and never `COPY`d by the
+Dockerfile, the same environment split `test_c1a_wheel_provenance.py`'s own precedent already
+documents); collected `473 + 8 = 481` (all 8 new tests: 7 in the new
+`tests/test_validators_batch.py`, 1 in `test_be2_architecture_guards.py`). Verified the skip
+breakdown directly (`pytest -rs`): exactly 4 skips in `test_validators_batch.py`, each with its
+host-checkout reason printed, 3 passed there, plus T6's 1 pass elsewhere = 4 passed total. No
+existing test weakened, xfailed, or deleted. One existing test renamed and its assertion updated
+to match a deliberately changed premise (above) — an UPDATE, not a signal.
+
+**Files created:** `backend/packaging/component_b_internal/validators/{__init__,
+contract_validators}.py`, `backend/tests/test_validators_batch.py`. **Files modified:**
+`backend/packaging/component_b_internal/{pyproject.toml,SOURCE_MANIFEST.txt}`,
+`backend/packaging/component_c_internal/pyproject.toml`,
+`backend/provenance/{component-b-live-engine-manifest.json,component-c-live-engine-manifest.json}`,
+`backend/requirements.in`, `backend/requirements.lock`, `backend/Dockerfile`,
+`backend/.dockerignore`, `backend/tests/fixtures/runtime_bundle/{valid_unapproved_bundle,
+missing_field_bundle,bad_checksum_bundle}.json`,
+`backend/tests/fixtures/runtime_bundle_c/{valid_unapproved_bundle_c,missing_field_bundle_c,
+bad_checksum_bundle_c}.json`, `backend/app/infrastructure/live_engine_c/adapter.py`,
+`backend/app/domain/live_engine_c/errors.py`, `backend/tests/test_c1a_wheel_provenance.py`,
+`backend/tests/test_be2_architecture_guards.py`, `backend/buildLog1.md` (this entry). **Retained,
+not deleted:** `backend/provenance/wheels/upadya_component_b_live_engine-0.1.0+bf4.09267ab-py3-
+none-any.whl`, `backend/provenance/wheels/prabathi_component_c_live_engine-0.1.0+c1.09267ab-py3-
+none-any.whl`. No Yass commit moved. No change to C's shipped file inventory. `c_to_3/emit.py`
+still omitted. No `select_task` wiring into a real caller. No endpoint, session-lifecycle,
+selection, evaluation, policy, safety, scaffold, telemetry, or aggregation logic touched. No
+frontend file. No git command beyond read-only verification (`status`, `rev-parse`) was run this
+batch; nothing was staged or committed.
+
+**Open for a future phase:** I4's numeric bound (still owner-escalated, unresolved); a real
+concurrent-writer test for Phase 3b's I2/I3 triggers (unrelated to this batch, still open);
+`select_task` wiring (Phase 5); rejecting a wrong `schema_version` on a real mastery payload once
+a real caller exists (recorded above, not built); the Phase 9 shared-wheel consolidation
+(`models/` + `validators/` + `schemas/` under one wheel) DEC-1's original note names as scheduled,
+still not started.

@@ -111,9 +111,14 @@ from component_c_generator.tasks.registry import (
 )
 
 from models.contracts import BToCMasteryPayload as _PkgBToCMasteryPayload
+from validators.contract_validators import (
+    ContractValidationError as _PkgContractValidationError,
+    validate_payload as _pkg_validate_payload,
+)
 
 from app.domain.live_engine_c.errors import (
     CatalogueUnavailableError,
+    MasteryPayloadContractValidationError,
     NoEligibleRecoveryTemplateError,
     QLearningDisabledError,
     RecoveryPreconditionError,
@@ -640,28 +645,43 @@ def _to_pkg_mastery_payload(
     mastery_source_intervention_session_number: int,
 ) -> _PkgBToCMasteryPayload:
     """PROVISIONAL, SUPERVISOR-RULED, ISOLATED (see module docstring). The only function in this
-    codebase that constructs ``models.contracts.BToCMasteryPayload``. If the owner overturns
+    codebase that produces a ``models.contracts.BToCMasteryPayload``. If the owner overturns
     this ruling, this is the only function that needs to change.
 
     The three ``mastery_source_*`` identity fields are B's own — B's ``student_id`` matches
     ``^STU-[0-9]{4}$`` and B's ``intervention_session_id`` matches ``^STU-[0-9]{4}-I-[0-9]{3}$``,
     neither of which is the same value space as C's own ``student_id``/``c_session_id``. They
     must be supplied by the caller; this function never derives or invents them from C's own
-    identifiers (G3)."""
-    return _PkgBToCMasteryPayload(
-        mastery_counting=mastery_by_skill["counting"],
-        mastery_number_sense=mastery_by_skill["number_sense"],
-        mastery_place_value=mastery_by_skill["place_value"],
-        mastery_addition=mastery_by_skill["addition"],
-        mastery_subtraction=mastery_by_skill["subtraction"],
-        mastery_multiplication=mastery_by_skill["multiplication"],
-        mastery_division=mastery_by_skill["division"],
-        schema_version="2.1",
-        student_id=mastery_source_student_id,
-        intervention_session_id=mastery_source_intervention_session_id,
-        intervention_session_number=mastery_source_intervention_session_number,
-        component_source="B",
-    )
+    identifiers (G3).
+
+    VALIDATORS BATCH: this no longer constructs ``BToCMasteryPayload`` directly — it builds the
+    same field values as a plain dict and calls ``validate_payload(payload, "b_to_c")``
+    (Component_C_Master_Build_Plan_v3.0 §5), returning the validated instance that call produces.
+    ``schema_version="2.1"`` and ``component_source="B"`` are KEPT, not removed: both are FROZEN
+    ``Literal`` fields on the contract model itself, required for the payload to validate at all
+    — this is not the adapter inventing or stamping a value, it is supplying the one value the
+    frozen contract accepts. F2 (an earlier plan to forbid this literal outright) is WITHDRAWN;
+    see the module docstring's mastery-payload note. The real forward concern — rejecting a
+    payload that carries the WRONG schema_version once a real caller exists, rather than
+    normalising it — is recorded for a future phase, not built here."""
+    payload = {
+        "mastery_counting": mastery_by_skill["counting"],
+        "mastery_number_sense": mastery_by_skill["number_sense"],
+        "mastery_place_value": mastery_by_skill["place_value"],
+        "mastery_addition": mastery_by_skill["addition"],
+        "mastery_subtraction": mastery_by_skill["subtraction"],
+        "mastery_multiplication": mastery_by_skill["multiplication"],
+        "mastery_division": mastery_by_skill["division"],
+        "schema_version": "2.1",
+        "student_id": mastery_source_student_id,
+        "intervention_session_id": mastery_source_intervention_session_id,
+        "intervention_session_number": mastery_source_intervention_session_number,
+        "component_source": "B",
+    }
+    try:
+        return _pkg_validate_payload(payload, "b_to_c")
+    except _PkgContractValidationError as exc:
+        raise MasteryPayloadContractValidationError(str(exc)) from exc
 
 
 def _to_pkg_evidence_window_config(config: EvidenceWindowConfig):

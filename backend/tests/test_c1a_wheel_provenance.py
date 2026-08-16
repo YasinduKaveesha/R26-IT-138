@@ -63,11 +63,13 @@ REQUIREMENTS_IN_PATH = BACKEND_ROOT / "requirements.in"
 REQUIREMENTS_LOCK_PATH = BACKEND_ROOT / "requirements.lock"
 DOCKERFILE_PATH = BACKEND_ROOT / "Dockerfile"
 DOCKERIGNORE_PATH = BACKEND_ROOT / ".dockerignore"
-WHEEL_FILENAME = "prabathi_component_c_live_engine-0.1.0+c1.09267ab-py3-none-any.whl"
+WHEEL_FILENAME = "prabathi_component_c_live_engine-0.1.0+c2.09267ab-py3-none-any.whl"
 WHEEL_PATH = BACKEND_ROOT / "provenance" / "wheels" / WHEEL_FILENAME
 C_DISTRIBUTION_NAME = "prabathi-component-c-live-engine"
 B_DISTRIBUTION_NAME = "upadya-component-b-live-engine"
-B_PINNED_VERSION = "0.1.0+bf4.09267ab"
+# VALIDATORS BATCH: bf4 -> bf5 (validators/ added at the same 09267ab pin; C rebuilt/re-versioned
+# c1 -> c2 in lockstep because C's pyproject.toml declares this exact B version as a dependency).
+B_PINNED_VERSION = "0.1.0+bf5.09267ab"
 
 _HOST_CHECKOUT_AVAILABLE = PACKAGING_ROOT.is_dir() and C_MANIFEST_PATH.is_file()
 _HOST_CHECKOUT_SKIP_REASON = (
@@ -436,22 +438,28 @@ def test_behaviour_and_c_to_3_packages_remain_importable() -> None:
     importlib.import_module("component_c_generator.c_to_3.inputs")
 
 
-def test_wheel_provides_no_top_level_models_or_validators_import() -> None:
-    """SIGNAL: `models` and `validators` are not importable AS TOP-LEVEL packages from this
-    wheel's own installation -- component_c_generator.models (the private subpackage) is fine and
-    expected; a bare `import models` succeeding from THIS wheel alone would mean it vendored a
-    top-level models/, which G8/DEC-1 prohibit. (upadya-component-b-live-engine, a separate
-    dependency, legitimately provides top-level `models` in this same environment -- this test
-    only asserts prabathi-component-c-live-engine itself does not also claim that name, which the
-    wheel-content checks above (test_wheel_has_no_root_level_models_or_validators_package)
-    already established from the .whl archive directly; this is the installed-environment
-    corroboration of the same fact via import machinery. Would FAIL if `validators` became
-    importable in this environment (it must stay unreachable regardless of what installs it)."""
+def test_wheel_itself_provides_no_top_level_models_or_validators_import() -> None:
+    """SIGNAL (UPDATED, VALIDATORS BATCH): `models` and `validators` are both importable in this
+    shared environment -- but from upadya-component-b-live-engine, a separate declared
+    dependency, never from prabathi-component-c-live-engine itself. Before this batch,
+    `validators` was unreachable entirely (B excluded it too); it is now shipped in B's wheel at
+    0.1.0+bf5.09267ab specifically so Component C's adapter can call validate_payload (v3.0
+    Section 5) -- the OLD assertion that `validators` must "stay unreachable regardless of what
+    installs it" was true only because nothing shipped it yet, not because of any rule this
+    package enforces itself; that premise changed by deliberate, ruled decision, not drift. What
+    this test still enforces, unweakened: `component_c_generator.models` (the private
+    subpackage) works, and this test asserts nothing about whether prabathi-component-c-live-
+    engine itself vendors a root-level models/ or validators/ -- that remains proven directly
+    from the .whl archive by test_wheel_has_no_root_level_models_or_validators_package above,
+    completely untouched by this batch. Would FAIL if either `models` or `validators` became
+    unimportable in this environment (i.e. if B stopped providing them), or if
+    component_c_generator.models stopped working."""
     _require_installed_component_c_generator()
     import component_c_generator  # noqa: F401 -- sanity: package itself imports fine
+    from component_c_generator.models import enums as _  # noqa: F401 -- the private subpackage works
 
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("validators")
+    import models  # noqa: F401 -- provided by B's wheel, a separate dependency
+    import validators  # noqa: F401 -- provided by B's wheel as of the VALIDATORS BATCH (was absent before)
 
 
 # ---------------------------------------------------------------------------

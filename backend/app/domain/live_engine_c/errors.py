@@ -7,6 +7,12 @@ installed wheel by direct inspection (not assumed): ``CatalogueValidationError``
 ``SelectionInputError``, ``TaskGenerationTechnicalError``, ``UnsupportedTemplateError``,
 ``UnknownTemplateError``, ``NoEligibleRecoveryTemplateError``, ``RecoveryPreconditionError``,
 ``QLearningDisabledError``, ``UnknownPolicyModeError``.
+
+VALIDATORS BATCH adds a tenth: ``MasteryPayloadContractValidationError``, translating
+``validators.contract_validators.ContractValidationError`` (now shipped in B's wheel at
+0.1.0+bf5.09267ab; see backend/provenance/component-b-live-engine-manifest.json's
+validators_widened_closure). Same translation pattern as the nine above -- a package exception
+type must never cross the X-3 boundary into app.domain.
 """
 
 from __future__ import annotations
@@ -57,3 +63,9 @@ class QLearningDisabledError(LiveEngineCError):
 
 class UnknownPolicyModeError(LiveEngineCError):
     """Translates ``component_c_generator.policy.rule_based.UnknownPolicyModeError``."""
+
+
+class MasteryPayloadContractValidationError(LiveEngineCError):
+    """Translates ``validators.contract_validators.ContractValidationError`` — raised by
+    ``validate_payload(payload, "b_to_c")`` when a mastery payload carries a prohibited field or
+    fails the frozen ``BToCMasteryPayload`` contract's own validation (VALIDATORS BATCH)."""
