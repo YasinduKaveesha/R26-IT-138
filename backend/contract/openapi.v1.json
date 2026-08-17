@@ -128,6 +128,86 @@
         "title": "CActiveSessionResponse",
         "type": "object"
       },
+      "CNextTaskResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "c_task_instance_id": {
+            "format": "uuid",
+            "title": "C Task Instance Id",
+            "type": "string"
+          },
+          "difficulty_level": {
+            "title": "Difficulty Level",
+            "type": "integer"
+          },
+          "game_family_id": {
+            "title": "Game Family Id",
+            "type": "string"
+          },
+          "game_task_template_id": {
+            "title": "Game Task Template Id",
+            "type": "string"
+          },
+          "interactive_assets": {
+            "additionalProperties": true,
+            "title": "Interactive Assets",
+            "type": "object"
+          },
+          "prompt_payload": {
+            "additionalProperties": true,
+            "title": "Prompt Payload",
+            "type": "object"
+          },
+          "representation_mode": {
+            "title": "Representation Mode",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "scaffold_state": {
+            "title": "Scaffold State",
+            "type": "string"
+          },
+          "skill_id": {
+            "title": "Skill Id",
+            "type": "string"
+          },
+          "task_index": {
+            "title": "Task Index",
+            "type": "integer"
+          },
+          "technical_status": {
+            "title": "Technical Status",
+            "type": "string"
+          },
+          "valid_action_space": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Valid Action Space",
+            "type": "object"
+          }
+        },
+        "required": [
+          "c_task_instance_id",
+          "game_family_id",
+          "game_task_template_id",
+          "task_index",
+          "skill_id",
+          "difficulty_level",
+          "representation_mode",
+          "prompt_payload",
+          "interactive_assets",
+          "valid_action_space",
+          "scaffold_state",
+          "technical_status",
+          "request_id"
+        ],
+        "title": "CNextTaskResponse",
+        "type": "object"
+      },
       "CSessionCommandResponse": {
         "additionalProperties": false,
         "properties": {
@@ -223,6 +303,46 @@
           "row_version"
         ],
         "title": "CSessionFields",
+        "type": "object"
+      },
+      "CSubmitActionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action_payload": {
+            "additionalProperties": true,
+            "title": "Action Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "action_payload"
+        ],
+        "title": "CSubmitActionRequest",
+        "type": "object"
+      },
+      "CSubmitActionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "c_task_instance_id": {
+            "format": "uuid",
+            "title": "C Task Instance Id",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "response_matched": {
+            "title": "Response Matched",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "c_task_instance_id",
+          "response_matched",
+          "request_id"
+        ],
+        "title": "CSubmitActionResult",
         "type": "object"
       },
       "ClassroomCreateRequest": {
@@ -2185,6 +2305,112 @@
         "summary": "Complete Session",
         "tags": [
           "c-session-lifecycle"
+        ]
+      }
+    },
+    "/api/v1/c/sessions/{c_session_id}/tasks/next": {
+      "post": {
+        "operationId": "next_task_api_v1_c_sessions__c_session_id__tasks_next_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "c_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "C Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CNextTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Next Task",
+        "tags": [
+          "c-task-serving"
+        ]
+      }
+    },
+    "/api/v1/c/sessions/{c_session_id}/tasks/{c_task_instance_id}/actions": {
+      "post": {
+        "operationId": "submit_action_api_v1_c_sessions__c_session_id__tasks__c_task_instance_id__actions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "c_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "C Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "c_task_instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "C Task Instance Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CSubmitActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CSubmitActionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Action",
+        "tags": [
+          "c-task-serving"
         ]
       }
     },

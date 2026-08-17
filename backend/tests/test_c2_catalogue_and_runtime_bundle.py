@@ -40,7 +40,7 @@ BAD_CHECKSUM_BUNDLE = f"{FIXTURE_DIR}/bad_checksum_bundle_c.json"
 
 # Recorded once here from the disclaimer-header fixture on disk; the loader/checksum tests below
 # re-derive it live rather than trusting this constant, so this is documentation, not the signal.
-CATALOGUE_CHECKSUM_ON_DISK = "aa0469b8d5e068d95bf80344ac5e26a9b573fc9f6123f7557f03465d8f77cbce"
+CATALOGUE_CHECKSUM_ON_DISK = "55709112756fed913ed24d44a21b9b54c7fd25976db8de884fbe47526082f661"
 
 
 @pytest.fixture()

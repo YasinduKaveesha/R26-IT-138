@@ -160,6 +160,9 @@ EXPECTED_ROUTES = {
     ("/api/v1/c/sessions/active", ("GET",)),
     ("/api/v1/c/sessions/{c_session_id}/abandon", ("POST",)),
     ("/api/v1/c/sessions/{c_session_id}/complete", ("POST",)),
+    # Phase 5 -- the two task-serving routes. See AUTHORIZED_C_TASK_SERVING_OPERATIONS below.
+    ("/api/v1/c/sessions/{c_session_id}/tasks/next", ("POST",)),
+    ("/api/v1/c/sessions/{c_session_id}/tasks/{c_task_instance_id}/actions", ("POST",)),
 }
 AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS = {
     ("/api/v1/classrooms/{classroom_id}/invites", ("POST",)),
@@ -198,6 +201,12 @@ AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS = {
     ("/api/v1/c/sessions/active", ("GET",)),
     ("/api/v1/c/sessions/{c_session_id}/abandon", ("POST",)),
     ("/api/v1/c/sessions/{c_session_id}/complete", ("POST",)),
+}
+# Phase 5 -- mirrors AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS' own role, for the two task-serving
+# routes (select_task -> build_task_instance -> persist -> public DTO; evaluate on submit).
+AUTHORIZED_C_TASK_SERVING_OPERATIONS = {
+    ("/api/v1/c/sessions/{c_session_id}/tasks/next", ("POST",)),
+    ("/api/v1/c/sessions/{c_session_id}/tasks/{c_task_instance_id}/actions", ("POST",)),
 }
 PROHIBITED_SCIENTIFIC_PATH_TERMS = (
     "session", "attempt", "hint", "progress", "bkt", "mastery", "sequenc", "certif", "guess",
@@ -251,6 +260,7 @@ def test_no_session_question_answer_or_scientific_route_exists() -> None:
             or route in AUTHORIZED_B_HINT_REQUEST_OPERATIONS
             or route in AUTHORIZED_B_SESSION_COMPLETION_OPERATIONS
             or route in AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS
+            or route in AUTHORIZED_C_TASK_SERVING_OPERATIONS
         ):
             terms = tuple(term for term in terms if term != "session")
         assert not any(term in lowered for term in terms), path
@@ -293,6 +303,17 @@ def test_openapi_contains_exactly_the_four_authorized_c_session_lifecycle_operat
         route for route in EXPECTED_ROUTES if route not in AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS
     }
     assert _current_routes() - AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS == non_c_session_routes
+
+
+def test_openapi_contains_exactly_the_two_authorized_c_task_serving_operations() -> None:
+    """Phase 5: mirrors the C session-lifecycle route-count guard exactly, for the two
+    task-serving routes (next, actions)."""
+    assert len(AUTHORIZED_C_TASK_SERVING_OPERATIONS) == 2
+    assert AUTHORIZED_C_TASK_SERVING_OPERATIONS <= _current_routes()
+    non_c_task_routes = {
+        route for route in EXPECTED_ROUTES if route not in AUTHORIZED_C_TASK_SERVING_OPERATIONS
+    }
+    assert _current_routes() - AUTHORIZED_C_TASK_SERVING_OPERATIONS == non_c_task_routes
 
 
 def test_b_session_dto_contains_no_scientific_expiry_or_attempt_fields() -> None:
@@ -766,6 +787,39 @@ def test_no_domain_config_field_carries_a_default() -> None:
 # =====================================================================================
 
 
+def _config_default_violations(tree: ast.AST, *, param_name: str, factory_name: str) -> list[tuple[str, str]]:
+    """Shared scan logic behind both the SelectionConfig (W1/W2, Phase 4) and GenerationConfig
+    (S1, Phase 5 work order: "Extend the W5-style AST guard to cover default_generation_config
+    exactly as it covers default_selection_config") injection-only guards. Returns
+    (kind, node_name) violation markers -- ("defaulted_param", function name) for a defaulted
+    parameter, ("factory_call", dumped call) for a call to the named factory -- rather than
+    asserting inline, so this same logic can be run against BOTH the real app/ tree and synthetic
+    ASTs (the latter proves the mechanism fires at all, not only that it happened to find nothing
+    today)."""
+    violations: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = node.args
+            positional = args.posonlyargs + args.args
+            defaulted_positional = dict(
+                zip(positional[len(positional) - len(args.defaults):], args.defaults)
+            )
+            defaulted_kwonly = {
+                arg: default
+                for arg, default in zip(args.kwonlyargs, args.kw_defaults)
+                if default is not None
+            }
+            for arg_node, _default in {**defaulted_positional, **defaulted_kwonly}.items():
+                if arg_node.arg == param_name:
+                    violations.append(("defaulted_param", node.name))
+        if isinstance(node, ast.Call):
+            callee = node.func
+            name = callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", None)
+            if name == factory_name:
+                violations.append(("factory_call", ast.dump(node)[:200]))
+    return violations
+
+
 def test_no_app_code_defaults_or_calls_default_selection_config() -> None:
     """SIGNAL: no function signature anywhere under app/ gives a `selection_config` parameter a
     default value (W1), and no file under app/ calls `default_selection_config` at all (W2 --
@@ -776,21 +830,63 @@ def test_no_app_code_defaults_or_calls_default_selection_config() -> None:
     default (e.g. inline at a call site)."""
     for path in Path("app").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                args = node.args
-                positional = args.posonlyargs + args.args
-                defaulted_positional = dict(
-                    zip(positional[len(positional) - len(args.defaults):], args.defaults)
-                )
-                defaulted_kwonly = {
-                    arg: default
-                    for arg, default in zip(args.kwonlyargs, args.kw_defaults)
-                    if default is not None
-                }
-                for arg_node, _default in {**defaulted_positional, **defaulted_kwonly}.items():
-                    assert arg_node.arg != "selection_config", (path, node.name)
-            if isinstance(node, ast.Call):
-                callee = node.func
-                name = callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", None)
-                assert name != "default_selection_config", (path, ast.dump(node)[:200])
+        violations = _config_default_violations(
+            tree, param_name="selection_config", factory_name="default_selection_config"
+        )
+        assert not violations, (path, violations)
+
+
+def test_no_app_code_defaults_or_calls_default_generation_config() -> None:
+    """SIGNAL (Phase 5, S1): the same guard, same shape, for GenerationConfig -- "GenerationConfig
+    stays INJECTION-ONLY with NO DEFAULT on every path (W1's shape). No production path may call
+    default_generation_config()." Governance assigned no values to any of the 30 templates'
+    generation parameters (every one is TEST_FIXTURE_ONLY); reading them out of the wheel at
+    runtime via its own default_generation_config() would hide that dependency exactly as
+    default_selection_config() would have for W. Would FAIL if a future edit added
+    `generation_config: GenerationConfig = default_generation_config()` to any application-layer
+    function, or called `default_generation_config()` anywhere in app/ even without assigning a
+    default."""
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        violations = _config_default_violations(
+            tree, param_name="generation_config", factory_name="default_generation_config"
+        )
+        assert not violations, (path, violations)
+
+
+def test_default_config_guard_mechanism_fires_on_synthetic_violations() -> None:
+    """SIGNAL: proves _config_default_violations actually DETECTS what it claims to, for BOTH
+    guards, against synthetic source -- not merely that it found nothing today. Four cases per
+    param/factory pair: a positional default, a keyword-only default, a bare (unassigned) factory
+    call, and a clean function that uses neither -- the first three must each be caught, the
+    fourth must pass clean. Would FAIL if the detection logic stopped matching a real violation
+    shape, or started flagging the clean case."""
+    for param_name, factory_name in (
+        ("selection_config", "default_selection_config"),
+        ("generation_config", "default_generation_config"),
+    ):
+        positional_default_source = (
+            f"def f(a, {param_name}={factory_name}()):\n    pass\n"
+        )
+        kwonly_default_source = (
+            f"def f(a, *, {param_name}={factory_name}()):\n    pass\n"
+        )
+        bare_call_source = (
+            f"def f({param_name}):\n    x = {factory_name}()\n    return x\n"
+        )
+        clean_source = (
+            f"def f({param_name}):\n    return {param_name}\n"
+        )
+
+        for source in (positional_default_source, kwonly_default_source, bare_call_source):
+            tree = ast.parse(source, filename="<synthetic-violation>")
+            violations = _config_default_violations(
+                tree, param_name=param_name, factory_name=factory_name
+            )
+            assert violations, (param_name, factory_name, source)
+
+        clean_tree = ast.parse(clean_source, filename="<synthetic-clean>")
+        clean_violations = _config_default_violations(
+            clean_tree, param_name=param_name, factory_name=factory_name
+        )
+        assert not clean_violations, (param_name, factory_name, clean_violations)

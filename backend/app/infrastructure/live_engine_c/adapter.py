@@ -127,6 +127,7 @@ from app.domain.live_engine_c.errors import (
     NoEligibleRecoveryTemplateError,
     QLearningDisabledError,
     RecoveryPreconditionError,
+    SF043OrderingError,
     SelectionInputError,
     TaskGenerationTechnicalError,
     UnknownPolicyModeError,
@@ -960,9 +961,22 @@ class LiveEngineCAdapter:
     ) -> SelectionResult:
         pkg_catalogue = _load_package_catalogue(catalogue.source_path)
         if mastery_payload is not None:
-            assert mastery_source_student_id is not None
-            assert mastery_source_intervention_session_id is not None
-            assert mastery_source_intervention_session_number is not None
+            # S4 (Phase 5 work order, same treatment as R-5d): `assert` is never a validation
+            # mechanism -- stripped entirely under -O, and unstripped it surfaces as an uncaught
+            # AssertionError (a 500) rather than a caught, translatable domain error. Phase 5 is
+            # the batch that first makes this call path reachable from a real HTTP caller (via
+            # TaskService), so the gap R-5d fixed one layer up in session_lifecycle.py is fixed
+            # here too, in the one adapter method that had the same bare-assert shape.
+            if (
+                mastery_source_student_id is None
+                or mastery_source_intervention_session_id is None
+                or mastery_source_intervention_session_number is None
+            ):
+                raise SF043OrderingError(
+                    "combined-mode select_task requires mastery_payload and all three B identity "
+                    "fields together (SF-043) -- caller supplied mastery_payload without a "
+                    "complete identity triple"
+                )
             pkg_mastery_payload = _to_pkg_mastery_payload(
                 mastery_payload,
                 mastery_source_student_id=mastery_source_student_id,

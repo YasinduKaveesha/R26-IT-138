@@ -1,5 +1,5 @@
 {
-  "checksum_sha256": "4ee2dad8abc35e3305aa04c4828f9521ae30e5326ca29e9d5aecac6d4c543e84",
+  "checksum_sha256": "7e2bec505e88221c44bd6d1d316fbda8a531117a94b93951dffca3b567c4b73e",
   "contract_version": "v1",
   "python_runtime": "3.11.15 (Dockerfile-pinned, matches provenance/component-b-live-engine-manifest.json build env)",
   "source": "app.main.app.openapi() (BE5a freeze)"

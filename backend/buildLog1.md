@@ -4497,3 +4497,286 @@ narrows any of them.
 `backend/tests/test_c4b_routes_and_bundle_config.py`, `backend/contract/openapi.v1.json`,
 `backend/contract/openapi.v1.meta.json`. No git command beyond read-only verification (`status`,
 `rev-parse`, `docker version`) was run this batch; nothing was staged or committed.
+
+## 2026-08-18 — Component C Phase 5: task serve, evaluate, the private/public split
+
+**HEADLINE CONSEQUENCE — STATED PLAINLY (Phase 5 work order, verbatim instruction).** Phase 5
+delivers a COMPLETE, TESTED SERVING PATH THAT IS DELIBERATELY NOT LIVE. Every real (non-smoke)
+call to `POST .../tasks/next` refuses before any task is generated, because `GenerationConfig` has
+no governed values anywhere in this codebase (S1): "The frozen catalogue supplies no numeric bound
+and no action-space enumeration for any of the 30 templates and the Parameters do not fix them
+either; every value is an ENGINEERING_ASSUMPTION tagged TEST_FIXTURE_ONLY. Governance assigned no
+values here." The route's production wiring hardcodes `smoke_mode=False` and passes an
+intentionally empty, always-refused `GenerationConfig` probe; `assert_generation_config_permitted`
+(built Phase 2, wired for the first time this batch, exactly as S1 instructs: "This is that call")
+refuses it unconditionally. A green test suite exercising the serving mechanism with
+`smoke_mode=True` is evidence the MECHANISM works — it is explicitly NOT evidence that Component C
+can serve a task to a real child. Proven concretely at the actual HTTP boundary, not only asserted:
+`test_p6_next_task_real_http_route_refuses_because_no_governed_generation_config_exists` posts a
+fully authenticated request to the real, fully-wired route and gets a structured `409`, never a
+`404`/stub.
+
+**Scope built.** The two task-serving routes (`POST /api/v1/c/sessions/{id}/tasks/next`,
+`POST /api/v1/c/sessions/{id}/tasks/{tid}/actions`), the application service layer
+(`task_service.py`), the private/public DTO split (`app/domain/c_task.py`), C-12's runtime-derived
+structural action-payload validator, and C-17's investigation closing as narrowed-not-resolved.
+
+**S1 — GenerationConfig, wired, not a bundle-schema change.** `assert_generation_config_permitted`
+(Phase 2, previously unwired) is now called at the top of `TaskService.next_task`.
+`GenerationConfig` stays injection-only, no default anywhere (W1's shape, extended): the W5-style
+AST guard (`test_be2_architecture_guards.py::_config_default_violations`, refactored into a shared
+helper used by BOTH the SelectionConfig and GenerationConfig checks) now also asserts no `app/`
+function signature defaults a `generation_config` parameter and no `app/` file calls
+`default_generation_config()` — proven to actually fire, not merely proven to find nothing today,
+by `test_default_config_guard_mechanism_fires_on_synthetic_violations` against four synthetic AST
+shapes (positional default, keyword-only default, bare call, clean) for both param/factory pairs.
+
+**S4 — the three bare `assert`s at `adapter.py:963-965` fixed, same treatment as R-5d.** Replaced
+with an explicit `if` raising `SF043OrderingError` — Phase 5 is the batch that first makes
+`select_task` reachable from a real caller (`TaskService`), so the gap R-5d fixed one layer up in
+`session_lifecycle.py` is fixed here too, in the one adapter method with the identical bare-assert
+shape. `assert` is never a validation mechanism: stripped under `-O`, and unstripped it surfaces as
+an uncaught `AssertionError` (500) rather than a caught, translatable domain error.
+
+**C-17 — OWNER-RULED: OPTION 2, NARROWED NOT RESOLVED.** Quoted, the record not decoration.
+
+Why Option 1 (route through a reduced `apply_safety`) was rejected, owner's words: *"Option 1 is
+not a reduced safety call, it is manufacturing learner behaviour. To reach `apply_safety`
+pre-task-1 you must construct a `CPolicyObservableEvidence`, and every field you fill in is a claim
+about a child who has not yet acted — `recent_consecutive_error_max = 0`,
+`rolling_strain_score = 0.0`. Those are not neutral placeholders, they are assertions that the
+child has made no errors and is under no strain, handed to the machinery whose entire job is to
+detect errors and strain. Defeating a precondition that exists to stop the controller running on
+absent history, in order to satisfy a goal of routing through that controller, is incoherent. And
+synthesising learner state in `app/` is the same act the never-ship boundary exists to prevent."*
+
+Why Option 3 (a narrower, C-owned recovery-only check) was rejected FOR THIS PHASE, owner's words:
+*"The recovery cap keys on `prior_session_end_state` in `('overloaded','disengaged')`. That value
+is produced by session aggregation, which is Phase 9. Build the check in Phase 5 and it reads a
+field that is always absent, never fires, and passes its tests — C-4 and B-1 exactly: correct
+function, no live input, green suite, and a gap that now looks closed. An open recorded gap gets
+closed. A no-op that reports success does not."*
+
+What makes Option 2 SAFE RATHER THAN CONVENIENT — owner's words, load-bearing, recorded here per
+instruction: *"your Q1 ruling already contains the gap. GenerationConfig has no governed values,
+serving is gated behind smoke mode, so Phase 5 cannot generate a task for a child at all. The
+recovery-cap gap is unreachable by construction, not by promise. That containment is verifiable
+today and it is the only reason I am willing to record rather than close."*
+
+**THE PRE-GATE-LIFT PRECONDITION (C17-1), owner's own words — this joins gate-B, not the
+backlog:** *"If the gate ever lifts with this open, a capable child recovering from overload gets
+started at difficulty 5... high mastery and prior overload are independent dimensions and that
+combination is not exotic, it is the child who was pushed too hard."*
+
+C17-2's three named things: the STRUCTURAL REASON (`component_c_generator.pipeline.evidence.
+build_policy_evidence` refuses an empty `history` — `evidence.py:92-93`); the NARROWED SCOPE
+(`mastery_driven` only — `familiarization`/`c_only` use governed `SelectionConfig` values directly,
+verified at `selector.py:227` and `:241`, never the raw formula); the UNBLOCKING CONDITION
+(`prior_session_end_state` must be computed and persisted — Phase 9).
+
+C17-3's tripwire, not a comment: `test_c17_3_initial_difficulty_path_does_not_consume_prior_
+session_end_state` asserts `"prior_session_end_state"` is absent from `LiveEngineCAdapter.
+select_task`'s parameter set AND absent from `task_service.py`'s entire source, alongside
+`"apply_safety"`/`"CPolicyObservableEvidence"`. Wiring any of these in breaks this test and points
+the editor back to this entry.
+
+C17-4: the register entry for C-17 closes as **NARROWED, NOT RESOLVED** — the finding changed
+meaning under this batch's trace (from "initial difficulty bypasses safety" in general to
+specifically the `mastery_driven` phase's formula-derived pick) and the register says so.
+
+**C-12 — OWNER-RULED: type checking plus unknown-key rejection.** Governing principle, quoted,
+every judgment call resolved against it: *"THE DECLARATION IS THE SCHEMA. NOTHING BEYOND THE
+DECLARATION IS STRUCTURAL."* `app/domain/live_engine_c/action_payload_validation.py`'s
+`validate_action_payload` is derived at runtime from each task instance's own `valid_action_space`
+— never a hand-written per-template table, covering all 30 (and any future Phase 10 addition) by
+construction. Structural only: exact key-set equality, declared-type matching. Correctness
+(ranges, counts, uniqueness, cross-field consistency) stays with the evaluator.
+
+THE TWO INTERPRETIVE DECISIONS, both owner's, recorded together as instructed:
+1. `"number"` means int OR float — ambiguous in the 30 templates' own source, resolved here, not
+   silently.
+2. Where `"int"` is declared, `bool` is explicitly REJECTED — `isinstance(True, int)` is `True` in
+   Python, so a naive check would silently admit `{"submitted_total": true}`; every numeric check
+   excludes `bool` by name.
+
+Pipe-string declarations (`"left|right|equal"`, `"<|>|="`, `"same|changed"`) are parsed
+PROGRAMMATICALLY (split on `"|"` at validation time), never hand-transcribed into a table — a
+future template's prose changing (e.g. a fourth comparison outcome) is validated correctly without
+this module being touched. Four rejection classes, each spy-proven BOTH a structured 4xx (loc/type
+only, never msg/input) AND an empty `submission_spy` (proving non-arrival at `evaluate`, not merely
+that some exception fired somewhere): wrong key set, wrong type, bad pipe-string value, bool-for-
+int. One positive control proves the spy mechanism itself works (a valid payload reaches
+`evaluate` and the spy is non-empty). REGISTERED, NOT BLOCKED ON: whether all 30 per-template
+evaluators are uniformly defensive with `.get()` — this ruling makes that defence-in-depth, not the
+only line; the 30-file audit remains open, not required for this phase.
+
+**R-6 — SUPERVISOR RULING (lead), rename `is_correct` -> `response_matched`.** Regenerating the
+frozen contract surfaced that `is_correct` trips `FORBIDDEN_FIELD_TERMS` (substring `"correct"`,
+no allow-list, not modified). NOT a rename to dodge the guard (R-H's already-condemned pattern) —
+adopts the REVIEWED name for this identical semantic already frozen in the contract:
+`app/domain/b_attempt.py:34`, `AttemptResponseFields.response_matched`. Typed `bool`, not B's
+`bool | None` (`None` there means a `TIMEOUT` event kind with no comparison made; every response
+this endpoint returns has already been evaluated, so no such state exists here) — the divergence
+is recorded in `app/domain/c_task.py`'s own docstring, not only here.
+
+**R-7 — LATENT DEFECT SINCE PHASE 2, found and fixed.** `tests/fixtures/runtime_bundle_c/
+test_catalogue_c.md`'s top-level `status` was `"TEST_FIXTURE_ONLY"` — a value the loader accepts
+(`catalogue.loader.py`'s `catalogue_status=str(root.get("status","unknown"))` applies no vocabulary
+check to this one field) but which `eligibility.py:51`'s own `catalogue_status_ok = str(
+catalogue_status).upper() in RECOGNIZED_CATALOGUE_STATUSES` never recognized. Every template in
+the fixture was therefore permanently inactive and `select_task` could never have returned a
+result for ANY grade — invisible from Phase 2 through Phase 4 because nothing called
+`select_task`/`eligible_templates` until this phase; Phase 2-4 only ever loaded and checksummed the
+file. Corrected to `"PROPOSED_FOR_APPROVAL"` — legitimate because it is one of the four
+in-vocabulary values (`"PROPOSED_FOR_APPROVAL"`, `"BASELINE_ACTIVE"`, `"APPROVED"`, `"ACTIVE"`)
+**and** because it is literally true of Component C's own status (v3.0 §2: "Component C is
+PROPOSED, not approved") — not a convenient invention. The catalogue file's checksum changed as a
+direct consequence; `valid_unapproved_bundle_c.json`'s recorded `catalogue.checksum.value` and
+`test_c2_catalogue_and_runtime_bundle.py`'s `CATALOGUE_CHECKSUM_ON_DISK` constant were both updated
+to the new real value (`55709112756fed913ed24d44a21b9b54c7fd25976db8de884fbe47526082f661`),
+verified via `sha256sum`, never hand-typed. `test_r7_fixture_catalogue_status_is_a_recognized_
+activation_status` (R-I pattern) reads `RECOGNIZED_CATALOGUE_STATUSES` from the installed wheel AT
+RUNTIME and asserts the fixture's own status is a member — computed, never a hardcoded copy of the
+vocabulary, so this cannot silently drift back out of validity the way the original value did.
+
+**R-8 — SEED-LINEAGE DISCLOSURE RECONCILED WITH R-5, resolved by collapsing to a single source.**
+The question, answered plainly: the original version of `task_service.py` constructed its own
+`STU-####`/`STU-####-C-###` values from a UUID hash — a SECOND, independent construction site
+minting a B-shaped identifier, alongside the mastery fixture's own existing
+`FIXTURE_MASTERY_SOURCE_STUDENT_ID = "STU-0001"` (R-5, Phase 4b). That is exactly the defect R-5
+exists to prevent: two places computing what is nominally "the same real child's platform
+identity," for the SAME learner inside the SAME call, that would almost always disagree (a
+UUID-hash derivation here, a fixed fictional constant there). Collapsed: `select_task`/
+`build_task_instance`'s `student_id` parameter, and `evaluate`'s reconstructed `TaskInstance`, now
+read `FIXTURE_MASTERY_SOURCE_STUDENT_ID` directly, for EVERY session mode, not only combined; a
+single fixed suffix (`_STU_SESSION_SUFFIX = "001"`) supplies the `c_session_id` shape from that
+same one constant. This is not a claim that a `c_only` session involves B — these two package
+parameters are format-validated only (`^STU-[0-9]{4}$` / `^STU-[0-9]{4}-C-[0-9]{3}$`), never used
+for lookup, RNG, or cross-referencing anywhere in the installed wheel or this codebase (seed
+derivation is the wholly separate `SeedLineage` parameter, itself plain integers/string-pair
+tuples, not B-shaped at all — confirmed not to be a second instance of this same problem). One
+constant, one source, never a second minting site — the `SeedLineage` root construction itself
+(`session.global_seed` at `path=()`, `task_index` as the sole per-task path element) is unchanged
+and was already single-sourced from the real session record.
+
+**Two disclosed BUILDER JUDGMENT — UNRATIFIED calls remain, both flagged prominently in
+`task_service.py`'s own module docstring, neither authorized by name in any work order:**
+1. The production route's `GenerationConfig` probe (`PRODUCTION_GENERATION_CONFIG_PROBE`) —
+   intentionally empty, intentionally always-refused; not sanctioned by name, disclosed for
+   exactly that reason.
+2. `_generation_config_checksum`'s definition (sha256 of `config_version:parameter_source_status`)
+   for the previously-undocumented `c_gameplay_events.config_checksum` column (undocumented since
+   Phase 3a; no existing precedent pinned down what it should cover).
+
+**Private/public split (P2/S3), as built.** `app/domain/c_task.py`'s own docstring carries the
+full column-by-column table. S3's six forced-private columns (`curriculum_node_id`,
+`functional_role`, `completion_condition`, `failure_condition`, `terminal_reason`,
+`difficulty_vector`) kept private with no case-by-case judgment, per the owner's own words:
+"Adding a field later is additive; removing one is breaking — the conservative direction is the
+reversible one." `correct_answer_payload`, `correctness_function_id`, and
+`c_task_opportunities.mastery_selected_skill` never public under any name — a column's allow-listed
+status at the DATABASE layer (`AUTHORIZED_C_COLUMN_EXCEPTIONS`) is not an argument for HTTP
+exposure, the same distinction Phase 4b established with `mastery_context_mode`.
+
+**S5 — the full 30-template leak loop, two real (not hypothetical) collisions encountered and
+narrowly excluded, disclosed in the test's own comments:**
+1. A `correct_answer_payload` value numerically coinciding with an unrelated public field's own
+   value (`task_index`, `difficulty_level`) on the same instance — pure coincidence, excluded by
+   value.
+2. BY DESIGN, some templates' `correct_answer_payload` legitimately repeats a value the child is
+   ALREADY SHOWN in `prompt_payload` (e.g. `C-BT-01` "Build and Trade": `prompt_payload.
+   target_number` is the number the child is asked to build; `correct_answer_payload` carries the
+   same number as part of its own structure) — not a leak through the projection, since
+   `prompt_payload` is intentionally public and was already serialised; excluded because this loop
+   cannot distinguish "redundant-with-the-public-prompt" from "genuinely leaked" without
+   per-template domain knowledge. Every OTHER secret value, for every template, is still checked in
+   full — both exclusions narrow the check, they do not disable it. A third, purely mechanical
+   defect was found and fixed in the check itself: naive substring search (`"4" in serialized`)
+   trivially "finds" a digit inside an unrelated larger number (`"14"`); replaced with exact-value
+   membership against the parsed JSON body's own leaf values.
+
+**P4 — `sessions_since_last_practice`, sourced from `c_learner_local_state` only,** proven
+behaviorally (a seeded distinctive dict round-trips exactly through `_learner_session_state`, the
+same function Phase 4's session-phase decision already uses) and structurally (`task_service.py`'s
+own source never mentions `b_learner_skill_states`/`LearnerSkillState`).
+
+**P5 — unknown template fails closed, both directions (X-10):** a known template evaluates
+successfully (positive control); an unregistered template id on a real, persisted
+`CTaskInstanceRecord` raises `UnknownTemplateError` inside the adapter, translated to
+`ConflictError`, with the `submission_spy` proving `evaluate` never returned successfully.
+
+**P6 — the two routes, mirroring Phase 4b's pattern exactly.** Auth via
+`get_authenticated_principal`; structured `details=[{"location","type"}]` for both the C-12
+rejection path and the mastery-payload path (unchanged from Phase 4b). Every positive-path proof
+of the serving mechanism (a task actually generated, an action actually evaluated) calls
+`TaskService` methods DIRECTLY with `smoke_mode=True`, never through `TestClient` — there is no way
+to reach a successful response through the real route in this batch, by design (the headline
+consequence). The one HTTP-level test for `next_task` proves the route refuses for real, not that
+it is unreachable.
+
+**Regenerated frozen contract, additive-only, verified by diff.** 3 new schemas
+(`CNextTaskResponse`, `CSubmitActionRequest`, `CSubmitActionResult`), 2 new paths
+(`/api/v1/c/sessions/{c_session_id}/tasks/next`,
+`/api/v1/c/sessions/{c_session_id}/tasks/{c_task_instance_id}/actions`) — `diff` against the
+pre-regeneration file showed zero removed lines and nothing else moved (no B schema touched, no
+existing path altered, no key reordering elsewhere). Every one of the 15 new property names
+checked programmatically against all 19 `FORBIDDEN_FIELD_TERMS`: `c_task_instance_id`,
+`difficulty_level`, `game_family_id`, `game_task_template_id`, `interactive_assets`,
+`prompt_payload`, `representation_mode`, `request_id`, `scaffold_state`, `skill_id`, `task_index`,
+`technical_status`, `valid_action_space`, `action_payload`, `response_matched` — zero offenders
+(computed, not eyeballed). New checksum:
+`7e2bec505e88221c44bd6d1d316fbda8a531117a94b93951dffca3b567c4b73e`, written to
+`openapi.v1.meta.json`; `contract_version` stays `"v1"`.
+
+**Verified block.** Real `docker compose build api` (clean), then `docker compose run --rm api
+python -m pytest -q`:
+```
+458 passed, 74 skipped, 0 failed, 532 collected
+```
+Reconciled exactly against the 439/74/513 baseline: `439 + 19 = 458` passed; `74` skipped
+unchanged; `513 + 19 = 532` collected. The 19: 16 new tests in
+`tests/test_c5_task_serve_and_evaluate.py` (C17-3 x1, R-7 x1, S5 x1, P4 x2, P5 x2, C-12 x6, P6 x3),
+3 new in `test_be2_architecture_guards.py`
+(`test_no_app_code_defaults_or_calls_default_generation_config`,
+`test_default_config_guard_mechanism_fires_on_synthetic_violations`,
+`test_openapi_contains_exactly_the_two_authorized_c_task_serving_operations`). No existing test
+weakened, xfailed, or deleted; no skip-count change.
+
+**Changed tests, labelled:**
+- `test_live_openapi_matches_frozen_artefact`, `test_frozen_route_set_matches_expected_authorized_
+  routes` — **UPDATE**: were failing (live schema/route set ahead of the frozen snapshot); pass now
+  that the snapshot was regenerated in lockstep with the two authorized new routes and the R-6
+  rename.
+- `test_no_app_code_defaults_or_calls_default_selection_config` — **UPDATE**: internals refactored
+  to share `_config_default_violations` with the new GenerationConfig guard; identical behavior,
+  same assertions, DRY only.
+- All 16 `test_c5_task_serve_and_evaluate.py` tests, 3 new `test_be2_architecture_guards.py`
+  tests — **SIGNAL** (new).
+
+**Files changed this batch (git add list, dependency order; owner commits):**
+`backend/app/domain/live_engine_c/action_payload_validation.py`,
+`backend/app/core/errors.py`, `backend/app/domain/c_task.py`,
+`backend/app/infrastructure/live_engine_c/adapter.py`,
+`backend/app/infrastructure/repositories.py`,
+`backend/app/application/live_engine_c/task_service.py`,
+`backend/app/api/routes/c_task.py`, `backend/app/main.py`,
+`backend/tests/fixtures/runtime_bundle_c/test_catalogue_c.md`,
+`backend/tests/fixtures/runtime_bundle_c/valid_unapproved_bundle_c.json`,
+`backend/tests/test_c2_catalogue_and_runtime_bundle.py`,
+`backend/tests/test_be2_architecture_guards.py`,
+`backend/tests/test_c5_task_serve_and_evaluate.py`,
+`backend/contract/openapi.v1.json`, `backend/contract/openapi.v1.meta.json`. No git command
+beyond read-only verification (`status`, `rev-parse`, `docker version`) was run this batch; nothing
+was staged or committed.
+
+**Remains open.** `frontend/src/api/generated/openapi-types.ts` is now stale against the
+regenerated contract (no frontend file touched, out of scope) and staler than after Phase 4b — no
+test catches this. The two-connection concurrency harness still does not exist. The 30-per-template
+`.get()`-defensiveness audit for the evaluator layer (C-12's own registered, not blocking, item).
+The whole-30-template full end-to-end `select_task` RNG-selection path (as opposed to
+`build_task_instance` called directly per template, S5's own method) is not separately proven —
+S5 proves PROJECTION safety per template, not that `select_task`'s own skill/template selection
+reaches every one of the 30 templates in practice. `is_recovery_context`'s own upstream source
+(scaffold/recovery machinery) remains unbuilt, unrelated to and not blocking C-17's containment.
+Every `CALIBRATION_PENDING` parameter — `W`, the other six selection parameters, every generation
+parameter — remains unresolved, untouched, unapproved.

@@ -7,12 +7,12 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence_models import (
-    AppUser, AppUserLearnerLink, AttemptRecord, AuditEvent, Base, Classroom, ClassroomInvite,
-    ClassroomMembership, CLearnerLocalStateRecord, CRuntimeBundleRecord, CSessionRecord,
-    HintEventRecord, IdempotencyRecord, ItemOpportunityRecord, Learner, LearnerSkillStateRecord,
-    PresentationTokenRecord, RuntimeBundleRecord, SessionAggregateResultRecord, SessionEvent,
-    SessionRecord, SkillCertificationResultRecord, SkillStateTransitionRecord, TaskInstanceRecord,
-    TeacherProfile,
+    AppUser, AppUserLearnerLink, AttemptRecord, AuditEvent, Base, CGameplayEventRecord, Classroom,
+    ClassroomInvite, ClassroomMembership, CLearnerLocalStateRecord, CRuntimeBundleRecord,
+    CSessionRecord, CTaskInstanceRecord, CTaskOpportunityRecord, HintEventRecord, IdempotencyRecord,
+    ItemOpportunityRecord, Learner, LearnerSkillStateRecord, PresentationTokenRecord,
+    RuntimeBundleRecord, SessionAggregateResultRecord, SessionEvent, SessionRecord,
+    SkillCertificationResultRecord, SkillStateTransitionRecord, TaskInstanceRecord, TeacherProfile,
 )
 
 
@@ -149,6 +149,56 @@ class CLearnerLocalStateRepository(SqlAlchemyNeutralRepository[CLearnerLocalStat
         return await self.session.scalar(
             select(CLearnerLocalStateRecord).where(CLearnerLocalStateRecord.student_id == student_id)
         )
+
+
+class CTaskOpportunityRecordRepository(SqlAlchemyNeutralRepository[CTaskOpportunityRecord]):
+    model_type = CTaskOpportunityRecord
+
+    async def count_for_session(self, c_session_id: UUID) -> int:
+        """Phase 5: the NEXT ``task_index`` for a session is ``count_for_session(...)`` -- no
+        separate counter column exists on ``c_sessions``; the opportunity rows ARE the count."""
+        return await self.session.scalar(
+            select(func.count()).select_from(CTaskOpportunityRecord).where(
+                CTaskOpportunityRecord.c_session_id == c_session_id
+            )
+        ) or 0
+
+
+class CTaskInstanceRecordRepository(SqlAlchemyNeutralRepository[CTaskInstanceRecord]):
+    model_type = CTaskInstanceRecord
+
+    async def get_owned(self, c_task_instance_id: UUID, c_session_id: UUID) -> CTaskInstanceRecord | None:
+        """Phase 5: ``c_task_instances`` carries no denormalized ``c_session_id`` (Phase 3a's own
+        minimal-FK style, mirroring B) -- ownership is proven through the parent
+        ``c_task_opportunities`` row instead."""
+        return await self.session.scalar(
+            select(CTaskInstanceRecord)
+            .join(CTaskOpportunityRecord, CTaskInstanceRecord.c_task_opportunity_id == CTaskOpportunityRecord.c_task_opportunity_id)
+            .where(
+                CTaskInstanceRecord.c_task_instance_id == c_task_instance_id,
+                CTaskOpportunityRecord.c_session_id == c_session_id,
+            )
+        )
+
+
+class CGameplayEventRecordRepository(SqlAlchemyNeutralRepository[CGameplayEventRecord]):
+    model_type = CGameplayEventRecord
+
+    async def max_index_and_timestamp_for_instance(self, game_task_instance_id: UUID) -> tuple[int, int]:
+        """Phase 3b's own triggers require ``event_index`` to be consecutive from 1 and
+        ``event_timestamp_relative_ms`` to be non-decreasing within a task -- both queried live
+        here rather than assumed, so a second event for the same instance is always valid
+        regardless of how many events already exist."""
+        row = (
+            await self.session.execute(
+                select(
+                    func.max(CGameplayEventRecord.event_index),
+                    func.max(CGameplayEventRecord.event_timestamp_relative_ms),
+                ).where(CGameplayEventRecord.game_task_instance_id == game_task_instance_id)
+            )
+        ).one()
+        max_index, max_timestamp = row
+        return (max_index or 0), (max_timestamp or 0)
 
 
 class SessionEventRepository(SqlAlchemyNeutralRepository[SessionEvent]):

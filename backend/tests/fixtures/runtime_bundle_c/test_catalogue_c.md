@@ -36,12 +36,24 @@ this fixture's 30 template ids cannot silently drift from `tasks.registry`'s own
 asserts the two id sets are equal, not merely equal in count. It does **not** prove the real,
 reviewed catalogue loads; that remains unprovable until a governed catalogue exists (Phase 0).
 
+**BUILDER JUDGMENT — UNRATIFIED (Phase 5, discovered not invented):** the top-level `status`
+field was originally `"TEST_FIXTURE_ONLY"`, a value the loader accepts (it applies no vocabulary
+check to this specific field — `catalogue.loader.py`'s `catalogue_status=str(root.get("status",
+"unknown"))` is a pass-through) but which the package's OWN `eligibility.decide_activation`
+(`RECOGNIZED_CATALOGUE_STATUSES = ("PROPOSED_FOR_APPROVAL", "BASELINE_ACTIVE", "APPROVED",
+"ACTIVE")`) does not recognize — meaning EVERY template in this fixture was permanently
+`inactive` and `select_task` could never return a result for ANY grade, a gap invisible until
+Phase 5 first called that code path (Phase 2-4 only ever loaded/checksummed this file, never
+selected against it). Corrected to `"PROPOSED_FOR_APPROVAL"` — the value that is also literally
+true of Component C's real status (v3.0 §2: "Component C is PROPOSED, not approved"), not a new
+invented value. No template content, skill, grade mapping, or difficulty data changed.
+
 ## Machine-readable catalogue
 
 ```yaml
 component_c_game_task_catalogue:
   version: "TEST-FIXTURE-1.0"
-  status: "TEST_FIXTURE_ONLY"
+  status: "PROPOSED_FOR_APPROVAL"
   skills:
     - counting
     - number_sense
