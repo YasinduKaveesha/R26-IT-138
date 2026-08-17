@@ -56,7 +56,9 @@ from app.infrastructure.persistence_models import (
     Learner,
 )
 from app.main import app
+from app.domain.runtime_bundle_c.types import SafetyConfigurationArtifact, SelectionConfigurationArtifact
 from tests.test_c4_session_lifecycle import (
+    all_usable_field_statuses,
     isolated_database,
     provenance,
     seed_learner,
@@ -129,6 +131,8 @@ async def seed_active_session(
         "catalogue_checksum": "a" * 64,
         "global_seed": 42,
         "selection_config": selection_config_fixture_for_tests(),
+        "selection_config_field_statuses": all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
+        "safety_config_field_statuses": all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
         "request_id": f"req-{uuid4()}",
     }
     if session_mode == "combined":

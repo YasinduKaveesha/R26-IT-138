@@ -32,7 +32,11 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.live_engine_c.bundle_resolution import resolve_c_bundle_and_catalogue, resolve_selection_config
+from app.application.live_engine_c.bundle_resolution import (
+    resolve_c_bundle_and_catalogue,
+    resolve_safety_config,
+    resolve_selection_config,
+)
 from app.application.live_engine_c.mastery_fixture import (
     fixture_b_mastery_payload_for_phase_4,
     fixture_b_provenance_for_phase_4,
@@ -106,6 +110,11 @@ class CSessionService:
                 require_approved=False,
             )
             selection_config = resolve_selection_config(bundle)
+            # Phase 6b, S2-a: resolved (and its absence raised) here, the SAME point
+            # selection_config already was -- both families fail closed before create_session is
+            # ever called, and create_session's own gate (X4) checks their per-field statuses
+            # again, structurally, not merely because this caller happened to run first.
+            safety_config = resolve_safety_config(bundle)
         except LiveEngineCError as exc:
             raise ConflictError() from exc
 
@@ -148,6 +157,8 @@ class CSessionService:
                 # NOT NULL column with a real value rather than an invented fixed literal.
                 global_seed=secrets.randbits(63),
                 selection_config=selection_config,
+                selection_config_field_statuses=bundle.selection_configuration.field_statuses,
+                safety_config_field_statuses=bundle.safety_configuration.field_statuses,
                 request_id=request_id,
                 mastery_by_skill=mastery_by_skill,
                 mastery_source_student_id=mastery_source_student_id,

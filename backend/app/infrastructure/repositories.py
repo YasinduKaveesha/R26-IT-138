@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence_models import (
     AppUser, AppUserLearnerLink, AttemptRecord, AuditEvent, Base, CGameplayEventRecord, Classroom,
-    ClassroomInvite, ClassroomMembership, CLearnerLocalStateRecord, CRuntimeBundleRecord,
+    ClassroomInvite, ClassroomMembership, CLearnerLocalStateRecord, CPolicyDecisionRecord,
+    CRuntimeBundleRecord, CSafetyEventRecord,
     CSessionRecord, CTaskInstanceRecord, CTaskOpportunityRecord, CTaskOpportunitySummaryRecord,
     HintEventRecord, IdempotencyRecord,
     ItemOpportunityRecord, Learner, LearnerSkillStateRecord, PresentationTokenRecord,
@@ -261,6 +262,39 @@ class CTaskOpportunitySummaryRecordRepository(SqlAlchemyNeutralRepository[CTaskO
                 CTaskOpportunitySummaryRecord.game_task_instance_id == game_task_instance_id
             )
         )
+
+    async def list_ordered_for_session(self, c_session_id: UUID) -> Sequence[CTaskOpportunitySummaryRecord]:
+        """Phase 6b: the full running session history (v3.0 §7.2: "history passed to
+        build_policy_evidence is the full running session history including the just-finished
+        task"), ordered by task_index -- never filtered, never truncated here."""
+        result = await self.session.execute(
+            select(CTaskOpportunitySummaryRecord)
+            .where(CTaskOpportunitySummaryRecord.c_session_id == c_session_id)
+            .order_by(CTaskOpportunitySummaryRecord.task_index)
+        )
+        return result.scalars().all()
+
+
+class CPolicyDecisionRecordRepository(SqlAlchemyNeutralRepository[CPolicyDecisionRecord]):
+    model_type = CPolicyDecisionRecord
+
+    async def most_recent_for_session(self, c_session_id: UUID) -> CPolicyDecisionRecord | None:
+        """Phase 6b, S8-b: the increase-block feedback loop's own persisted state -- the most
+        recently written decision's ``increase_block_remaining`` IS
+        ``evidence.safety_increase_block_remaining`` for the NEXT task. No separate counter
+        column exists (same "the rows ARE the count" discipline as
+        CTaskOpportunityRecordRepository.count_for_session) -- ordered by created_at_utc, the
+        provenance column every record already carries, never a synthetic sequence."""
+        return await self.session.scalar(
+            select(CPolicyDecisionRecord)
+            .where(CPolicyDecisionRecord.c_session_id == c_session_id)
+            .order_by(CPolicyDecisionRecord.created_at_utc.desc())
+            .limit(1)
+        )
+
+
+class CSafetyEventRecordRepository(SqlAlchemyNeutralRepository[CSafetyEventRecord]):
+    model_type = CSafetyEventRecord
 
 
 class SessionEventRepository(SqlAlchemyNeutralRepository[SessionEvent]):

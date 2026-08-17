@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "bundle_version": "c2-test-fixture-1.0",
   "publication_state": "DRAFT",
   "immutable_after_publication": true,
@@ -29,17 +29,85 @@
       "algorithm": "sha256",
       "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
-    "approval_status": "CALIBRATION_PENDING",
     "config_version": "c4.0-selection-1.0.0",
     "parameter_source_status": "TEST_FIXTURE_ONLY",
     "familiarization_window_by_grade": {
-      "2": 2,
-      "3": 3
+      "source": "Not named in Component_C_Generator_v1.0/SPEC.md §8/§9/§10 (no commit hash -- see C-6) -- no SPEC citation exists",
+      "status": "CALIBRATION_PENDING",
+      "value": {
+        "2": 2,
+        "3": 3
+      }
     },
-    "familiarization_difficulty_level": 1,
-    "fallback_difficulty_level": 1,
-    "familiarization_session_difficulty_cap": 2,
-    "fallback_difficulty_cap": 2
+    "familiarization_difficulty_level": {
+      "source": "Not named in Component_C_Generator_v1.0/SPEC.md §8/§9/§10 (no commit hash -- see C-6) -- no SPEC citation exists",
+      "status": "CALIBRATION_PENDING",
+      "value": 1
+    },
+    "fallback_difficulty_level": {
+      "source": "Component_C_Generator_v1.0/SPEC.md §8.2 and §10 (no commit hash -- see C-6): 'C-only fallback -> initial 1' -- cited twice, consistently",
+      "status": "PROPOSED_UNSIGNED",
+      "value": 1
+    },
+    "familiarization_session_difficulty_cap": {
+      "source": "Not named in Component_C_Generator_v1.0/SPEC.md §8/§9/§10 (no commit hash -- see C-6) -- no SPEC citation exists",
+      "status": "CALIBRATION_PENDING",
+      "value": 2
+    },
+    "fallback_difficulty_cap": {
+      "source": "Component_C_Generator_v1.0/SPEC.md §8.2 ('fallback_difficulty_cap = 2') and §10 ('session cap 2') (no commit hash -- see C-6) -- cited twice, consistently",
+      "status": "PROPOSED_UNSIGNED",
+      "value": 2
+    }
+  },
+  "safety_configuration": {
+    "version": "c4.1-safety-1.0.0",
+    "checksum": {
+      "algorithm": "sha256",
+      "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "config_version": "c4.1-safety-1.0.0",
+    "parameter_source_status": "TEST_FIXTURE_ONLY",
+    "consecutive_error_trigger": {
+      "source": "Not numerically named in Component_C_Generator_v1.0/SPEC.md §17 (no commit hash -- see C-6) -- qualitative only",
+      "status": "CALIBRATION_PENDING",
+      "value": 5
+    },
+    "strain_trigger": {
+      "source": "Not numerically named in Component_C_Generator_v1.0/SPEC.md §17 (no commit hash -- see C-6) -- qualitative only",
+      "status": "CALIBRATION_PENDING",
+      "value": 0.85
+    },
+    "increase_block_window": {
+      "source": "Component_C_Generator_v1.0/SPEC.md §17 (no commit hash -- see C-6): 'block future increases for a bounded window' -- qualitative, no numeric window length cited",
+      "status": "CALIBRATION_PENDING",
+      "value": 3
+    },
+    "prior_overloaded_disengaged_cap": {
+      "source": "Component_C_Generator_v1.0/SPEC.md §10 (no commit hash -- see C-6): 'prior overloaded/disengaged complete state -> <=2'",
+      "status": "PROPOSED_UNSIGNED",
+      "value": 2
+    },
+    "safe_termination_error_threshold": {
+      "source": "Not numerically named in Component_C_Generator_v1.0/SPEC.md §17 (no commit hash -- see C-6) -- qualitative only",
+      "status": "CALIBRATION_PENDING",
+      "value": 7
+    },
+    "strain_bucket_low_max": {
+      "source": "Not named in Component_C_Generator_v1.0/SPEC.md §17 (no commit hash -- see C-6) -- no SPEC citation exists",
+      "status": "CALIBRATION_PENDING",
+      "value": 0.25
+    },
+    "strain_bucket_moderate_max": {
+      "source": "Not named in Component_C_Generator_v1.0/SPEC.md §17 (no commit hash -- see C-6) -- no SPEC citation exists",
+      "status": "CALIBRATION_PENDING",
+      "value": 0.50
+    },
+    "strain_bucket_high_max": {
+      "source": "Not named in Component_C_Generator_v1.0/SPEC.md §17 (no commit hash -- see C-6) -- no SPEC citation exists",
+      "status": "CALIBRATION_PENDING",
+      "value": 0.85
+    }
   },
   "activation_date": null,
   "compatibility": {

@@ -28,6 +28,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.live_engine_c.bundle_resolution import assert_family_usable
 from app.core.errors import ConflictError, ResourceNotFoundError
 from app.domain.live_engine_c.errors import SF043OrderingError
 from app.domain.live_engine_c.types import AttendanceStatus, Grade, LearnerSessionState, SelectionConfig, SessionMode
@@ -89,6 +90,8 @@ async def create_session(
     c_runtime_bundle_record_id: UUID,
     global_seed: int,
     selection_config: SelectionConfig,
+    selection_config_field_statuses: Mapping[str, str],
+    safety_config_field_statuses: Mapping[str, str],
     request_id: str,
     mastery_by_skill: Optional[Mapping[str, float]] = None,
     mastery_source_student_id: Optional[str] = None,
@@ -111,7 +114,27 @@ async def create_session(
     harness, so only the SEQUENTIAL shape (lock acquired, then checked) is exercised by test; the
     partial unique index on ``c_sessions`` (``uq_c_sessions_one_starting_or_active_per_learner``,
     migration 20260816_0005) is the actual, DB-enforced backstop if the advisory lock is ever
-    bypassed or the race window is hit anyway."""
+    bypassed or the race window is hit anyway.
+
+    PHASE 6b, S2/X4 -- THE STRUCTURAL GATE, BOTH FAMILIES, HERE, BEFORE ANY CSessionRecord EXISTS:
+    ``assert_family_usable`` is called TWICE below -- once for ``selection_config``'s five real
+    fields, once for ``safety_config``'s nine -- inside THIS function, not merely ordered before
+    it by a caller (S7's own finding: incidental ordering is not a gate, it holds only until
+    someone reorders a call). Owner's inversion (S2), the reason this is here and not inside
+    ``adapt``/the per-task call: "If safety config is unusable and the consuming path refuses,
+    the session proceeds WITHOUT safety... for any protective capability, fail-closed must mean
+    refuse the protected activity, never refuse the protection." No session exists to need
+    protecting once this refuses.
+
+    DISCLOSED PLAINLY (X2-3, same register position Phase 5 used for "endpoints deliberately not
+    live"): under this batch's own real field classification (X3-f -- every SPEC-cited value is
+    ``PROPOSED_UNSIGNED``, every uncited value is ``CALIBRATION_PENDING``, and the usable
+    whitelist is ``{APPROVED}`` only, X1), NO bundle committed anywhere in this codebase can ever
+    satisfy this gate today. As of this batch, Component C's backend cannot create a session in
+    production at all -- not a bug, the direct, intended consequence of X1's whitelist applied to
+    a project where nothing is yet signed. This is stated here, in the schema's own description,
+    and in the batch's build-log headline -- not left for someone to discover as a defect and
+    "fix" by loosening the whitelist."""
     await session.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
         {"scope": f"c_session.create:{student_id}"},
@@ -120,6 +143,10 @@ async def create_session(
     existing = await repository.find_starting_or_active_for_learner(student_id)
     if existing is not None:
         return existing
+
+    # X4: one mechanism, called twice, before any CSessionRecord is constructed.
+    assert_family_usable(family_name="selection_config", field_statuses=selection_config_field_statuses)
+    assert_family_usable(family_name="safety_config", field_statuses=safety_config_field_statuses)
 
     if session_mode == "c_only":
         if mastery_by_skill is not None:

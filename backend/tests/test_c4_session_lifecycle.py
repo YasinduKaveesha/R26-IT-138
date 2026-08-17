@@ -23,7 +23,8 @@ from sqlalchemy.pool import NullPool
 from app.core.config import get_settings
 from app.core.errors import ConflictError, ResourceNotFoundError
 from app.domain.live_engine_c.errors import MasteryPayloadContractValidationError, SF043OrderingError
-from app.domain.live_engine_c.types import SelectionConfig
+from app.domain.live_engine_c.types import SafetyConfig, SelectionConfig
+from app.domain.runtime_bundle_c.types import SafetyConfigurationArtifact, SelectionConfigurationArtifact
 from app.application.live_engine_c.mastery_fixture import fixture_b_mastery_payload_for_phase_4
 from app.application.live_engine_c.session_lifecycle import (
     abandon_session,
@@ -78,6 +79,38 @@ def selection_config_fixture_for_tests() -> SelectionConfig:
     )
 
 
+def safety_config_fixture_for_tests() -> SafetyConfig:
+    """TEST_FIXTURE_ONLY -- mirrors component_c_generator.safety.config.default_safety_config()'s
+    own values (never calling that factory from app/ or tests/ that exercise app/ code -- S8-a),
+    labelled at the point of supply like every other config fixture in this suite."""
+    return SafetyConfig(
+        config_version="c4.1-safety-1.0.0",
+        parameter_source_status="TEST_FIXTURE_ONLY",
+        consecutive_error_trigger=5,
+        strain_trigger=0.85,
+        increase_block_window=3,
+        prior_overloaded_disengaged_cap=2,
+        safe_termination_error_threshold=7,
+        strain_bucket_low_max=0.25,
+        strain_bucket_moderate_max=0.50,
+        strain_bucket_high_max=0.85,
+    )
+
+
+def all_usable_field_statuses(field_names: tuple) -> dict:
+    """X1/X4 test helper: every field APPROVED -- the ONE status the whitelist accepts. The
+    baseline every unusable-field test starts from and mutates one entry away from."""
+    return {name: "APPROVED" for name in field_names}
+
+
+def all_calibration_pending_field_statuses(field_names: tuple) -> dict:
+    """The real, current classification (X3-f) for a bundle that has signed nothing -- every
+    field CALIBRATION_PENDING/PROPOSED_UNSIGNED, i.e. unusable. Used as the default
+    'nothing is signed' fixture shape, matching what any bundle actually committed in this
+    codebase looks like today."""
+    return {name: "CALIBRATION_PENDING" for name in field_names}
+
+
 async def seed_learner(session: AsyncSession, *, grade: int = 2) -> UUID:
     learner_id = uuid4()
     session.add(
@@ -118,6 +151,8 @@ def _create_session_kwargs(**overrides: object) -> dict[str, object]:
         "catalogue_checksum": "a" * 64,
         "global_seed": 42,
         "selection_config": selection_config_fixture_for_tests(),
+        "selection_config_field_statuses": all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
+        "safety_config_field_statuses": all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
         "request_id": f"req-{uuid4()}",
         "mastery_by_skill": fixture_b_mastery_payload_for_phase_4(),
         "mastery_source_student_id": "STU-0001",

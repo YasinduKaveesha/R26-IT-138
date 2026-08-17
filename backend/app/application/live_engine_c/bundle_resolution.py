@@ -17,13 +17,28 @@ from __future__ import annotations
 
 from typing import Mapping, Optional
 
+from typing import Mapping
+
 from app.core.errors import ConflictError
-from app.domain.live_engine_c.errors import LiveEngineCError, SelectionConfigurationMissingError
-from app.domain.live_engine_c.types import Catalogue, SelectionConfig
+from app.domain.live_engine_c.errors import (
+    ConfigurationFamilyNotUsableError,
+    LiveEngineCError,
+    SafetyConfigurationMissingError,
+    SelectionConfigurationMissingError,
+)
+from app.domain.live_engine_c.types import Catalogue, SafetyConfig, SelectionConfig
 from app.domain.runtime_bundle.errors import RuntimeBundleError
 from app.domain.runtime_bundle_c.types import CRuntimeBundle
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.runtime_bundle_c.loader import CRuntimeBundleLoader
+
+# X1 (owner ruling, Phase 6b): "usable = {APPROVED}, and every other value -- the five named,
+# plus any value nobody has considered yet -- is not usable by construction." A WHITELIST, never
+# a deny-list matching specific known-bad statuses (X1-a) -- a status string this codebase has
+# never seen, including a deliberately nonsense one, refuses by the same "not in the set" check
+# as every named-but-unusable status (X1-b, proven by
+# tests/test_c6b_policy_and_safety.py::test_x1b_nonsense_status_refuses_by_default).
+USABLE_APPROVAL_STATUSES = frozenset({"APPROVED"})
 
 
 def resolve_c_bundle_and_catalogue(
@@ -82,3 +97,50 @@ def resolve_selection_config(bundle: CRuntimeBundle) -> SelectionConfig:
         familiarization_session_difficulty_cap=artifact.familiarization_session_difficulty_cap,
         fallback_difficulty_cap=artifact.fallback_difficulty_cap,
     )
+
+
+def resolve_safety_config(bundle: CRuntimeBundle) -> SafetyConfig:
+    """Phase 6b, symmetric to ``resolve_selection_config`` one family later: "Fail-closed means
+    halt, not default." Raises ``SafetyConfigurationMissingError`` when
+    ``bundle.safety_configuration`` is ``None`` -- never defaults, never substitutes a
+    placeholder. When present, this is a direct field-by-field carry of the already-resolved
+    scalar values; per-field STATUS is checked separately, by ``assert_family_usable`` below,
+    called from ``create_session`` (S2-a) -- never here, and never skipped by virtue of this
+    function having been reached (this function has no opinion on usability at all)."""
+    artifact = bundle.safety_configuration
+    if artifact is None:
+        raise SafetyConfigurationMissingError(
+            f"runtime bundle {bundle.bundle_version!r} carries no safety_configuration -- "
+            "halting rather than proceeding on a default (S2-a)"
+        )
+    return SafetyConfig(
+        config_version=artifact.config_version,
+        parameter_source_status=artifact.parameter_source_status,
+        consecutive_error_trigger=artifact.consecutive_error_trigger,
+        strain_trigger=artifact.strain_trigger,
+        increase_block_window=artifact.increase_block_window,
+        prior_overloaded_disengaged_cap=artifact.prior_overloaded_disengaged_cap,
+        safe_termination_error_threshold=artifact.safe_termination_error_threshold,
+        strain_bucket_low_max=artifact.strain_bucket_low_max,
+        strain_bucket_moderate_max=artifact.strain_bucket_moderate_max,
+        strain_bucket_high_max=artifact.strain_bucket_high_max,
+    )
+
+
+def assert_family_usable(*, family_name: str, field_statuses: Mapping[str, str]) -> None:
+    """X4 -- THE ONE STRUCTURAL GATE MECHANISM, shared by BOTH families (selection and safety),
+    called twice from ``session_lifecycle.create_session`` itself, before any ``CSessionRecord``
+    is constructed -- never as caller-side ordering that merely happens to run first (S7's own
+    finding: incidental ordering is not a gate, it holds only until someone reorders a call).
+
+    X1/W2: usable = {APPROVED} only (``USABLE_APPROVAL_STATUSES``, a whitelist). ANY field whose
+    status is not in that set makes the WHOLE family unusable -- W2's trap named exactly:
+    "mark enough fields as something-other-than-pending and the block reads as usable... Per-field
+    status is for accuracy of the record, never for partial enablement." Raises
+    ``ConfigurationFamilyNotUsableError`` naming the family and every unusable field (never the
+    value any field held)."""
+    unusable = tuple(
+        name for name, status in field_statuses.items() if status not in USABLE_APPROVAL_STATUSES
+    )
+    if unusable:
+        raise ConfigurationFamilyNotUsableError(family_name, unusable)

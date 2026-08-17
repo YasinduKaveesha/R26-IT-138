@@ -99,6 +99,31 @@ class SelectionConfigurationMissingError(LiveEngineCError):
     the block, B1-b) -- never defaulted, never substituted."""
 
 
+class SafetyConfigurationMissingError(LiveEngineCError):
+    """Phase 6b, S2-a/X4: raised when a code path needs ``SafetyConfig`` and the resolved
+    ``CRuntimeBundle.safety_configuration`` is ``None`` (a real, expected state for any bundle
+    not yet republished with the block) -- never defaults, never substitutes a placeholder.
+    Mirrors ``SelectionConfigurationMissingError`` exactly, one family later."""
+
+
+class ConfigurationFamilyNotUsableError(LiveEngineCError):
+    """Phase 6b, X1/X4: raised when ANY field of a parameter family's per-field status is not in
+    the USABLE whitelist ({"APPROVED"} only -- X1-a, a whitelist, never a deny-list on specific
+    known-bad values). W2's own trap, quoted: "mark enough fields as something-other-than-pending
+    and the block reads as usable... Per-field status is for accuracy of the record, never for
+    partial enablement." One unusable field makes the WHOLE family unusable. Carries the family
+    name and the specific unusable field names -- never which VALUE they held (S1: no threshold
+    value may appear in an error message any more than in a source file)."""
+
+    def __init__(self, family_name: str, unusable_fields: tuple[str, ...]) -> None:
+        self.family_name = family_name
+        self.unusable_fields = unusable_fields
+        super().__init__(
+            f"{family_name}: {len(unusable_fields)} field(s) not in the usable whitelist: "
+            f"{', '.join(unusable_fields)}"
+        )
+
+
 class SF043OrderingError(LiveEngineCError):
     """Phase 4: the SF-043 ordering gate at session creation -- "B runs -> B completes ->
     B emits seven mastery values -> C validates the same-session payload -> C begins." Raised

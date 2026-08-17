@@ -36,7 +36,11 @@ from app.domain.runtime_bundle.errors import (
     RuntimeBundleValidationError,
 )
 from app.domain.runtime_bundle.types import Checksum, Compatibility, SourceArtifact, VersionedArtifact
-from app.domain.runtime_bundle_c.types import CRuntimeBundle, SelectionConfigurationArtifact
+from app.domain.runtime_bundle_c.types import (
+    CRuntimeBundle,
+    SafetyConfigurationArtifact,
+    SelectionConfigurationArtifact,
+)
 
 
 def _read_json(path: str, *, not_found_message: str) -> Any:
@@ -86,21 +90,58 @@ def _selection_configuration(raw: Optional[Mapping[str, Any]]) -> Optional[Selec
     """Phase 4b: absent (``None``) on any bundle that has not been republished with this block --
     additive-only (owner condition 2). Never substitutes a placeholder; the caller of this
     loader, not this function, decides whether an absent block is fatal for what it's about to
-    do (owner condition 1: "halt, not default" belongs at the consumer of W, not here)."""
+    do (owner condition 1: "halt, not default" belongs at the consumer of W, not here).
+
+    Phase 6b (schema_version 1.2, BREAKING): each of the five real parameter fields is now a
+    ``{source, status, value}`` object, not a flat scalar. This function reads ``value`` for the
+    flat scalar fields below (unchanged consumer shape) and separately collects every field's
+    ``status``/``source`` into ``field_statuses``/``field_sources`` -- the per-field usability
+    gate's own input (``bundle_resolution.py``)."""
     if raw is None:
         return None
     window_raw = raw["familiarization_window_by_grade"]
+    field_statuses = {name: raw[name]["status"] for name in SelectionConfigurationArtifact.FIELD_NAMES}
+    field_sources = {name: raw[name]["source"] for name in SelectionConfigurationArtifact.FIELD_NAMES}
     return SelectionConfigurationArtifact(
         version=raw["version"],
         checksum=_checksum(raw["checksum"]),
-        approval_status=raw["approval_status"],
         config_version=raw["config_version"],
         parameter_source_status=raw["parameter_source_status"],
-        familiarization_window_by_grade={int(grade): window for grade, window in window_raw.items()},
-        familiarization_difficulty_level=raw["familiarization_difficulty_level"],
-        fallback_difficulty_level=raw["fallback_difficulty_level"],
-        familiarization_session_difficulty_cap=raw["familiarization_session_difficulty_cap"],
-        fallback_difficulty_cap=raw["fallback_difficulty_cap"],
+        familiarization_window_by_grade={
+            int(grade): window for grade, window in window_raw["value"].items()
+        },
+        familiarization_difficulty_level=raw["familiarization_difficulty_level"]["value"],
+        fallback_difficulty_level=raw["fallback_difficulty_level"]["value"],
+        familiarization_session_difficulty_cap=raw["familiarization_session_difficulty_cap"]["value"],
+        fallback_difficulty_cap=raw["fallback_difficulty_cap"]["value"],
+        field_statuses=field_statuses,
+        field_sources=field_sources,
+    )
+
+
+def _safety_configuration(raw: Optional[Mapping[str, Any]]) -> Optional[SafetyConfigurationArtifact]:
+    """Phase 6b, NEW: symmetric to ``_selection_configuration`` above, per-field from the start
+    (S3/W2 -- this family is provably mixed, so it never had a block-level status to migrate
+    away from)."""
+    if raw is None:
+        return None
+    field_statuses = {name: raw[name]["status"] for name in SafetyConfigurationArtifact.FIELD_NAMES}
+    field_sources = {name: raw[name]["source"] for name in SafetyConfigurationArtifact.FIELD_NAMES}
+    return SafetyConfigurationArtifact(
+        version=raw["version"],
+        checksum=_checksum(raw["checksum"]),
+        config_version=raw["config_version"],
+        parameter_source_status=raw["parameter_source_status"],
+        consecutive_error_trigger=raw["consecutive_error_trigger"]["value"],
+        strain_trigger=raw["strain_trigger"]["value"],
+        increase_block_window=raw["increase_block_window"]["value"],
+        prior_overloaded_disengaged_cap=raw["prior_overloaded_disengaged_cap"]["value"],
+        safe_termination_error_threshold=raw["safe_termination_error_threshold"]["value"],
+        strain_bucket_low_max=raw["strain_bucket_low_max"]["value"],
+        strain_bucket_moderate_max=raw["strain_bucket_moderate_max"]["value"],
+        strain_bucket_high_max=raw["strain_bucket_high_max"]["value"],
+        field_statuses=field_statuses,
+        field_sources=field_sources,
     )
 
 
@@ -175,4 +216,5 @@ class CRuntimeBundleLoader:
             activation_date=manifest["activation_date"],
             compatibility=compatibility,
             selection_configuration=_selection_configuration(manifest.get("selection_configuration")),
+            safety_configuration=_safety_configuration(manifest.get("safety_configuration")),
         )

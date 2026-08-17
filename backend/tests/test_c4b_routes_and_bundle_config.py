@@ -1,6 +1,31 @@
 """Component C Phase 4b acceptance tests: the governed SelectionConfig bundle source (B1, T3-T6),
 the three-now-four HTTP routes (B2), concurrency mirroring (B3), and session completion / the
 N-increment (B4).
+
+PHASE 6b NOTE (X1/X2-3, disclosed here because it changes what this file's own HTTP-level tests
+can prove): the committed reference bundle (``valid_unapproved_bundle_c.json``) now carries its
+REAL, honest per-field classification (X3-f) -- every field CALIBRATION_PENDING or
+PROPOSED_UNSIGNED, none APPROVED. Under X1's whitelist (usable = {APPROVED} only),
+``CSessionService.create`` now refuses EVERY request against that real fixture, by design (see
+``session_lifecycle.create_session``'s own module-level disclosure). This file's own tests
+predate that gate and exist to prove ROUTING/response-shape/concurrency MECHANICS, not the gate
+itself (which has its own dedicated tests in ``test_c6b_policy_and_safety.py``) -- so an
+autouse fixture below points ``CSessionService``'s bundle path at a SEPARATE, clearly-named
+``all_usable_for_tests_bundle_c.json`` (every per-field status APPROVED, TEST-ONLY, not a claim
+that governance ever signed anything) for the duration of this file only, restoring the original
+positive-path behaviour these pre-6b tests were written to prove.
+
+RATIFIED (Phase 6b final step, SUPERVISOR RULING -- was previously BUILDER JUDGMENT --
+UNRATIFIED): accepted on three verified grounds -- the fixture is FILE-LOCAL (this file's own
+``@pytest.fixture(autouse=True)``, not a shared ``conftest.py`` entry), so it cannot shadow or
+weaken the gate's own dedicated tests in ``test_c6b_policy_and_safety.py``, which construct their
+own bundles directly and never import this file; it is clearly named
+(``all_usable_for_tests_bundle_c.json``, not reusing the real fixture's name); and the gate has
+its own dedicated tests, in a different file, that exercise the REALISTIC (real classification)
+bundle. THE TRADE-OFF, stated honestly rather than left implicit: with this autouse fixture in
+place, none of THIS file's own HTTP-level tests exercise the unapproved-bundle refusal path any
+longer -- that proof now lives exclusively in ``test_c6b_policy_and_safety.py``'s own gate tests,
+not here.
 """
 
 from __future__ import annotations
@@ -16,6 +41,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.application.live_engine_c import c_session_service as c_session_service_module
 from app.application.live_engine_c.bundle_resolution import resolve_selection_config
 from app.core.config import get_settings
 from app.domain.live_engine_c.errors import SelectionConfigurationMissingError
@@ -28,6 +54,15 @@ from app.infrastructure.runtime_bundle_c.loader import CRuntimeBundleLoader
 from app.main import app
 
 SCHEMA_PATH = "provenance/c-runtime-bundle.schema.json"
+ALL_USABLE_BUNDLE_PATH = "tests/fixtures/runtime_bundle_c/all_usable_for_tests_bundle_c.json"
+
+
+@pytest.fixture(autouse=True)
+def _all_usable_bundle_for_http_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """See module docstring's PHASE 6b NOTE. Test-side only -- app/'s own hardcoded
+    ``_BUNDLE_PATH`` is untouched; this patches the imported module attribute for the duration of
+    each test in this file."""
+    monkeypatch.setattr(c_session_service_module, "_BUNDLE_PATH", ALL_USABLE_BUNDLE_PATH)
 BASE_BUNDLE_PATH = "tests/fixtures/runtime_bundle_c/valid_unapproved_bundle_c.json"
 
 
@@ -59,18 +94,24 @@ def provenance(resource_type: str, resource_id: UUID) -> dict[str, object]:
     }
 
 
-def _full_selection_configuration_block(approval_status: str = "CALIBRATION_PENDING") -> dict:
+def _full_selection_configuration_block(field_status: str = "CALIBRATION_PENDING") -> dict:
+    """Phase 6b (X3, BREAKING): per-field {source, status, value}, replacing the 1.1 flat
+    block-level approval_status this helper used to emit. ``field_status`` is applied uniformly
+    to all five fields -- callers needing a MIXED block (some usable, some not) build one
+    directly rather than through this helper."""
+    source = "TEST FIXTURE -- not a real SPEC citation"
     return {
         "version": "c4.0-selection-1.0.0",
         "checksum": {"algorithm": "sha256", "value": "a" * 64},
-        "approval_status": approval_status,
         "config_version": "c4.0-selection-1.0.0",
         "parameter_source_status": "TEST_FIXTURE_ONLY",
-        "familiarization_window_by_grade": {"2": 2, "3": 3},
-        "familiarization_difficulty_level": 1,
-        "fallback_difficulty_level": 1,
-        "familiarization_session_difficulty_cap": 2,
-        "fallback_difficulty_cap": 2,
+        "familiarization_window_by_grade": {
+            "source": source, "status": field_status, "value": {"2": 2, "3": 3},
+        },
+        "familiarization_difficulty_level": {"source": source, "status": field_status, "value": 1},
+        "fallback_difficulty_level": {"source": source, "status": field_status, "value": 1},
+        "familiarization_session_difficulty_cap": {"source": source, "status": field_status, "value": 2},
+        "fallback_difficulty_cap": {"source": source, "status": field_status, "value": 2},
     }
 
 

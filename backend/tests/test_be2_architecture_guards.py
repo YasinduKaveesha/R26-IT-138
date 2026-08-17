@@ -854,16 +854,31 @@ def test_no_app_code_defaults_or_calls_default_generation_config() -> None:
         assert not violations, (path, violations)
 
 
+def test_no_app_code_defaults_or_calls_default_safety_config() -> None:
+    """SIGNAL (Phase 6b, S8-a/X8-a): the same guard, same shape, for SafetyConfig. No threshold
+    value in any source file; default_safety_config() never called from app/. Would FAIL if a
+    future edit added `safety_config: SafetyConfig = default_safety_config()` to any
+    application-layer function, or called `default_safety_config()` anywhere in app/ even without
+    assigning a default."""
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        violations = _config_default_violations(
+            tree, param_name="safety_config", factory_name="default_safety_config"
+        )
+        assert not violations, (path, violations)
+
+
 def test_default_config_guard_mechanism_fires_on_synthetic_violations() -> None:
-    """SIGNAL: proves _config_default_violations actually DETECTS what it claims to, for BOTH
-    guards, against synthetic source -- not merely that it found nothing today. Four cases per
-    param/factory pair: a positional default, a keyword-only default, a bare (unassigned) factory
-    call, and a clean function that uses neither -- the first three must each be caught, the
-    fourth must pass clean. Would FAIL if the detection logic stopped matching a real violation
-    shape, or started flagging the clean case."""
+    """SIGNAL: proves _config_default_violations actually DETECTS what it claims to, for ALL
+    THREE guards, against synthetic source -- not merely that it found nothing today. Four cases
+    per param/factory pair: a positional default, a keyword-only default, a bare (unassigned)
+    factory call, and a clean function that uses neither -- the first three must each be caught,
+    the fourth must pass clean. Would FAIL if the detection logic stopped matching a real
+    violation shape, or started flagging the clean case."""
     for param_name, factory_name in (
         ("selection_config", "default_selection_config"),
         ("generation_config", "default_generation_config"),
+        ("safety_config", "default_safety_config"),
     ):
         positional_default_source = (
             f"def f(a, {param_name}={factory_name}()):\n    pass\n"
@@ -1167,3 +1182,91 @@ def test_evidence_construction_guards_do_not_scan_tests_directory() -> None:
     assert _package_policy_observable_evidence_violations(package_test_side_tree)
     for path in Path("app").rglob("*.py"):
         assert "tests" not in path.parts
+
+
+# =====================================================================================
+# Phase 6b, final step -- X2-1: a NAMED ALLOW-LIST WITH A STALENESS ASSERTION (supervisor ruling,
+# correcting the earlier "only tests/ may pass require_approved=False" wording -- that wording
+# collided with four pre-existing, already-shipped app/ call sites the owner did not have in
+# view). This is NOT an authorization: each entry below is a KNOWN BYPASS of
+# CRuntimeBundleLoader.load_and_validate's own require_approved gate, recorded so it is VISIBLE,
+# never blessed. Two are Component B's own call sites (hint_request.py, opportunity_selection.py)
+# and are OUT OF THIS COMPONENT'S REMIT entirely -- reported to the owner as a finding, not
+# touched by this batch. The other two are Component C's, both Phase 4b/5's own already-disclosed
+# "ENGINEERING-ONLY TEST-provenance DRAFT bridge... not a governed bundle-artifact resolution
+# mechanism" (c_session_service.py's and task_service.py's own module docstrings) -- no other
+# bundle-resolution mechanism exists anywhere in this codebase.
+#
+# WHY THIS DOES NOT REOPEN X2-3: this batch's own per-field usability gate
+# (app.application.live_engine_c.bundle_resolution.assert_family_usable, called from
+# session_lifecycle.py:148-149) fires INDEPENDENTLY of require_approved -- it checks
+# selection_config/safety_config's own per-field statuses, a completely separate mechanism from
+# the bundle-level require_approved flag these four call sites bypass. "Component C's backend
+# cannot create a session in production" (X2-3) holds regardless of these four bypasses, because
+# the per-field gate was never gated by require_approved in the first place.
+# =====================================================================================
+
+
+KNOWN_REQUIRE_APPROVED_FALSE_BYPASSES: frozenset[str] = frozenset(
+    {
+        # Component C, Phase 4b -- ENGINEERING-ONLY TEST-provenance DRAFT bridge (own docstring).
+        "app/application/live_engine_c/c_session_service.py",
+        # Component C, Phase 5 -- same bridge, same reasoning, second call site.
+        "app/application/live_engine_c/task_service.py",
+        # Component B -- OUT OF THIS COMPONENT'S REMIT. Reported, not touched.
+        "app/application/hint_request.py",
+        # Component B -- OUT OF THIS COMPONENT'S REMIT. Reported, not touched.
+        "app/application/opportunity_selection.py",
+    }
+)
+
+
+def _has_require_approved_false(tree: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for kw in node.keywords:
+                if (
+                    kw.arg == "require_approved"
+                    and isinstance(kw.value, ast.Constant)
+                    and kw.value.value is False
+                ):
+                    return True
+    return False
+
+
+def _require_approved_false_call_sites() -> set[str]:
+    found: set[str] = set()
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if _has_require_approved_false(tree):
+            found.add(path.as_posix())
+    return found
+
+
+def test_x2_1_known_require_approved_false_bypasses_are_exactly_these_four() -> None:
+    """SIGNAL: KNOWN_REQUIRE_APPROVED_FALSE_BYPASSES is EXACTLY the set COMPUTED live from a real
+    AST scan of app/ -- never a hand-maintained count trusted on its own (same discipline as
+    AUTHORIZED_C_COLUMN_EXCEPTIONS's own staleness assertion). Would FAIL if a FIFTH call site
+    appeared anywhere under app/ (a new, unenumerated bypass -- "a fifth call site fails the
+    build") or if one of these four were removed/renamed without updating the record."""
+    found = _require_approved_false_call_sites()
+    assert found == KNOWN_REQUIRE_APPROVED_FALSE_BYPASSES, found
+
+    # Staleness half: every enumerated entry must actually exist and actually contain the call --
+    # an allow-list entry for a file that no longer bypasses anything is exactly as misleading as
+    # a missing one.
+    for rel_path in KNOWN_REQUIRE_APPROVED_FALSE_BYPASSES:
+        path = Path(rel_path)
+        assert path.exists(), rel_path
+        assert _has_require_approved_false(ast.parse(path.read_text(encoding="utf-8"))), rel_path
+
+
+def test_require_approved_false_scan_fires_on_synthetic_violation() -> None:
+    """POSITIVE CONTROL: proves _has_require_approved_false actually detects the literal
+    ``require_approved=False`` keyword call, and passes clean on ``require_approved=True`` --
+    "a fifth call site must fail, and a clean control must not.\""""
+    violating_tree = ast.parse("foo(require_approved=False)\n", filename="<synthetic-violation>")
+    assert _has_require_approved_false(violating_tree)
+
+    clean_tree = ast.parse("foo(require_approved=True)\n", filename="<synthetic-clean>")
+    assert not _has_require_approved_false(clean_tree)

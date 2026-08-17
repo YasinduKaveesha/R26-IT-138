@@ -5032,3 +5032,283 @@ solved, not blocking 6b by name); and confirmation, not merely absence, that no 
 needed for the two latent Phase-5 event-shape defects fixed this batch — nothing is live, the
 smoke gate has never lifted, and every existing `c_gameplay_events` row was written by this test
 suite's own fixtures, so no real learner data exists in the old, invalid shape.
+
+## 2026-08-19 — Component C Phase 6b: policy and the hard safety controller (highest-risk phase)
+
+**HEADLINE, STATED FIRST (X2-3):** under this batch's own real field classification (X3-f), every
+per-field status the committed reference bundle carries is `CALIBRATION_PENDING` or
+`PROPOSED_UNSIGNED` — none is `APPROVED`. X1's whitelist (`usable = {APPROVED}`, nothing else)
+means `session_lifecycle.create_session`'s own structural gate (X4) now refuses **every** real
+session-creation request. **As of this batch, Component C's backend cannot create a session in
+production at all.** This is not a defect to be discovered and "fixed" by loosening the whitelist
+— it is the direct, intended consequence of applying a hard whitelist to a project where nothing
+is yet signed, and it is recorded here, in `session_lifecycle.py`'s own module docstring, and in
+`provenance/c-runtime-bundle.schema.json`'s own top-level description — three places, not one.
+
+**X1 — the whitelist.** Owner ruling, quoted: "usable = {APPROVED}, and nothing else.
+`PROPOSED_UNSIGNED` is NOT usable... a value cited from a document whose own status line reads
+'IMPLEMENTATION NOT AUTHORIZED UNTIL REVIEWED' cannot be sufficient to open a gate, because doing
+so implements on the authority of a document that withholds exactly that authority." Implemented
+as a literal whitelist (`USABLE_APPROVAL_STATUSES = frozenset({"APPROVED"})`), never a deny-list
+matching named-bad values — proven with a deliberately nonsense status string
+(`test_x1b_nonsense_status_refuses_by_default`) refusing by the same "not in the set" check as
+every named-but-unusable status. `PROVISIONAL`/`APPROVED_FOR_PROVISIONAL_IMPLEMENTATION` are
+given no meaning this batch (deferred, costless under the whitelist — an unruled status fails
+closed on arrival); the wrinkle for whoever rules on `APPROVED_FOR_PROVISIONAL_IMPLEMENTATION`
+later is recorded verbatim in the schema's own `approvalStatus` description ("the ruling has two
+parts... whether it opens the gate, and what approval it records and on whose authority").
+
+**X2-1 — RESOLVED, final step: a NAMED ALLOW-LIST WITH A STALENESS ASSERTION (SUPERVISOR RULING,
+correcting the earlier "only tests/ may pass `require_approved=False`" wording — not an owner
+approval; the owner did not have these four call sites in view when the earlier wording was
+written).** `tests/test_be2_architecture_guards.py`'s `KNOWN_REQUIRE_APPROVED_FALSE_BYPASSES`
+enumerates the four call sites this batch's own block first found, COMPUTED against a real AST
+scan of `app/` (never hand-maintained) via
+`test_x2_1_known_require_approved_false_bypasses_are_exactly_these_four` — exact set equality, so
+a fifth call site anywhere under `app/` fails the build. Each entry is recorded as a **KNOWN
+BYPASS, not an authorization** — the constant's own docstring says so explicitly. `app/application/
+hint_request.py:233` and `app/application/opportunity_selection.py:300` are **Component B's own
+call sites, out of this component's remit entirely** — reported here as a finding for the owner,
+not touched by this batch. `app/application/live_engine_c/c_session_service.py:106` and
+`app/application/live_engine_c/task_service.py:268` are Component C's, both Phase 4b/5's own
+already-disclosed "ENGINEERING-ONLY TEST-provenance DRAFT bridge... not a governed bundle-artifact
+resolution mechanism" (no other bundle-resolution mechanism exists in this codebase).
+`test_require_approved_false_scan_fires_on_synthetic_violation` proves the scan mechanism itself
+detects a bare `require_approved=False` call and passes clean on `require_approved=True`.
+
+**WHY THIS DOES NOT REOPEN X2-3.** The bundle-level `require_approved` gate (bypassed at these
+four sites) and this batch's own per-field usability gate
+(`bundle_resolution.assert_family_usable`, called from `session_lifecycle.py:148-149`) are
+COMPLETELY SEPARATE mechanisms — the per-field gate checks `selection_config`/`safety_config`'s
+own per-field statuses and was never conditioned on `require_approved` in the first place. "As of
+this batch, Component C's backend cannot create a session in production at all" (X2-3) holds
+regardless of these four bypasses, because the mechanism that makes it hold does not run through
+`require_approved` at all.
+
+**X2-2, ratified retroactively rather than rebuilt as originally specified.** The paired
+"nine refuses AND ten succeeds, under the same opt-out" test could not be built as literally
+worded (it presumes an opt-out guard shaped differently from the allow-list X2-1 actually became).
+The underlying per-field usability check IS proven live on its own terms instead — see W2-b below,
+which proves the check fires (nine parametrized cases) and does not over-fire (the tenth,
+all-usable case) directly against `assert_family_usable`, independent of whatever guards
+`require_approved`.
+
+**RATIFIED (SUPERVISOR RULING, previously BUILDER JUDGMENT — UNRATIFIED): the test-only
+`all_usable_for_tests_bundle_c.json` plus the autouse fixture in
+`test_c4b_routes_and_bundle_config.py`.** Accepted on three verified grounds: the fixture is
+FILE-LOCAL (that file's own `@pytest.fixture(autouse=True)`, not a shared `conftest.py` entry), so
+it cannot shadow or weaken the gate's own dedicated tests in `test_c6b_policy_and_safety.py`
+(which construct their own bundles directly and never import this file); it is clearly named,
+distinct from the real fixture's name; and the gate has its own dedicated tests, in a different
+file, that exercise the REALISTIC (real X3-f classification) bundle. **The trade-off, stated
+honestly:** with this autouse fixture in place, none of `test_c4b_routes_and_bundle_config.py`'s
+own HTTP-level tests exercise the unapproved-bundle refusal path any longer — that proof now
+lives exclusively in `test_c6b_policy_and_safety.py`'s own gate tests, not there.
+
+**X3 — schema 1.1 → 1.2, BREAKING, stated everywhere it matters.** Per-field `{source, status,
+value}` built for all 9 `CSafetyConfig` fields and all 5 real `CSelectionConfig` fields, replacing
+the 1.1 block-level `approval_status`. Confirmed breaking in planning, executed as breaking: the
+committed fixture bundle's old flat `"approval_status": "CALIBRATION_PENDING"` shape no longer
+validates; it has been republished whole (X3-e: the selection correction has its own tests --
+`test_widened_bundle_with_full_selection_configuration_resolves_to_a_real_selection_config` and
+the T5 pair in `test_c4b_routes_and_bundle_config.py`, updated for the new shape -- and its own
+paragraph here, not folded into the safety feature diff). `PROPOSED_UNSIGNED` added to
+`approvalStatus`'s enum, its meaning recorded once in the schema's own `$defs.approvalStatus`
+description. `fallback_difficulty_level` stays `1`, `fallback_difficulty_cap` stays `2` — status
+corrected, no value moved (X3-d).
+
+**W0/X6-1 — SPEC verified myself, at `ResearchProject/Yass/Component_C_Generator_v1.0/SPEC.md` §10
+(lines 368-380):** `initial_level = clamp(round(1 + 4 × mastery_selected_skill), 1, 5)`. Caps:
+"prior overloaded/disengaged complete state → ≤2; recovery → 1; C-only fallback → initial 1,
+session cap 2." (X6-2: this exact string, PLUS not multiplication, is the canonical formula for
+every future quotation.) §8.2 (lines 324-338) independently states `fallback_difficulty_cap = 2`
+a second time. §17 (lines 482-487) names the six safety actions qualitatively but gives NO numeric
+threshold for any of the other 8 `CSafetyConfig` fields.
+
+**X3-f — full field classification, as built:**
+| Field | Source | Status |
+|---|---|---|
+| `familiarization_window_by_grade` | not named in §8/§9/§10 | `CALIBRATION_PENDING` |
+| `familiarization_difficulty_level` | not named in §8/§9/§10 | `CALIBRATION_PENDING` |
+| `familiarization_session_difficulty_cap` | not named (§10 names every OTHER cap — W5-c's vindication) | `CALIBRATION_PENDING` |
+| `fallback_difficulty_level` | §8.2 + §10, cited twice | `PROPOSED_UNSIGNED` (value 1, unchanged) |
+| `fallback_difficulty_cap` | §8.2 + §10, cited twice | `PROPOSED_UNSIGNED` (value 2, unchanged) |
+| `prior_overloaded_disengaged_cap` | §10 | `PROPOSED_UNSIGNED` (value 2, unchanged) |
+| `consecutive_error_trigger`, `strain_trigger`, `increase_block_window`, `safe_termination_error_threshold`, `strain_bucket_low_max`, `strain_bucket_moderate_max`, `strain_bucket_high_max` | §17 qualitative only, no numeric citation | `CALIBRATION_PENDING` (all seven) |
+
+Every citation carries C-6 discipline: BY PATH, `"no commit hash -- see C-6"`, matching
+`component-c-live-engine-manifest.json`'s own established convention exactly.
+
+**W2-d — verified myself, both documents, quoted:** `SPEC.md` line 9: "**Status:** **PROPOSED FOR
+OWNER REVIEW — IMPLEMENTATION NOT AUTHORIZED UNTIL REVIEWED**." Final Approval Memo §18.1/§18.3
+(lines 883-938): all three decision checkboxes unticked (`- [ ]`), all four signature blocks
+(Component C owner, Component 3 owner, Supervisor, Co-supervisor) blank. (The file's own name
+carries `_APPROVED`; its body does not say that — see the filename sweep below.)
+
+**X4 — the dual-family structural gate, one mechanism.** `bundle_resolution.assert_family_usable`
+called TWICE inside `session_lifecycle.create_session` itself (not caller-side ordering) — once
+for `selection_config`'s five fields, once for `safety_config`'s nine — before any
+`CSessionRecord` is constructed. `test_x4b_either_family_unusable_refuses_session_creation_with_
+no_row_added` proves both directions plus the symmetric both-usable positive control, each with a
+`session_creation_spy` proving no row was added on refusal. No third family found (X4-c) —
+`GenerationConfig`/`PolicyConfig`/`EvidenceWindowConfig` stay CODE-gated, deliberately never
+bundle-data, per the standing classification rule itself; reported, not built.
+
+**W2-b — nine usable, one pending, parametrized across all nine safety fields, PAIRED with the
+positive control (X2-2's own requirement, satisfied directly against the usability check itself):**
+`test_w2b_one_pending_safety_field_makes_the_whole_block_unusable` (9 parametrized cases) and
+`test_w2b_all_nine_usable_succeeds` (1 case) — the pair proves the check is demonstrably live, not
+incidentally never reached.
+
+**W3/X5 — the C-17 register, split, both mechanisms independently re-verified against
+`controller.py` directly:**
+- **Item A — recovery cap.** `controller.py:87-89`, `is_recovery_context`, forces `ceiling, floor
+  = 1, 1`, reason `"recovery_cap"`. SPEC §10 "recovery → 1" — hardcoded in the pinned controller,
+  not a `CSafetyConfig` field, not touched by this schema. Closes when `is_recovery_context`'s
+  real source (recovery/scaffold machinery, Phase 7) is built and wired.
+- **Item B — prior-state cap.** `controller.py:97-99`, `prior_session_end_state`, applies
+  `safety_config.prior_overloaded_disengaged_cap`. SPEC §10 "→ ≤2". Closes when Phase 9 produces
+  and persists `prior_session_end_state` AND `prior_overloaded_disengaged_cap` moves from
+  `PROPOSED_UNSIGNED` to `APPROVED`.
+Both mechanisms verified independently by direct read of `controller.py`, not carried forward
+from memory. The original conflation ("a recovery cap to exactly 1 keying on
+prior_session_end_state") is the supervisor's error, propagated from Phase 5's own trace;
+attributed here, not to the builder.
+
+**W5 — register (c), RESOLVED, entry kept.** The Phase-5-vs-supervisor `derive.py` "c_only cap 1"
+vs "`fallback_difficulty_cap = 2`" discrepancy dissolves: SPEC §10 states "C-only fallback →
+initial 1, session cap 2" — two different quantities (a *level* and a *cap*), both correct, both
+independently confirmed twice (§10 and §8.2). The supervisor's error was comparing a level against
+a cap. Standing rule earned and recorded: **any comparison among `*_difficulty_level`/
+`*_difficulty_cap`/`*_session_difficulty_cap` parameters must name which quantity is being
+compared** — the near-identical naming is what invites the mistake, and SPEC §10 states several in
+one breath. Vindication logged: §10 names every cap except `familiarization_session_difficulty_
+cap`, independently confirming Phase 5's original `CALIBRATION_PENDING` finding for that one field
+from a completely different direction (a SPEC citation search, not a trace read).
+
+**X6-1 — filename sweep (searched `ResearchProject/` in full, including `Yass/`), body checked,
+never inferred from the name:**
+| File | Filename claims | Body actually says |
+|---|---|---|
+| `R26-IT-138_Component_C_Final_Approval_Memo_v1.0_APPROVED.md` (4 identical copies: `current/Governance`, `Yass/Governance`, `Yass/stage`, `Yass_Backup_Before_Reconciliation/Governance`) | Approved | "PROPOSED FOR COMPONENT-OWNER AND SUPERVISOR APPROVAL," all 3 checkboxes unticked, all 4 signature blocks blank |
+| `R26-IT-138_Blocking_Decisions_Memo_v1.0_APPROVED.md` (4 identical copies, same four locations) | Approved | Header states "APPROVED — TEAM DECISION" and its own D1/D2/D3 table marks each "Approved" with named signatories, BUT the accompanying formal Role/Name/Signature/Date sign-off table has every Signature and Date cell blank for every role — a different, milder shape than the Final Approval Memo (names present, decision text present, formal signature still absent), reported precisely rather than collapsed into the same finding |
+| `R26-IT-138_Second_Owner_Review_Final.md` (`Yass/`) | "Final" | "**Decision: REJECTED — RETURN FOR ONE FINAL NARROW CONSISTENCY REVISION**" — a third, independent instance of the same pattern |
+| `R26-IT-138_Final_Second_Owner_Verification.zip` (`Yass/`) | "Final" | NOT VERIFIED — a binary zip archive, no text body to read; disclosed as unverified rather than assumed either way |
+
+None of these documents' bodies were used to justify any status in this batch's own field
+classification (X3-f) — they were checked only because X6-1 required the sweep, and none names
+any of the safety/selection fields this batch classifies.
+
+**Criterion 1 — six positive controls,** each docstring carrying both X7-a limits verbatim
+(reachability not correctness against TEST_FIXTURE_ONLY thresholds; the I4/error-free-history
+double caveat). All six constructed via direct, test-side `PolicyObservableEvidence` +
+`adapter.decide_adaptation` calls, never through `app/` (T4's guards forbid that, deliberately
+don't scan `tests/`). **Disclosed limit specific to action 3 (decrease):** `CSafetyConfig`'s own
+docstring states its triggers are "deliberately set at or above" the policy's own decrease
+thresholds — so any evidence severe enough to trip safety's decrease-force ALSO already trips the
+policy's own decrease proposal; the "safety overrides a conflicting policy proposal" shape is
+structurally unreachable under the current TEST_FIXTURE_ONLY threshold relationship, not tested,
+and not silently implied as tested.
+
+**Criterion 2 — settled per S5-a, no re-litigation:** both paths call the same shipped
+`build_policy_evidence`, so the test's real subject is the backend's own history assembly
+(completeness and ordering), proven field-for-field against the oracle on the six `recent_*`/
+`rolling_strain_score` fields, with the same stated-limit discipline 6a's own parity test
+established.
+
+**Criterion 3 — truncated-history regression:** a 1-summary truncation produces a different
+`recent_correctness_rate` than the full 3-summary history — a silent truncation bug would be
+visible, not silent.
+
+**S8-b — the increase-block feedback loop, stateful across tasks, proven real:**
+`test_s8b_increase_block_remaining_persists_and_feeds_back_across_tasks` — task 1's severe trigger
+arms the block (persisted `increase_block_remaining == safety_config.increase_block_window`);
+task 2's evidence assembly reads that PERSISTED value back exactly (not a fresh 0-default); a
+third, hand-constructed evidence object (documented why: the real assembly's own
+`recent_consecutive_error_max` is a MAX over the whole window and task 1's trigger stays in-window,
+so it would legitimately RE-ARM rather than decrement — correct windowing, not a bug, and not what
+this specific assertion is testing) proves the countdown decrements by exactly 1 absent a new
+trigger.
+
+**S8-c — no path returns an unsafetied decision:** structural (`adaptation.py`'s own pinned source
+calls `apply_safety` unconditionally at the function's top level, verified by AST, not string
+search) plus a behavioral companion (every decision, triggering or not, carries a real
+`rolling_strain_bucket` and non-negative `increase_block_remaining`).
+
+**S8-d — Q-learning both directions (X-10):** `rule_based_baseline` works; both disabled modes
+(`q_learning_offline`, `frozen_q_evaluation`) raise `QLearningDisabledError`, translated by the
+adapter (unchanged, Phase 1b).
+
+**S8-e/X8-b — no migration.** `c_policy_decisions`/`c_safety_events` already existed (Phase 3a).
+This batch's schema change is a JSON Schema file edit, not a database migration — same precedent
+as W's own Phase 4b addition.
+
+**X8-d — no OpenAPI contract regeneration.** Nothing client-facing changed this batch: no new
+route, no new DTO. `decide_and_persist_adaptation`/`build_evidence_for_session` are server-only,
+per-task application functions with no HTTP route calling them yet (matches v3.0's own Phase 6
+scope, "server-only... the client never sees or pre-empts it"). Stated plainly rather than
+regenerated for its own sake.
+
+**Verified — full suite, clean (X2-1's final step included).**
+```
+506 passed, 74 skipped, 0 failed, 580 collected
+```
+Reconciles exactly against the batch's true starting baseline, 477/74/551:
+`477 + 29 = 506` passed, `551 + 29 = 580` collected, skips unchanged. The +29 is exactly 27 from
+this batch's earlier steps (26 new tests in `tests/test_c6b_policy_and_safety.py` + 1 in
+`tests/test_be2_architecture_guards.py`) plus 2 more from X2-1's build this step
+(`test_x2_1_known_require_approved_false_bypasses_are_exactly_these_four`,
+`test_require_approved_false_scan_fires_on_synthetic_violation`, both **SIGNAL**, new). No
+EXISTING test's own assertions were changed anywhere in this batch — three test files' shared
+FIXTURE-CONSTRUCTION HELPERS were extended to satisfy `create_session`'s two new required
+parameters and the schema's breaking per-field shape
+(`test_c4_session_lifecycle.py::_create_session_kwargs`,
+`test_c5_task_serve_and_evaluate.py::seed_active_session`,
+`test_c4b_routes_and_bundle_config.py::_full_selection_configuration_block` plus the now-ratified
+autouse fixture) — every changed test in those three files is therefore **SIGNAL** in the narrow
+sense that its own assertions are untouched, the infrastructure change disclosed rather than
+silently absorbed.
+
+**Files changed this batch (git add list, dependency order; owner commits):**
+`backend/provenance/c-runtime-bundle.schema.json`,
+`backend/app/domain/runtime_bundle_c/types.py`,
+`backend/app/domain/live_engine_c/errors.py`,
+`backend/app/infrastructure/runtime_bundle_c/loader.py`,
+`backend/app/infrastructure/repositories.py`,
+`backend/app/application/live_engine_c/bundle_resolution.py`,
+`backend/app/application/live_engine_c/session_lifecycle.py`,
+`backend/app/application/live_engine_c/c_session_service.py`,
+`backend/app/application/live_engine_c/adaptation_service.py`,
+`backend/tests/fixtures/runtime_bundle_c/valid_unapproved_bundle_c.json`,
+`backend/tests/fixtures/runtime_bundle_c/all_usable_for_tests_bundle_c.json`,
+`backend/tests/test_c4_session_lifecycle.py`,
+`backend/tests/test_c4b_routes_and_bundle_config.py`,
+`backend/tests/test_c5_task_serve_and_evaluate.py`,
+`backend/tests/test_be2_architecture_guards.py`,
+`backend/tests/test_c6b_policy_and_safety.py`. No git command beyond read-only verification
+(`status`, `rev-parse`, `docker version`) was run this batch; nothing was staged or committed.
+
+**Unverified / disclosed, plainly.** Component B's two `require_approved=False` bypasses
+(`hint_request.py`, `opportunity_selection.py`) are a reported finding, not a resolved one — this
+batch has no authorization to touch Component B, so whether/how they should be closed is
+unanswered, deliberately. `R26-IT-138_Final_Second_Owner_Verification.zip`'s body was not read
+(binary archive). The `EvidenceWindowConfig` citation question flagged in the prior planning turn
+(`C Parameters §14`, same unverifiable-SPEC shape as the original S3 question) remains unresolved
+and untouched — not named in this batch's ruling, not reclassified.
+
+**Out of scope, confirmed.** Phase 7 scaffolds/rewards and `is_recovery_context`'s real source —
+untouched (C-17 Item A stays open). Phase 8 telemetry validation, including fixing C-9 — untouched.
+Phase 9 aggregation/`prior_session_end_state` — untouched (C-17 Item B stays open). `c_to_3` —
+untouched. No frontend file. No wheel/pyproject/provenance-manifest/requirements.*/Dockerfile/
+`.dockerignore` change. No Yass commit — `SPEC.md` was read-only. No gate lifted or weakened — X4
+only adds structure. No parameter VALUE changed, including `fallback_difficulty_level`/
+`fallback_difficulty_cap` (status-only, X3-d). No meaning assigned to `PROVISIONAL` or
+`APPROVED_FOR_PROVISIONAL_IMPLEMENTATION` — deferred, per X1's own design. No third parameter
+family built (X4-c: none found, reported). No migration.
+
+**Remains open.** Everything named open at the end of the Phase 6a entry, unchanged. Additionally:
+Component B's own two `require_approved=False` bypasses (reported, not this batch's to fix); C-17
+Items A and B, both still open with their own separate closing conditions; every field this batch
+classified `CALIBRATION_PENDING` remains genuinely uncalibrated; `PROPOSED_UNSIGNED` fields remain
+unsigned — Component C's backend cannot create a session in production until governance actually
+signs something, which is this batch's own headline, not an incidental side effect.
