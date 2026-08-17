@@ -113,6 +113,7 @@ from app.application.live_engine_c.mastery_fixture import (
     fixture_b_mastery_payload_for_phase_4,
     fixture_b_provenance_for_phase_4,
 )
+from app.application.live_engine_c.scaffold_service import decide_and_persist_scaffold_level
 from app.application.live_engine_c.session_lifecycle import _learner_session_state, _provenance
 from app.application.live_engine_c.summary_service import derive_and_persist_summary
 from app.application.live_engine_c.terminal_event import write_completed_correct_terminal_event
@@ -127,7 +128,7 @@ from app.domain.live_engine_c.generation_mode_guard import (
     GenerationConfigNotPermittedError,
     assert_generation_config_permitted,
 )
-from app.domain.live_engine_c.types import GenerationConfig, SeedLineage, TaskInstance
+from app.domain.live_engine_c.types import GenerationConfig, ScaffoldConfig, ScaffoldLevel, SeedLineage, TaskInstance
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import CGameplayEventRecord, CTaskInstanceRecord, CTaskOpportunityRecord
 from app.infrastructure.repositories import (
@@ -149,6 +150,25 @@ PRODUCTION_GENERATION_CONFIG_PROBE = GenerationConfig(
     config_version="phase5-not-live-probe",
     parameter_source_status="TEST_FIXTURE_ONLY",
     per_template={},
+)
+
+# Phase 7, Z1/Z5: Scaffold is injection-only (zero SPEC-stated fields, same classification as
+# Generation) but, unlike GenerationConfig, is NOT smoke-gated per task-call -- Z1's own
+# inversion reasoning: gating a protective mechanism per-call would mean "refuse to emit a
+# scaffold," which fails OPEN, not closed. Its usability is checked once, at SESSION START
+# (session_lifecycle.create_session's own five-family gate); by the time submit_action runs, a
+# session already exists, meaning that gate already passed. This probe carries the SAME literal
+# numbers component_c_generator.scaffolds.config.default_scaffold_config() would produce
+# (hardcoded here, never calling that factory -- S8-a's guard) -- unreachable in production
+# regardless, since no session can ever exist there (X2-3): submit_action's own route can never
+# be reached by a real request, the same shape as next_task's own probe.
+PRODUCTION_SCAFFOLD_CONFIG_PROBE = ScaffoldConfig(
+    config_version="c4.2-scaffold-1.0.0",
+    parameter_source_status="TEST_FIXTURE_ONLY",
+    level_c1_min_consecutive_incorrect=1,
+    level_c2_min_consecutive_incorrect=2,
+    level_c3_min_consecutive_incorrect=3,
+    level_c4_min_consecutive_incorrect=4,
 )
 
 
@@ -409,6 +429,7 @@ class TaskService:
         c_task_instance_id: UUID,
         action_payload: Mapping[str, Any],
         generation_config: GenerationConfig,
+        scaffold_config: ScaffoldConfig,
         submission_spy: Optional[list] = None,
     ) -> CSubmitActionResult:
         student_id = await _require_learner_id(session, principal_user_id)
@@ -552,6 +573,7 @@ class TaskService:
         # T1 (owner ruling): completed_correct is the ONLY terminal reason built this batch. See
         # terminal_event.py's module docstring for the full nine-reason mapping and T1-5's
         # statement of what remains unclosed.
+        scaffold_level: ScaffoldLevel = "C0"
         if evaluation.is_correct:
             await write_completed_correct_terminal_event(
                 session,
@@ -575,9 +597,39 @@ class TaskService:
                 game_task_instance_id=domain_instance.game_task_instance_id,
                 request_id=request_id,
             )
+        else:
+            # Phase 7, Z5: the ORDINARY escalation path -- decided from the real, just-persisted
+            # event stream (never a caller-asserted count).
+            #
+            # F-1 (Phase 7 final step, sharpened per the owner's own correction): the LITERAL
+            # `False` below means the safety-forced C4 branch is STRUCTURALLY UNREACHABLE in this
+            # application, not merely untested. No caller of decide_and_persist_scaffold_level
+            # anywhere under app/ ever passes a value other than this hardcoded constant, so
+            # safety.controller.SafetyDecision.activate_recovery_flag -- even if it were True on a
+            # real decision -- has no path from that decision into this parameter. This is the
+            # C-4 shape: a real branch, provably reachable at the unit level (Z5-d's own direct
+            # test against decide_scaffold_level), that the application itself can never trigger,
+            # because nothing wires a real value into the one parameter that would let it. Proven
+            # reachable in isolation is not the same claim as wired for real, and this comment
+            # exists so the gap is named at the exact line that creates it, not only in the build
+            # log. See the F-2 register entry (buildLog1.md) for the closing condition and why
+            # reconstructing the flag from safety_reason's own text was rejected, not merely
+            # deferred. v3.0's own Phase 7 hard constraint states "Safety may force C4" -- this is
+            # a PHASE CONSTRAINT NOT MET, not a deferred nicety (F-3).
+            scaffold_level = await decide_and_persist_scaffold_level(
+                session,
+                adapter=adapter,
+                c_session_id=c_session_id,
+                c_task_opportunity_id=instance_record.c_task_opportunity_id,
+                c_task_instance_id=c_task_instance_id,
+                scaffold_config=scaffold_config,
+                safety_forces_recovery=False,  # STRUCTURALLY UNREACHABLE -- see comment above.
+                request_id=request_id,
+            )
 
         return CSubmitActionResult(
             c_task_instance_id=c_task_instance_id,
             response_matched=evaluation.is_correct,
+            scaffold_level=scaffold_level,
             request_id=request_id,
         )

@@ -73,4 +73,5 @@ class CNextTaskResponse(CTaskFields):
 class CSubmitActionResult(StrictModel):
     c_task_instance_id: UUID
     response_matched: bool
+    scaffold_level: str
     request_id: str

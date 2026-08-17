@@ -144,12 +144,43 @@ def test_x1_every_named_status_except_approved_is_unusable() -> None:
 
 
 # =====================================================================================
-# X4 -- the dual-family structural gate, spy-proven, both families, both directions.
+# X4/Z2 -- the FIVE-family structural gate (Phase 7 extends X4's two-family gate to all five:
+# Selection, Safety, Generation, Policy, Scaffold -- one mechanism, two entry points, one error
+# type). Z2-d-5, the principle this whole section exists to prove, owner's words: "'no failure'
+# is not evidence a mechanism works, and 'refused' is not evidence a particular gate fired."
+# Parametrizing over five families with the gate always refusing for whatever reason would give
+# five green tests attributable to nothing -- Case 0 (below) proves the gate CAN pass at all;
+# Cases 1-5 each independently isolate exactly one family and assert the refusal's own structured
+# identity, never merely "it raised."
 # =====================================================================================
 
 
+# Phase 7, Z2-d-2a: USABILITY SEMANTICS for the three code-gated families, stated and justified
+# BEFORE Case 0 was attempted (recorded here, not discovered by tuning): a code-gated family's
+# config is usable iff smoke_mode=True, OR its parameter_source_status is outside
+# {"TEST_FIXTURE_ONLY", "SMOKE_ONLY"} -- component_c_generator.generation_mode_guard's own
+# DISALLOWED_OUTSIDE_SMOKE_MODE set, unchanged, generalized to Policy and Scaffold by direct
+# analogy (Z1: identical classification, identical field shape). Every REAL config anywhere in
+# this codebase carries "TEST_FIXTURE_ONLY" -- no other value has ever been constructed -- so in
+# practice smoke_mode is the only lever. To isolate ONE of the three code-gated families as the
+# SOLE unusable one (Cases 3/4/5 need this independently of Generation, Policy, and Scaffold
+# sharing no other coupling), the other two need a status OUTSIDE the disallowed set while
+# smoke_mode stays False -- this constant supplies exactly that, a TEST-ONLY marker, never a real
+# governance value, exercising the semantic's own "status outside the disallowed set" branch
+# rather than loosening it.
+_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET = "TEST_ISOLATION_MARKER_NEVER_A_REAL_STATUS"
+
+
 async def _create_bundle_and_session(
-    session, *, selection_statuses: dict, safety_statuses: dict, session_creation_spy: list | None,
+    session,
+    *,
+    selection_statuses: dict,
+    safety_statuses: dict,
+    generation_status: str = "TEST_FIXTURE_ONLY",
+    policy_status: str = "TEST_FIXTURE_ONLY",
+    scaffold_status: str = "TEST_FIXTURE_ONLY",
+    smoke_mode: bool = True,
+    session_creation_spy: list | None,
 ):
     student_id = await seed_learner(session)
     bundle_id = await seed_runtime_bundle(session)
@@ -161,58 +192,196 @@ async def _create_bundle_and_session(
         selection_config=selection_config_fixture_for_tests(),
         selection_config_field_statuses=selection_statuses,
         safety_config_field_statuses=safety_statuses,
+        generation_parameter_source_status=generation_status,
+        policy_parameter_source_status=policy_status,
+        scaffold_parameter_source_status=scaffold_status,
+        smoke_mode=smoke_mode,
         request_id=f"req-{uuid4()}",
         session_creation_spy=session_creation_spy,
     )
 
 
-def test_x4b_either_family_unusable_refuses_session_creation_with_no_row_added() -> None:
-    """X4-b, parametrized inline over both directions plus the symmetric positive control --
-    proving the ONE shared gate mechanism checks BOTH families, not just one."""
+def test_case0_all_five_families_usable_session_creation_succeeds() -> None:
+    """CASE 0 (Z2-d-1, built and demonstrated FIRST, before any refusal case): all five families
+    usable -> session creation SUCCEEDS, spy shows exactly one created row. THIS IS THE
+    LOAD-BEARING CASE -- without it, no refusal case below is attributable to anything, because
+    there would be no proof the gate can ever pass at all.
+
+    WHAT THIS TEST ACTUALLY PROVES, AND WHAT IT DOES NOT (Z2-d-6, stated in this test's own
+    words, not left implicit): this test runs with the bundle approval opt-out ON
+    (require_approved=False, via the fixture bundle's own resolution path), smoke_mode=True, and
+    Policy/Scaffold's parameter_source_status left at their only real value
+    ("TEST_FIXTURE_ONLY") -- usable here only because smoke_mode is on. So this test demonstrates
+    that the FIVE GATES COMPOSE CORRECTLY under those levers: five independent usability checks,
+    called in sequence, all passing, one session row written. It does NOT demonstrate that
+    PRODUCTION session creation works -- in this codebase, production session creation
+    (CSessionService.create) hardcodes smoke_mode=False and resolves a bundle whose real,
+    committed per-field statuses are never APPROVED (X2-3), so it refuses unconditionally,
+    permanently, by design. A reader who sees this test green and concludes "the gate is not
+    blocking anything" has misread it -- the gate is blocking everything in production; this test
+    only proves the gate itself is a real, passable mechanism when every lever it checks is
+    deliberately set to its usable value, which production never does."""
     alembic("upgrade", "head")
 
     async def exercise() -> None:
         database_engine, factory = isolated_database()
-
-        # Direction 1: selection unusable, safety usable -> refuses, spy empty.
         async with factory() as session:
             spy: list = []
-            with pytest.raises(ConfigurationFamilyNotUsableError):
+            record = await _create_bundle_and_session(
+                session,
+                selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
+                safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                generation_status="TEST_FIXTURE_ONLY",
+                policy_status="TEST_FIXTURE_ONLY",
+                scaffold_status="TEST_FIXTURE_ONLY",
+                smoke_mode=True,
+                session_creation_spy=spy,
+            )
+            assert spy == [record.c_session_id]
+            await session.commit()
+        await database_engine.dispose()
+
+    asyncio.run(exercise())
+
+
+# =====================================================================================
+# CASES 1-5 (Z2-d): four usable, family F unusable -> session creation REFUSES, spy empty, AND
+# the raised error's own structured content names family F -- "the state construction makes the
+# refusal real, the structured identity makes it attributable. Neither alone is sufficient"
+# (Z2-d-4). Each case is independently constructed -- never a parametrization that would make all
+# five pass for the same reason (Z2-d's own rejected shape).
+# =====================================================================================
+
+
+def test_case1_selection_unusable_refuses_and_names_selection_config() -> None:
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
+        async with factory() as session:
+            spy: list = []
+            with pytest.raises(ConfigurationFamilyNotUsableError) as excinfo:
                 await _create_bundle_and_session(
                     session,
                     selection_statuses=all_calibration_pending_field_statuses(
                         SelectionConfigurationArtifact.FIELD_NAMES
                     ),
                     safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    smoke_mode=True,
                     session_creation_spy=spy,
                 )
             assert spy == []
+            assert excinfo.value.family_name == "selection_config"
+        await database_engine.dispose()
 
-        # Direction 2: safety unusable, selection usable -> refuses, spy empty.
+    asyncio.run(exercise())
+
+
+def test_case2_safety_unusable_refuses_and_names_safety_config() -> None:
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
         async with factory() as session:
-            spy2: list = []
-            with pytest.raises(ConfigurationFamilyNotUsableError):
+            spy: list = []
+            with pytest.raises(ConfigurationFamilyNotUsableError) as excinfo:
                 await _create_bundle_and_session(
                     session,
                     selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
                     safety_statuses=all_calibration_pending_field_statuses(
                         SafetyConfigurationArtifact.FIELD_NAMES
                     ),
-                    session_creation_spy=spy2,
+                    smoke_mode=True,
+                    session_creation_spy=spy,
                 )
-            assert spy2 == []
+            assert spy == []
+            assert excinfo.value.family_name == "safety_config"
+        await database_engine.dispose()
 
-        # Symmetric positive control: both usable -> session created, spy has one entry.
+    asyncio.run(exercise())
+
+
+def test_case3_generation_unusable_refuses_and_names_generation_config() -> None:
+    """Isolates Generation as the SOLE unusable code-gated family: smoke_mode=False (so Generation's
+    own TEST_FIXTURE_ONLY status is disallowed) while Policy and Scaffold are independently made
+    usable via the test-only marker status (see its own module-level docstring for why this is
+    exercising the semantic, not loosening it)."""
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
         async with factory() as session:
-            spy3: list = []
-            record = await _create_bundle_and_session(
-                session,
-                selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
-                safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
-                session_creation_spy=spy3,
-            )
-            assert spy3 == [record.c_session_id]
-            await session.commit()
+            spy: list = []
+            with pytest.raises(ConfigurationFamilyNotUsableError) as excinfo:
+                await _create_bundle_and_session(
+                    session,
+                    selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
+                    safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    generation_status="TEST_FIXTURE_ONLY",
+                    policy_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    scaffold_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    smoke_mode=False,
+                    session_creation_spy=spy,
+                )
+            assert spy == []
+            assert excinfo.value.family_name == "generation_config"
+        await database_engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_case4_policy_unusable_refuses_and_names_policy_config() -> None:
+    """Isolates Policy: smoke_mode=False, Generation and Scaffold independently made usable via
+    the test-only marker status, only Policy left at TEST_FIXTURE_ONLY. Z2-c's own coupling
+    (apply_safety is called INSIDE decide_adaptation, adaptation.py:46) is why this family's gate
+    matters at all -- this test proves the GATE fires for Policy specifically, not that the
+    downstream coupling is exercised (that is Criterion 1's job, unchanged)."""
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
+        async with factory() as session:
+            spy: list = []
+            with pytest.raises(ConfigurationFamilyNotUsableError) as excinfo:
+                await _create_bundle_and_session(
+                    session,
+                    selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
+                    safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    generation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    policy_status="TEST_FIXTURE_ONLY",
+                    scaffold_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    smoke_mode=False,
+                    session_creation_spy=spy,
+                )
+            assert spy == []
+            assert excinfo.value.family_name == "policy_config"
+        await database_engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_case5_scaffold_unusable_refuses_and_names_scaffold_config() -> None:
+    """Isolates Scaffold: smoke_mode=False, Generation and Policy independently made usable via
+    the test-only marker status, only Scaffold left at TEST_FIXTURE_ONLY."""
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
+        async with factory() as session:
+            spy: list = []
+            with pytest.raises(ConfigurationFamilyNotUsableError) as excinfo:
+                await _create_bundle_and_session(
+                    session,
+                    selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
+                    safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    generation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    policy_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    scaffold_status="TEST_FIXTURE_ONLY",
+                    smoke_mode=False,
+                    session_creation_spy=spy,
+                )
+            assert spy == []
+            assert excinfo.value.family_name == "scaffold_config"
         await database_engine.dispose()
 
     asyncio.run(exercise())
@@ -442,12 +611,16 @@ def test_s8d_rule_based_baseline_works() -> None:
     assert decision.policy_mode == "rule_based_baseline"
 
 
-async def _seed_session_with_summaries(session, *, summary_overrides: list[dict]) -> UUID:
+async def _seed_session_with_summaries(session, *, summary_overrides: list[dict]) -> tuple[UUID, UUID]:
     """Shared setup for criterion 2/3/S8-b: a real CSessionRecord (via create_session, all-usable
     statuses -- these tests are about evidence assembly, not the gate) plus one
     CTaskOpportunityRecord/CTaskInstanceRecord/CTaskOpportunitySummaryRecord chain per entry in
     ``summary_overrides`` (each a dict of CTaskOpportunitySummaryRecord field overrides layered
-    on a minimal valid default)."""
+    on a minimal valid default). Returns ``(c_session_id, last_instance_id)`` -- the last created
+    instance id, for callers exercising ``build_evidence_for_session``'s own Z6-a
+    ``recovery_parent_instance_id`` derivation (every instance here has it set to ``None``, so
+    ``is_recovery_context`` derives to ``False``, matching every prior call site's own literal
+    ``False``)."""
     from datetime import UTC, datetime as dt
 
     from app.infrastructure.persistence_models import CTaskInstanceRecord
@@ -508,7 +681,7 @@ async def _seed_session_with_summaries(session, *, summary_overrides: list[dict]
             )
         )
     await session.flush()
-    return c_session_id
+    return c_session_id, instance_id
 
 
 # =====================================================================================
@@ -529,7 +702,7 @@ def test_criterion2_backend_history_assembly_matches_the_oracle_field_for_field(
     async def exercise() -> None:
         database_engine, factory = isolated_database()
         async with factory() as session:
-            c_session_id = await _seed_session_with_summaries(
+            c_session_id, current_instance_id = await _seed_session_with_summaries(
                 session,
                 summary_overrides=[
                     {"correct_task": True, "total_attempts": 1},
@@ -544,7 +717,7 @@ def test_criterion2_backend_history_assembly_matches_the_oracle_field_for_field(
                 intervention_session_id=FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID,
                 stu_session_id=f"{FIXTURE_MASTERY_SOURCE_STUDENT_ID}-C-001",
                 session_mode="c_only", session_phase="c_only", current_difficulty_level=1,
-                is_recovery_context=False, prior_session_end_state=None,
+                c_task_instance_id=current_instance_id, prior_session_end_state=None,
                 evidence_window_config=evidence_window_config_fixture_for_tests(),
             )
 
@@ -603,7 +776,7 @@ def test_criterion3_truncated_history_produces_different_evidence_than_full_hist
     async def exercise() -> None:
         database_engine, factory = isolated_database()
         async with factory() as session:
-            c_session_id = await _seed_session_with_summaries(
+            c_session_id, current_instance_id = await _seed_session_with_summaries(
                 session,
                 summary_overrides=[
                     {"correct_task": False, "total_attempts": 3, "consecutive_error_max_within_task": 2},
@@ -618,7 +791,7 @@ def test_criterion3_truncated_history_produces_different_evidence_than_full_hist
                 intervention_session_id=FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID,
                 stu_session_id=f"{FIXTURE_MASTERY_SOURCE_STUDENT_ID}-C-001",
                 session_mode="c_only", session_phase="c_only", current_difficulty_level=1,
-                is_recovery_context=False, prior_session_end_state=None,
+                c_task_instance_id=current_instance_id, prior_session_end_state=None,
                 evidence_window_config=evidence_window_config_fixture_for_tests(),
             )
 
@@ -662,7 +835,7 @@ def test_s8b_increase_block_remaining_persists_and_feeds_back_across_tasks() -> 
     async def exercise() -> None:
         database_engine, factory = isolated_database()
         async with factory() as session:
-            c_session_id = await _seed_session_with_summaries(
+            c_session_id, current_instance_id = await _seed_session_with_summaries(
                 session, summary_overrides=[{"consecutive_error_max_within_task": 5}],
             )
             opportunities = (await session.execute(
@@ -685,7 +858,7 @@ def test_s8b_increase_block_remaining_persists_and_feeds_back_across_tasks() -> 
                 intervention_session_id=FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID,
                 stu_session_id=f"{FIXTURE_MASTERY_SOURCE_STUDENT_ID}-C-001",
                 session_mode="c_only", session_phase="c_only", current_difficulty_level=1,
-                is_recovery_context=False, prior_session_end_state=None,
+                c_task_instance_id=current_instance_id, prior_session_end_state=None,
                 evidence_window_config=evidence_window_config_fixture_for_tests(),
             )
             assert evidence_1.safety_increase_block_remaining == 0  # nothing persisted yet
@@ -705,7 +878,7 @@ def test_s8b_increase_block_remaining_persists_and_feeds_back_across_tasks() -> 
                 intervention_session_id=FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID,
                 stu_session_id=f"{FIXTURE_MASTERY_SOURCE_STUDENT_ID}-C-001",
                 session_mode="c_only", session_phase="c_only", current_difficulty_level=1,
-                is_recovery_context=False, prior_session_end_state=None,
+                c_task_instance_id=current_instance_id, prior_session_end_state=None,
                 evidence_window_config=evidence_window_config_fixture_for_tests(),
             )
             assert evidence_2.safety_increase_block_remaining == decision_1.increase_block_remaining

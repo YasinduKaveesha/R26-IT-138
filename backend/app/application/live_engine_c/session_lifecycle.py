@@ -28,7 +28,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.live_engine_c.bundle_resolution import assert_family_usable
+from app.application.live_engine_c.bundle_resolution import assert_code_gated_family_usable, assert_family_usable
 from app.core.errors import ConflictError, ResourceNotFoundError
 from app.domain.live_engine_c.errors import SF043OrderingError
 from app.domain.live_engine_c.types import AttendanceStatus, Grade, LearnerSessionState, SelectionConfig, SessionMode
@@ -92,6 +92,10 @@ async def create_session(
     selection_config: SelectionConfig,
     selection_config_field_statuses: Mapping[str, str],
     safety_config_field_statuses: Mapping[str, str],
+    generation_parameter_source_status: str,
+    policy_parameter_source_status: str,
+    scaffold_parameter_source_status: str,
+    smoke_mode: bool,
     request_id: str,
     mastery_by_skill: Optional[Mapping[str, float]] = None,
     mastery_source_student_id: Optional[str] = None,
@@ -134,7 +138,32 @@ async def create_session(
     production at all -- not a bug, the direct, intended consequence of X1's whitelist applied to
     a project where nothing is yet signed. This is stated here, in the schema's own description,
     and in the batch's build-log headline -- not left for someone to discover as a defect and
-    "fix" by loosening the whitelist."""
+    "fix" by loosening the whitelist.
+
+    PHASE 7, Z1/Z2 -- CLASSIFICATION AND GATING ARE SEPARATE AXES. Owner ruling, quoted: "A
+    parameter family containing at least one field a governing document specifies belongs in the
+    bundle under per-field source/status. A family with no specified fields stays injection-only
+    and smoke-gated... CLASSIFICATION decides where values LIVE... GATING is uniform and
+    independent: EVERY parameter family gates SESSION START. One check at session creation, each
+    family feeding it by its own mechanism -- bundle approval status, or the code gate." Z1's own
+    verification found ZERO SPEC-stated fields for Generation, Policy, and Scaffold (§15 gives no
+    numeric threshold for any of Scaffold's four fields, matching the same absence already found
+    for Generation and Policy) -- all three stay injection-only, no bundle block, no schema
+    widening. But all FIVE families gate HERE, at session start, now: two via
+    ``assert_family_usable`` (bundle per-field status), three via
+    ``assert_code_gated_family_usable`` (code gate, ``smoke_mode`` against
+    ``parameter_source_status`` -- the exact mechanism ``generation_mode_guard.
+    assert_generation_config_permitted`` already used for Generation alone, generalized). WHY
+    Policy needs this and it is not obvious without tracing: "apply_safety is called INSIDE
+    decide_adaptation at adaptation.py:46. If Policy's config is unusable and the policy path
+    refuses, safety never runs at all -- even with safety config perfectly usable. Policy's gate
+    is load-bearing for safety whether or not anyone intended that." Verified directly:
+    ``component_c_generator/adaptation.py:46`` reads
+    ``safety_decision = apply_safety(selected_action=selected_action, evidence=evidence, ...)``,
+    called unconditionally, immediately after ``propose_action`` -- Policy failing before that
+    line means Safety's own call is never reached. NO NEW PRODUCTION RESTRICTION: safety already
+    refused session creation unconditionally (X2-3); uniform gating costs nothing today because
+    nothing was reachable in production before this change either."""
     await session.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
         {"scope": f"c_session.create:{student_id}"},
@@ -144,9 +173,25 @@ async def create_session(
     if existing is not None:
         return existing
 
-    # X4: one mechanism, called twice, before any CSessionRecord is constructed.
+    # X4/Z2: one mechanism (two entry points, one error type), called FIVE times, before any
+    # CSessionRecord is constructed -- every family feeds the SAME gate, by its own mechanism.
     assert_family_usable(family_name="selection_config", field_statuses=selection_config_field_statuses)
     assert_family_usable(family_name="safety_config", field_statuses=safety_config_field_statuses)
+    assert_code_gated_family_usable(
+        family_name="generation_config",
+        parameter_source_status=generation_parameter_source_status,
+        smoke_mode=smoke_mode,
+    )
+    assert_code_gated_family_usable(
+        family_name="policy_config",
+        parameter_source_status=policy_parameter_source_status,
+        smoke_mode=smoke_mode,
+    )
+    assert_code_gated_family_usable(
+        family_name="scaffold_config",
+        parameter_source_status=scaffold_parameter_source_status,
+        smoke_mode=smoke_mode,
+    )
 
     if session_mode == "c_only":
         if mastery_by_skill is not None:

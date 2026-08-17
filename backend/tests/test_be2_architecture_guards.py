@@ -1270,3 +1270,122 @@ def test_require_approved_false_scan_fires_on_synthetic_violation() -> None:
 
     clean_tree = ast.parse("foo(require_approved=True)\n", filename="<synthetic-clean>")
     assert not _has_require_approved_false(clean_tree)
+
+
+# =====================================================================================
+# Phase 7, Z4-c: no reward path writes learner state or imports anything B-owned. The package's
+# own rewards.py cannot violate this (verified by direct read, Y4-a/Z4-d) -- this guard is about
+# the APPLICATION code calling it, same shape as the T4 evidence-construction guards.
+# =====================================================================================
+
+_B_OWNED_IMPORT_ROOTS = frozenset({"models"})  # `models.contracts` -- B's own mastery/identity models
+_LEARNER_STATE_WRITE_TARGETS = frozenset({"CLearnerLocalStateRecord", "prior_session_end_state"})
+
+
+def _reward_path_violations(tree: ast.AST) -> list[str]:
+    """Flags, in a reward-named file's own AST: any import whose root is B-owned, or any
+    construction/assignment naming a learner-state write target. Returns violation strings, never
+    asserts inline, so the same logic drives both the real app/ scan and the synthetic control."""
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in _B_OWNED_IMPORT_ROOTS:
+                    violations.append(f"import:{alias.name}")
+        if isinstance(node, ast.ImportFrom) and node.module:
+            root = node.module.split(".")[0]
+            if root in _B_OWNED_IMPORT_ROOTS:
+                violations.append(f"import_from:{node.module}")
+        if isinstance(node, ast.Call):
+            callee = node.func
+            name = callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", None)
+            if name in _LEARNER_STATE_WRITE_TARGETS:
+                violations.append(f"construct:{name}")
+        if isinstance(node, ast.Attribute) and node.attr in _LEARNER_STATE_WRITE_TARGETS:
+            if isinstance(node.ctx, ast.Store):
+                violations.append(f"assign:{node.attr}")
+    return violations
+
+
+def test_z4c_no_reward_path_writes_learner_state_or_imports_b_owned() -> None:
+    """SIGNAL: every file under app/ whose path contains "reward" (today: exactly
+    reward_service.py) is scanned for a B-owned import root or a learner-state write target.
+    Would FAIL if a future reward-related file imported anything B-owned, or constructed/assigned
+    CLearnerLocalStateRecord/prior_session_end_state."""
+    reward_files = [p for p in Path("app").rglob("*.py") if "reward" in p.name]
+    assert reward_files, "expected at least one reward-named file under app/ (reward_service.py)"
+    violations: list[tuple[Path, str]] = []
+    for path in reward_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        violations.extend((path, v) for v in _reward_path_violations(tree))
+    assert not violations, violations
+
+
+def test_z4c_reward_guard_fires_on_synthetic_violations() -> None:
+    """POSITIVE CONTROL: proves _reward_path_violations actually detects a B-owned import and a
+    learner-state write, and passes clean on legitimate reward-decision code."""
+    b_import_tree = ast.parse("from models.contracts import BToCMasteryPayload\n", filename="<synthetic-violation>")
+    assert _reward_path_violations(b_import_tree)
+
+    write_tree = ast.parse(
+        "def f(record):\n    record.prior_session_end_state = 'overloaded'\n",
+        filename="<synthetic-violation>",
+    )
+    assert _reward_path_violations(write_tree)
+
+    construct_tree = ast.parse(
+        "CLearnerLocalStateRecord(student_id=x)\n", filename="<synthetic-violation>"
+    )
+    assert _reward_path_violations(construct_tree)
+
+    clean_tree = ast.parse(
+        "def decide_child_facing_reward(adapter, context):\n    return adapter.decide_child_facing_reward(context)\n",
+        filename="<synthetic-clean>",
+    )
+    assert not _reward_path_violations(clean_tree)
+
+
+# =====================================================================================
+# Phase 7, Z5-e: C scaffolds are not B hints -- no C scaffold path imports, reads, or mirrors
+# app/application/hint_request.py.
+# =====================================================================================
+
+
+def test_z5e_no_scaffold_path_imports_hint_request() -> None:
+    """SIGNAL: every file under app/ whose path contains "scaffold" (today: exactly
+    scaffold_service.py) never imports app.application.hint_request in any form. Would FAIL if a
+    future scaffold-related file imported B's hint machinery."""
+    scaffold_files = [p for p in Path("app").rglob("*.py") if "scaffold" in p.name]
+    assert scaffold_files, "expected at least one scaffold-named file under app/ (scaffold_service.py)"
+    for path in scaffold_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                assert not node.module.startswith("app.application.hint_request"), (path, node.module)
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert not alias.name.startswith("app.application.hint_request"), (path, alias.name)
+
+
+def test_z5e_guard_fires_on_synthetic_violation() -> None:
+    """POSITIVE CONTROL: proves the hint_request-import check actually detects an import."""
+    violating_tree = ast.parse(
+        "from app.application.hint_request import HintService\n", filename="<synthetic-violation>"
+    )
+    found = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module
+        and node.module.startswith("app.application.hint_request")
+        for node in ast.walk(violating_tree)
+    )
+    assert found
+
+    clean_tree = ast.parse("from app.domain.live_engine_c.types import ScaffoldConfig\n", filename="<synthetic-clean>")
+    found_clean = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module
+        and node.module.startswith("app.application.hint_request")
+        for node in ast.walk(clean_tree)
+    )
+    assert not found_clean

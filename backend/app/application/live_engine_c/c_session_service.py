@@ -62,6 +62,22 @@ from app.infrastructure.repositories import (
 # ENGINEERING-ONLY TEST-provenance DRAFT bridge, mirroring opportunity_selection.py's own
 # _ENGINEERING_TEST_BUNDLES exactly -- not a governed bundle-artifact resolution mechanism.
 _BUNDLE_PATH = "tests/fixtures/runtime_bundle_c/valid_unapproved_bundle_c.json"
+
+# Phase 7, Z2: Generation/Policy/Scaffold have no governed value anywhere in this codebase (Z1 --
+# zero SPEC-stated fields for any of the three) -- every config ever constructed for them carries
+# this exact status. This is the one literal string the real HTTP route can ever supply to the
+# session-start code gate; never a call to any default_*_config() factory (S8-a's guard).
+_NOT_LIVE_PARAMETER_SOURCE_STATUS = "TEST_FIXTURE_ONLY"
+
+# The real HTTP route never lets a client set smoke_mode -- same shape as task_service.py's
+# PRODUCTION_GENERATION_CONFIG_PROBE/hardcoded smoke_mode=False. A MODULE-LEVEL constant (not an
+# inline literal) so it can be monkeypatched the same way _BUNDLE_PATH already is, file-locally,
+# for Phase 4b's own pre-existing HTTP-level tests (test_c4b_routes_and_bundle_config.py) --
+# mirroring the ratified pattern from Phase 6b's own final step (all_usable_for_tests_bundle_c.json
+# + its autouse fixture): this batch's uniform five-family gate (Z2) closes off the LAST path
+# those pre-existing tests used to reach a real 201, since smoke_mode=False now also blocks
+# Generation/Policy/Scaffold even when the bundle itself is all-usable.
+_SMOKE_MODE = False
 _SCHEMA_PATH = "provenance/c-runtime-bundle.schema.json"
 _CATALOGUE_PATH = "tests/fixtures/runtime_bundle_c/test_catalogue_c.md"
 
@@ -159,6 +175,10 @@ class CSessionService:
                 selection_config=selection_config,
                 selection_config_field_statuses=bundle.selection_configuration.field_statuses,
                 safety_config_field_statuses=bundle.safety_configuration.field_statuses,
+                generation_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
+                policy_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
+                scaffold_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
+                smoke_mode=_SMOKE_MODE,
                 request_id=request_id,
                 mastery_by_skill=mastery_by_skill,
                 mastery_source_student_id=mastery_source_student_id,

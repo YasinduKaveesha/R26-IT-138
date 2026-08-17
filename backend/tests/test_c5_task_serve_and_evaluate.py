@@ -33,6 +33,7 @@ from app.application.live_engine_c.mastery_fixture import FIXTURE_MASTERY_SOURCE
 from app.application.live_engine_c.task_service import (
     _CATALOGUE_PATH,
     PRODUCTION_GENERATION_CONFIG_PROBE,
+    PRODUCTION_SCAFFOLD_CONFIG_PROBE,
     TaskService,
     _stu_session_id,
 )
@@ -133,6 +134,10 @@ async def seed_active_session(
         "selection_config": selection_config_fixture_for_tests(),
         "selection_config_field_statuses": all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
         "safety_config_field_statuses": all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+        "generation_parameter_source_status": "TEST_FIXTURE_ONLY",
+        "policy_parameter_source_status": "TEST_FIXTURE_ONLY",
+        "scaffold_parameter_source_status": "TEST_FIXTURE_ONLY",
+        "smoke_mode": True,
         "request_id": f"req-{uuid4()}",
     }
     if session_mode == "combined":
@@ -560,6 +565,7 @@ def test_p5_unknown_template_fails_closed_via_submit_action() -> None:
                     c_task_instance_id=instance_id,
                     action_payload={"submitted_total": 3},
                     generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+                    scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
                     submission_spy=spy,
                 )
             assert spy == []
@@ -609,7 +615,7 @@ def test_c12_rejection_wrong_key_set() -> None:
                 await TaskService().submit_action(
                     session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                     c_session_id=c_session_id, c_task_instance_id=instance_id,
-                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
                     submission_spy=spy,
                 )
             assert excinfo.value.details, "expected structured field_errors"
@@ -640,7 +646,7 @@ def test_c12_rejection_wrong_type() -> None:
                 await TaskService().submit_action(
                     session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                     c_session_id=c_session_id, c_task_instance_id=instance_id,
-                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
                     submission_spy=spy,
                 )
             assert spy == []
@@ -671,7 +677,7 @@ def test_c12_rejection_bad_pipe_string_value() -> None:
                     await TaskService().submit_action(
                         session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                         c_session_id=c_session_id, c_task_instance_id=instance_id,
-                        action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+                        action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
                         submission_spy=spy,
                     )
                 assert spy == []
@@ -724,7 +730,7 @@ def test_c12_rejection_bool_for_int() -> None:
                 await TaskService().submit_action(
                     session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                     c_session_id=c_session_id, c_task_instance_id=instance_id,
-                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
                     submission_spy=spy,
                 )
             assert spy == []
@@ -764,7 +770,7 @@ def test_c12_positive_control_valid_payload_reaches_evaluate() -> None:
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
                 submission_spy=spy,
             )
             assert spy == [instance_id]
@@ -835,10 +841,12 @@ def test_p6_submit_action_response_exact_key_set() -> None:
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id="req-1",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
             )
             body = json.loads(result.model_dump_json())
-            assert set(body.keys()) == {"c_task_instance_id", "response_matched", "request_id"}
+            assert set(body.keys()) == {
+                "c_task_instance_id", "response_matched", "scaffold_level", "request_id",
+            }
         await database_engine.dispose()
 
     asyncio.run(exercise())

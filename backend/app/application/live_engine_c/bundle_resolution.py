@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from typing import Mapping, Optional
 
-from typing import Mapping
-
 from app.core.errors import ConflictError
 from app.domain.live_engine_c.errors import (
     ConfigurationFamilyNotUsableError,
@@ -26,6 +24,7 @@ from app.domain.live_engine_c.errors import (
     SafetyConfigurationMissingError,
     SelectionConfigurationMissingError,
 )
+from app.domain.live_engine_c.generation_mode_guard import DISALLOWED_OUTSIDE_SMOKE_MODE
 from app.domain.live_engine_c.types import Catalogue, SafetyConfig, SelectionConfig
 from app.domain.runtime_bundle.errors import RuntimeBundleError
 from app.domain.runtime_bundle_c.types import CRuntimeBundle
@@ -144,3 +143,26 @@ def assert_family_usable(*, family_name: str, field_statuses: Mapping[str, str])
     )
     if unusable:
         raise ConfigurationFamilyNotUsableError(family_name, unusable)
+
+
+def assert_code_gated_family_usable(*, family_name: str, parameter_source_status: str, smoke_mode: bool) -> None:
+    """Phase 7, Z2: the SAME session-start gate `assert_family_usable` implements for the two
+    BUNDLE-DATA families (selection, safety), extended to the THREE CODE-GATED families
+    (generation, policy, scaffold) -- Z1's own classification: these families have zero
+    SPEC-stated fields, so there is no per-field bundle status for them to carry at all; the only
+    thing determining usability is whether the caller has explicitly opted into ``smoke_mode``,
+    exactly mirroring ``generation_mode_guard.assert_generation_config_permitted``'s own,
+    already-built (Phase 2) mechanism -- generalized here, not reinvented, and reusing that
+    module's own ``DISALLOWED_OUTSIDE_SMOKE_MODE`` set rather than a second copy of it.
+
+    USABILITY SEMANTICS (Z2-d-2a, stated and derived BEFORE Case 0 was attempted, from what each
+    family actually requires -- not loosened afterward to make a test pass): a code-gated
+    family's config is usable if and only if ``smoke_mode=True``, OR its
+    ``parameter_source_status`` is somehow outside ``{"TEST_FIXTURE_ONLY", "SMOKE_ONLY"}`` --
+    which today it never is, for any of the three families, anywhere in this codebase (no
+    governed value has ever been constructed for Generation, Policy, or Scaffold). Raises the
+    SAME ``ConfigurationFamilyNotUsableError`` the bundle-data families raise -- ONE mechanism,
+    one error type, across all five families -- naming ``parameter_source_status`` as the one
+    unusable field (never the value it held)."""
+    if not smoke_mode and parameter_source_status in DISALLOWED_OUTSIDE_SMOKE_MODE:
+        raise ConfigurationFamilyNotUsableError(family_name, ("parameter_source_status",))

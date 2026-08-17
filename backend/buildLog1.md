@@ -5312,3 +5312,284 @@ Items A and B, both still open with their own separate closing conditions; every
 classified `CALIBRATION_PENDING` remains genuinely uncalibrated; `PROPOSED_UNSIGNED` fields remain
 unsigned — Component C's backend cannot create a session in production until governance actually
 signs something, which is this batch's own headline, not an incidental side effect.
+
+## 2026-08-18 — Component C Phase 7: the C0-C4 ladder and safe child-facing reward events
+
+**Z1 — the classification rule, revised, accepted, and recorded as the operative rule.** Owner
+ruling, quoted: "A parameter family containing at least one field a governing document specifies
+belongs in the bundle under per-field source/status. A family with no specified fields stays
+injection-only and smoke-gated... per-field source/status exists to tell a SPEC-stated-but-unsigned
+value apart from an ungoverned one, so a family with zero specified fields has nothing for that
+machinery to express." SPEC §15 (`Component_C_Generator_v1.0/SPEC.md`, no commit hash — see C-6)
+verified directly: it names the C0-C4 ladder and its meanings but fixes **zero numeric thresholds**
+for any of `CScaffoldConfig`'s four fields. **Scaffold is therefore injection-only — no schema
+widening, no bundle block, no republish this batch.** The supervisor's earlier classification
+("belongs in the bundle") was wrong; this batch's own §15 verification is what corrected it —
+attributed here, not silently absorbed.
+
+**Z1-b, the five-family table, worked example:**
+| Family | SPEC-stated fields | Classification |
+|---|---|---|
+| Selection | 2 of 5 (`fallback_difficulty_level`, `fallback_difficulty_cap`) | Bundle, per-field |
+| Safety | 1 of 9 (`prior_overloaded_disengaged_cap`) | Bundle, per-field |
+| Generation | 0 | Injection-only |
+| Policy | 0 | Injection-only |
+| Scaffold | 0 | Injection-only |
+
+**Z2 — classification and gating are separate axes; this batch's real work.** Owner ruling,
+quoted: "CLASSIFICATION decides where values LIVE... GATING is uniform and independent: EVERY
+parameter family gates SESSION START. One check at session creation, each family feeding it by its
+own mechanism." All FIVE families now gate `session_lifecycle.create_session` — Selection/Safety
+via `assert_family_usable` (unchanged, per-field bundle status), Generation/Policy/Scaffold via
+the NEW `assert_code_gated_family_usable` (smoke_mode against `parameter_source_status`,
+generalizing `generation_mode_guard.assert_generation_config_permitted`'s own already-built
+mechanism). ONE mechanism, two entry points, ONE error type
+(`ConfigurationFamilyNotUsableError`) across all five.
+
+**Why Policy needed this, verified not assumed:** `component_c_generator/adaptation.py:46`:
+`safety_decision = apply_safety(selected_action=selected_action, evidence=evidence, ...)`, called
+unconditionally, immediately after `propose_action`. If Policy's config is unusable and the policy
+path refuses before that line, `apply_safety` never runs — even with Safety's own config perfectly
+usable. Policy's gate is load-bearing for Safety whether or not anyone intended that; this is
+invisible without tracing into `decide_adaptation`, so it is recorded here explicitly.
+
+**Z2-e — no new production restriction.** Safety already refused session creation
+unconditionally (X2-3, Phase 6b). Uniform gating costs nothing today: nothing was reachable in
+production before this change either.
+
+**Z2-d — Case 0 built FIRST, per the amended, final instruction.** Usability semantics for the
+three code-gated families were stated and justified BEFORE Case 0 was attempted (recorded verbatim
+in `bundle_resolution.assert_code_gated_family_usable`'s own docstring and
+`test_c6b_policy_and_safety.py`'s own module-level comment): usable iff `smoke_mode=True`, OR
+`parameter_source_status` is outside `{"TEST_FIXTURE_ONLY", "SMOKE_ONLY"}` — the latter never true
+anywhere in this codebase. **Case 0 IS constructible** under those exact semantics (no loosening
+needed): `test_case0_all_five_families_usable_session_creation_succeeds`, extending
+`test_c6b_policy_and_safety.py:205-215` in place rather than a parallel test — all five usable,
+`smoke_mode=True`, spy shows exactly one created row. Its own docstring discloses, in its own
+words, which levers are active, that COMPOSITION (not production reachability) is what is proven,
+and that production session creation is refused for reasons this test deliberately bypasses.
+
+**Cases 1-5**, each independently constructed (never a parametrization sharing one refusal
+reason): Selection and Safety isolated by their own per-field statuses (unchanged shape); Generation/
+Policy/Scaffold isolated via `smoke_mode=False` plus a test-only, never-a-real-governance-value
+marker status (`_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET`) supplied to the other two code-gated
+families so exactly one is unusable at a time — exercising the ALREADY-derived semantic's own
+"status outside the disallowed set" branch, not loosening it. Each case asserts BOTH halves (Z2-d-4:
+"the state construction makes the refusal real, the structured identity makes it attributable.
+Neither alone is sufficient"): `spy == []` AND `excinfo.value.family_name == "<the one family>"`.
+`ConfigurationFamilyNotUsableError` already carried `family_name` (verified, `errors.py:118-124`,
+Phase 6b) — no extension needed. Z2-d-5's principle, recorded: "'no failure' is not evidence a
+mechanism works, and 'refused' is not evidence a particular gate fired."
+
+**Z3 — a wrong reason attached to a right decision, corrected.** The supervisor's earlier record
+distinguished GenerationConfig ("values don't exist anywhere in governance at all") from Safety
+("authoritative thresholds remain CALIBRATION_PENDING") as though the two used different language.
+Verified false: `generation_config.py:12-13` reads, quoted verbatim: "The authoritative per-template
+bounds remain CALIBRATION_PENDING pending Component C Parameters sign-off." Identical phrasing to
+Safety's own docstring. **The OUTCOME stands** — Generation has zero SPEC-stated fields, so it is
+injection-only under Z1's rule regardless. **The RECORDED REASON was wrong and is corrected here**,
+on the real discriminator (SPEC-stated field count), not the false one.
+
+**Z4 — rewards, endorsed as ephemeral AFTER the required check, not assumed.** Searched
+`ResearchProject/Yass/Component_C_Generator_v1.0/SPEC.md` §21 and
+`current/Boundary_Contracts_v1.0/R26-IT-138_Component_C_to_Component_3_Contract_Spec_v1.0.md`
+directly. Found: the Contract Spec's own line 282, quoted: "Q-values, action probabilities, policy
+logits, agent archetypes and reward-model internals do not cross the boundary" — and its "13.6 RL
+internals" prohibited-field list (line 813) names `reward_model_state` explicitly. SPEC §21's own
+required-groups list (identifiers, quality/technical status, count/rate, duration/timing,
+difficulty, engagement, friction, learner state, policy/composite/rule versions) names no reward
+field at all, and its own Prohibited line states "RL reward" explicitly. **The absence is the
+evidence** — neither document expects a persisted or exported reward record of any kind. Rewards
+are computed and returned, never persisted; no table, no migration. The ten-table
+`EXPECTED_TABLES`/`AUTHORIZED_TABLES` guard (exact-equality, pre-existing) is what makes "no reward
+table" a DESIGN, not an omission — `test_z4b_no_reward_table_exists_ten_table_guard_makes_it_a_
+design` names this directly.
+
+**Y4-a's six-prohibition verification stands UNHEDGED**, unchanged from planning: all six are
+genuinely structural, traced to `rewards.py`'s own source (no timing field; no write path at all;
+a 4-value positive-only enum with silence as the "no reward" case; exactly one learner's context,
+no cohort parameter; no `LearnerState` import; no `models.contracts` import). Z4-c's own guard
+(`test_z4c_no_reward_path_writes_learner_state_or_imports_b_owned`, AST-scanned over every
+reward-named file under `app/`, synthetic-violation-proven) confirms the APPLICATION code calling
+`rewards.py` inherits the same property, mechanically, not by inference.
+
+**Z5 — scaffolds.** Server decides: `CSubmitActionRequest` carries exactly one field
+(`action_payload`); a client-supplied `scaffold_level` is rejected (422, `extra_forbidden`), not
+silently dropped — proven at the real HTTP boundary
+(`test_z5a_client_supplied_scaffold_level_is_rejected_not_ignored`). Scaffold CONTENT has no
+governed source (verified this batch's planning turn, re-confirmed): `scaffold_service.py` serves
+the LEVEL only, and mirrors `hint_request.py:168-177`/`:242`'s fail-closed shape in its own module
+docstring for the day content is wired — no content is authored, no generic fallback added.
+`CSubmitActionResult` extended with `scaffold_level: str`, allow-list constructed, exact-key-set
+updated; the frozen OpenAPI contract regenerated — additive-only diff (one new property, one new
+required entry, zero removed lines), checksum recomputed
+(`3418d145255129f7ec5cd0b523667260a4b44beb2260b1e4b69985e5e2133b4e`), `scaffold_level` checked
+against all 19 `FORBIDDEN_FIELD_TERMS` (none match).
+
+**Z5-d, both C4 paths proven reachable:** ordinary escalation wired through `submit_action`,
+decided from the real persisted event stream each call (never a caller-asserted count) —
+`test_z5d_ordinary_escalation_reaches_c4_wired_through_submit_action` drives five consecutive
+incorrect submissions to C1→C2→C3→C4→C4, with matching `c_scaffold_events` rows. Time pressure
+removal verified from `recovery.py`'s own pinned source: `RECOVERY_DIFFICULTY_LEVEL == 1`,
+`RECOVERY_SCAFFOLD_STATE == "C4"`, and the literal
+`recovery_difficulty_vector["time_pressure"] = "removed"` line, read directly, never
+reimplemented.
+
+**F-1 (Phase 7 final step, SUPERVISOR CORRECTION — sharpens, does not merely restate, the earlier
+disclosure).** The safety-forced C4 path is proven reachable at the unit level, directly against
+`decide_scaffold_level` (test-side construction, T4-d's own discipline). The earlier wording —
+"not wired end-to-end through a full adaptation decision" — understated what that means in
+practice. `task_service.py`'s own call site (the line immediately below the `else:` branch in
+`submit_action`) passes `safety_forces_recovery=False` as a LITERAL. No caller of
+`decide_and_persist_scaffold_level` anywhere under `app/` ever supplies anything else. The
+consequence, stated in these terms because the earlier ones did not: **the safety-forced branch is
+STRUCTURALLY UNREACHABLE in the application, not merely untested.** This is the C-4 shape —
+"provably reachable in isolation" and "wired for real" are different claims, and the record
+previously read as though the weaker one implied the stronger. A comment naming this precisely now
+sits at the exact call site (`task_service.py`, the `safety_forces_recovery=False` line inside
+`submit_action`'s scaffold-decision branch), not only in this build log.
+
+**Z5-e:** `test_z5e_no_scaffold_path_imports_hint_request`, AST-scanned, synthetic-violation-proven
+— no scaffold-named file under `app/` imports `app.application.hint_request` in any form.
+`hint_request.py` itself was read for its fail-closed precedent only; not modified.
+
+**Z6 — recovery and C-17 Item A, both halves, exactly as framed, no more claimed.**
+`adaptation_service.build_evidence_for_session` now DERIVES `is_recovery_context` from
+`CTaskInstanceRecord.recovery_parent_instance_id is not None` for the current task instance — real
+persisted data, never a hardcoded `False`
+(`test_z6a_is_recovery_context_derives_true_from_real_recovery_parent_instance_id`, a genuine
+recovery-linked instance yields `True`;
+`test_z6a_is_recovery_context_derives_false_when_no_parent` confirms the negative). **THE
+MECHANISM closes** — a real, non-hardcoded source now exists. **THE PRODUCTION GUARANTEE CANNOT
+close**: `scaffolds.recovery.build_recovery_task` builds THROUGH `generation.build_task_instance`
+(`recovery.py:153-163`), which the generation smoke gate refuses outside `smoke_mode=True`
+(`test_z6b_recovery_task_creation_itself_is_smoke_gated`, verified structurally by source
+inspection and behaviorally against the real guard) — so no recovery task, and therefore no
+non-`None` `recovery_parent_instance_id`, can ever exist via a real production call. **C-17 Item A
+closes PARTIALLY: the mechanism, not the guarantee.** `RECOVERY_DIFFICULTY_LEVEL`/
+`RECOVERY_SCAFFOLD_STATE`/the time-pressure marker are called through, never reimplemented (Z6-d).
+
+**F-2 — REGISTER ITEM, its own entry alongside C-17 Item A (Phase 7 final step).** The
+safety-forced C4 branch (F-1, above) is a second, distinct pre-gate-lift item, not a restatement
+of C-17 Item A: Item A is about `is_recovery_context` lacking a real source; this item is about
+`safety_forces_recovery` — a DIFFERENT parameter, on a DIFFERENT port
+(`ScaffoldPort.decide_scaffold_level`, not `AdaptationPort`/`PolicyEvidencePort`) — having a real
+source (`SafetyDecision.activate_recovery_flag`, produced every time `apply_safety` runs) that
+simply never reaches the one call site that would use it.
+
+- **Closing condition:** closes when a prior safety decision's recovery flag can be read back at
+  scaffold-decision time — i.e., when `submit_action`'s scaffold branch can look up the MOST
+  RECENT `activate_recovery_flag` this session produced and pass the real value instead of the
+  literal `False`.
+- **Why it is not done here:** `c_policy_decisions` (verified directly, `persistence_models.py:
+  1162-1187`) carries no column for the flag itself — only `safety_reason` (a free-text string)
+  and `action_overridden` (a boolean about whether the applied action differs from the selected
+  one, not about recovery specifically). Persisting the flag as its own column is therefore a
+  MIGRATION, and this batch's own work order places "any migration not named in advance" out of
+  scope. None was named in advance for this; none is added now.
+- **REJECTED, not left as an option a later reader might take:** reconstructing the boolean from
+  `safety_reason`'s own text (e.g. checking for the `"consecutive_error_safety_trigger"`/
+  `"rolling_strain_safety_trigger"` substrings `adaptation_service.py`'s own reason-token constants
+  already use for a DIFFERENT purpose, criterion 1's detection) is explicitly rejected as the
+  closing mechanism. `safety_reason` is a human-readable audit string, not a governed machine
+  contract; parsing it to recover a boolean the schema could simply carry as its own column would
+  be building a second, fragile encoding of a fact the record already has cause to store properly.
+  The closing condition is the migration, named honestly as future work, not a string-parsing
+  workaround built now to avoid naming one.
+- **F-3, why this is a constraint not met, not a deferred nicety:** v3.0 states "Safety may force
+  C4" as one of Phase 7's own hard constraints — not an optional enhancement. This item records a
+  PHASE CONSTRAINT THIS BATCH DID NOT MEET, in those terms, not a "nice to have for later."
+
+**Z7 — acceptance criteria, ratified, marked as what they are.** v3.0 states NONE for Phase 7 —
+every other phase has them; stated here plainly, not inferred. The six criteria proposed in this
+batch's own planning turn (server decides; content fails closed; no B-hint crossing; C4 reachable
+both ways with time pressure visible; the six reward prohibitions each verified or provocation-
+tested; no reward path touches learner state or B) are RATIFIED as this batch's own criteria and
+recorded as PROPOSED BY THIS BATCH — never presented as v3.0's own text.
+
+**Verified — full suite, clean.**
+```
+530 passed, 74 skipped, 0 failed, 604 collected
+```
+Reconciles exactly against 506/74/580: `506 + 24 = 530` passed, `580 + 24 = 604` collected, skips
+unchanged. The +24 is exactly: 5 new tests in `test_c6b_policy_and_safety.py` (Case 0 + Cases 1-5,
+net of the two tests they replaced — see below), 4 new tests in
+`test_be2_architecture_guards.py` (Z4-c's guard + control, Z5-e's guard + control), 15 new tests in
+`test_c7_scaffolds_and_rewards.py`. **UPDATE, not SIGNAL** (existing assertions changed, not merely
+extended): `test_p6_submit_action_response_exact_key_set` (`test_c5_task_serve_and_evaluate.py`,
+exact-key-set now includes `scaffold_level`); the two `test_x4b_...` tests from
+`test_c6b_policy_and_safety.py` were REPLACED (not merely extended) by
+`test_case0_all_five_families_usable_session_creation_succeeds` +
+`test_case1_selection_unusable_...` through `test_case5_scaffold_unusable_...` — six tests
+replacing one, net +5, each independently attributable per Z2-d rather than the prior test's own
+two-direction-plus-positive-control shape. Every other changed test file
+(`test_c4_session_lifecycle.py`, `test_c4b_routes_and_bundle_config.py`,
+`test_c5_task_serve_and_evaluate.py`'s other calls, `test_c6a_summary_derivation.py`) had shared
+FIXTURE-CONSTRUCTION HELPERS extended to satisfy `create_session`'s three new required parameters
+and `submit_action`'s new `scaffold_config` parameter — own assertions untouched, labelled
+**SIGNAL** in the narrow sense already established in the Phase 6b entry, disclosed here rather
+than silently absorbed.
+
+**Files changed this batch (git add list, dependency order; owner commits):**
+`backend/app/application/live_engine_c/bundle_resolution.py`,
+`backend/app/application/live_engine_c/session_lifecycle.py`,
+`backend/app/application/live_engine_c/c_session_service.py`,
+`backend/app/application/live_engine_c/adaptation_service.py`,
+`backend/app/application/live_engine_c/scaffold_service.py`,
+`backend/app/application/live_engine_c/reward_service.py`,
+`backend/app/application/live_engine_c/task_service.py`,
+`backend/app/domain/c_task.py`,
+`backend/app/api/routes/c_task.py`,
+`backend/app/infrastructure/repositories.py`,
+`backend/contract/openapi.v1.json`,
+`backend/contract/openapi.v1.meta.json`,
+`backend/tests/test_be2_architecture_guards.py`,
+`backend/tests/test_c4_session_lifecycle.py`,
+`backend/tests/test_c4b_routes_and_bundle_config.py`,
+`backend/tests/test_c5_task_serve_and_evaluate.py`,
+`backend/tests/test_c6a_summary_derivation.py`,
+`backend/tests/test_c6b_policy_and_safety.py`,
+`backend/tests/test_c7_scaffolds_and_rewards.py`. No git command beyond read-only verification
+(`status`, `rev-parse`, `docker version`) was run this batch; nothing was staged or committed.
+
+**Unverified / disclosed, plainly.** The safety-forced C4 path is proven reachable at the unit
+level against `decide_scaffold_level` directly; in the application itself it is STRUCTURALLY
+UNREACHABLE, not merely untested — see F-1/F-2 above for the sharpened statement, the call-site
+comment, and the register item this now carries. `_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET`'s use
+as an isolation lever for Cases 3-5 is
+BUILDER JUDGMENT — UNRATIFIED: no work order text names this specific mechanism; it exercises the
+already-derived usability semantic's own branch rather than loosening it, disclosed in the test
+file's own module-level comment. `c_session_service.py`'s `_SMOKE_MODE` module constant (mirroring
+`_BUNDLE_PATH`'s own pattern) and its extension into `test_c4b_routes_and_bundle_config.py`'s
+autouse fixture is BUILDER JUDGMENT — UNRATIFIED, extending the Phase 6b-ratified pattern by direct
+analogy: this batch's own uniform gating closed the LAST path those pre-existing tests used to
+reach a real 201, and the fix mirrors the already-accepted three grounds (file-local, clearly
+named, the gate's own dedicated tests live elsewhere).
+
+**Out of scope, confirmed.** Phase 8 telemetry validation, including fixing C-9 — untouched. Phase
+9 aggregation/`prior_session_end_state` — untouched (C-17 Item B stays open). `c_to_3` — untouched.
+No frontend file. No wheel/pyproject/provenance-manifest/requirements.*/Dockerfile/`.dockerignore`
+change. No Yass commit — `SPEC.md` read-only throughout. `b_learner_skill_states` not read.
+`opportunity_selection.py` not read (only named in Phase 6b's own X2-1 finding, unchanged).
+`hint_request.py` read-only, for precedent, never modified. No gate lifted or weakened — Z2 only
+adds structure, Z2-e's own point. No parameter value changed. No scaffold content authored — Z5-b's
+own discipline. No bundle schema change — Z1's own outcome (scaffold stays injection-only). No
+migration — `c_scaffold_events` already existed (Phase 3a); no reward table was added (Z4-b's own
+point, the ten-table guard proves it).
+
+**Remains open.** Everything named open at the end of the Phase 6b entry, unchanged. Additionally,
+TWO items now stand alongside each other, each with its own closing condition, neither a
+restatement of the other:
+- **C-17 Item A** — `is_recovery_context`'s mechanism is real (Z6-a); the production guarantee
+  stays open pending recovery task creation becoming reachable outside smoke mode, which nothing
+  in this batch or any prior one authorizes.
+- **F-2** — the safety-forced C4 branch is structurally unreachable in the application
+  (`safety_forces_recovery=False` hardcoded, `task_service.py`'s own scaffold-decision call site);
+  closes when a prior safety decision's recovery flag can be read back at scaffold-decision time,
+  which requires a new `c_policy_decisions` column (a migration, out of this batch's scope, none
+  named) — reconstructing the flag from `safety_reason`'s own text was considered and REJECTED,
+  not left open as a workaround a later reader might take.
+
+Every Generation/Policy/Scaffold threshold remains `CALIBRATION_PENDING`/`TEST_FIXTURE_ONLY`,
+unchanged by this batch's gating work, which touches WHERE usability is checked, never WHAT
+values are usable.

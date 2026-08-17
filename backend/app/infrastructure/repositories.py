@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.persistence_models import (
     AppUser, AppUserLearnerLink, AttemptRecord, AuditEvent, Base, CGameplayEventRecord, Classroom,
     ClassroomInvite, ClassroomMembership, CLearnerLocalStateRecord, CPolicyDecisionRecord,
-    CRuntimeBundleRecord, CSafetyEventRecord,
+    CRuntimeBundleRecord, CSafetyEventRecord, CScaffoldEventRecord,
     CSessionRecord, CTaskInstanceRecord, CTaskOpportunityRecord, CTaskOpportunitySummaryRecord,
     HintEventRecord, IdempotencyRecord,
     ItemOpportunityRecord, Learner, LearnerSkillStateRecord, PresentationTokenRecord,
@@ -295,6 +295,10 @@ class CPolicyDecisionRecordRepository(SqlAlchemyNeutralRepository[CPolicyDecisio
 
 class CSafetyEventRecordRepository(SqlAlchemyNeutralRepository[CSafetyEventRecord]):
     model_type = CSafetyEventRecord
+
+
+class CScaffoldEventRecordRepository(SqlAlchemyNeutralRepository[CScaffoldEventRecord]):
+    model_type = CScaffoldEventRecord
 
 
 class SessionEventRepository(SqlAlchemyNeutralRepository[SessionEvent]):

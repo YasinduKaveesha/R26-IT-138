@@ -49,6 +49,7 @@ from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import (
     CPolicyDecisionRecord,
     CSafetyEventRecord,
+    CTaskInstanceRecord,
     CTaskOpportunitySummaryRecord,
 )
 from app.infrastructure.repositories import (
@@ -113,13 +114,13 @@ async def build_evidence_for_session(
     *,
     adapter: LiveEngineCAdapter,
     c_session_id: UUID,
+    c_task_instance_id: UUID,
     student_id: str,
     intervention_session_id: str,
     stu_session_id: str,
     session_mode: SessionMode,
     session_phase: SessionPhase,
     current_difficulty_level: int,
-    is_recovery_context: bool,
     prior_session_end_state: Optional[LearnerState],
     evidence_window_config: EvidenceWindowConfig,
 ):
@@ -129,7 +130,19 @@ async def build_evidence_for_session(
     the shipped pipeline/evidence.py, not in this function). ``safety_increase_block_remaining``
     is read from the most recent persisted ``CPolicyDecisionRecord`` for this session (0 if this
     is the session's first decision -- S8-b's own feedback loop, fed back here, never a fresh
-    default each call)."""
+    default each call).
+
+    Phase 7, Z6-a: ``is_recovery_context`` is DERIVED here, from real persisted data --
+    ``CTaskInstanceRecord.recovery_parent_instance_id is not None`` for the CURRENT task instance
+    -- never a hardcoded ``False``. Z6-b, both halves recorded plainly: this makes the MECHANISM
+    real (a genuine, non-hardcoded source now exists), but the PRODUCTION GUARANTEE C-17 Item A
+    exists to track still cannot close -- ``scaffolds.recovery.build_recovery_task`` builds
+    THROUGH ``generation.build_task_instance`` (``recovery.py:153-163``), which the generation
+    smoke gate refuses outside ``smoke_mode=True``, so no recovery task -- and therefore no
+    non-``None`` ``recovery_parent_instance_id`` -- can ever exist via a real production call.
+    C-17 Item A closes PARTIALLY: the mechanism, not the guarantee."""
+    instance_record = await session.get(CTaskInstanceRecord, c_task_instance_id)
+    is_recovery_context = instance_record is not None and instance_record.recovery_parent_instance_id is not None
     summaries = await CTaskOpportunitySummaryRecordRepository(session).list_ordered_for_session(c_session_id)
     history = [
         _to_domain_summary(

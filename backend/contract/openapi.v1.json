@@ -335,11 +335,16 @@
           "response_matched": {
             "title": "Response Matched",
             "type": "boolean"
+          },
+          "scaffold_level": {
+            "title": "Scaffold Level",
+            "type": "string"
           }
         },
         "required": [
           "c_task_instance_id",
           "response_matched",
+          "scaffold_level",
           "request_id"
         ],
         "title": "CSubmitActionResult",

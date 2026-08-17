@@ -22,6 +22,7 @@ from app.application.live_engine_c.summary_service import derive_and_persist_sum
 from app.application.live_engine_c.task_service import (
     _CATALOGUE_PATH,
     PRODUCTION_GENERATION_CONFIG_PROBE,
+    PRODUCTION_SCAFFOLD_CONFIG_PROBE,
     TaskService,
     _stu_session_id,
 )
@@ -210,7 +211,7 @@ def test_t1_3_t1_4_correct_answer_terminates_and_a_retry_is_a_structured_409_not
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
                 submission_spy=spy,
             )
             assert result.response_matched is True, (
@@ -236,7 +237,7 @@ def test_t1_3_t1_4_correct_answer_terminates_and_a_retry_is_a_structured_409_not
                 await TaskService().submit_action(
                     session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                     c_session_id=c_session_id, c_task_instance_id=instance_id,
-                    action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+                    action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
                     submission_spy=spy2,
                 )
             assert spy2 == [], "evaluate() must never be reached against an already-terminal instance"
@@ -287,7 +288,7 @@ def test_t1_2_only_completed_correct_writes_a_terminal_event_behaviorally() -> N
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
             )
             assert result.response_matched is False
 

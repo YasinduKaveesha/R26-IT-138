@@ -15,7 +15,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 
-from app.application.live_engine_c.task_service import PRODUCTION_GENERATION_CONFIG_PROBE, TaskService
+from app.application.live_engine_c.task_service import (
+    PRODUCTION_GENERATION_CONFIG_PROBE,
+    PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+    TaskService,
+)
 from app.domain.c_session import StrictModel
 from app.domain.c_task import CNextTaskResponse, CSubmitActionResult
 from app.domain.principal import AuthenticatedPrincipal
@@ -78,6 +82,7 @@ async def submit_action(
             c_task_instance_id=c_task_instance_id,
             action_payload=body.action_payload,
             generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+            scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
         )
         await db_session.commit()
         return response

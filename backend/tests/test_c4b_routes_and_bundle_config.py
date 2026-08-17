@@ -26,7 +26,16 @@ bundle. THE TRADE-OFF, stated honestly rather than left implicit: with this auto
 place, none of THIS file's own HTTP-level tests exercise the unapproved-bundle refusal path any
 longer -- that proof now lives exclusively in ``test_c6b_policy_and_safety.py``'s own gate tests,
 not here.
-"""
+
+PHASE 7 EXTENSION (Z2, BUILDER JUDGMENT -- UNRATIFIED, extending the ratified 6b pattern by
+direct analogy, not a new mechanism): the uniform five-family gate now ALSO checks Generation/
+Policy/Scaffold via ``smoke_mode`` -- hardcoded ``False`` in ``CSessionService.create``, same
+shape as the bundle path, same reason (the real HTTP route never lets a client set it). The
+all-usable bundle alone is no longer sufficient for this file's own HTTP-level tests to reach a
+real 201: the autouse fixture below ALSO monkeypatches ``c_session_service_module._SMOKE_MODE`` to
+``True`` for the same reason and under the same three grounds already ratified for the bundle
+path (file-local, clearly a test-only override, the gate's own dedicated tests live elsewhere and
+exercise the real ``smoke_mode=False`` production shape)."""
 
 from __future__ import annotations
 
@@ -59,10 +68,11 @@ ALL_USABLE_BUNDLE_PATH = "tests/fixtures/runtime_bundle_c/all_usable_for_tests_b
 
 @pytest.fixture(autouse=True)
 def _all_usable_bundle_for_http_tests(monkeypatch: pytest.MonkeyPatch) -> None:
-    """See module docstring's PHASE 6b NOTE. Test-side only -- app/'s own hardcoded
-    ``_BUNDLE_PATH`` is untouched; this patches the imported module attribute for the duration of
-    each test in this file."""
+    """See module docstring's PHASE 6b NOTE / PHASE 7 EXTENSION. Test-side only -- app/'s own
+    hardcoded ``_BUNDLE_PATH``/``_SMOKE_MODE`` are untouched; this patches the imported module
+    attributes for the duration of each test in this file."""
     monkeypatch.setattr(c_session_service_module, "_BUNDLE_PATH", ALL_USABLE_BUNDLE_PATH)
+    monkeypatch.setattr(c_session_service_module, "_SMOKE_MODE", True)
 BASE_BUNDLE_PATH = "tests/fixtures/runtime_bundle_c/valid_unapproved_bundle_c.json"
 
 
