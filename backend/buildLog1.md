@@ -5593,3 +5593,208 @@ restatement of the other:
 Every Generation/Policy/Scaffold threshold remains `CALIBRATION_PENDING`/`TEST_FIXTURE_ONLY`,
 unchanged by this batch's gating work, which touches WHERE usability is checked, never WHAT
 values are usable.
+
+## 2026-08-18 — REGISTER RECONCILIATION: F-2 mischaracterisation traced and corrected, F-2 column
+## batch cancelled
+
+TEXT ONLY. No migration, no column, no new or modified test, no code change beyond one comment at
+`task_service.py:615`. This entry does not edit any line written above -- it is an APPENDED
+correction; every superseded line is quoted below, none rewritten in place.
+
+**PROCEDURAL RULE (binding on all future register entries claiming a mechanism is unreachable),
+owner ruling, quoted:** "A register entry asserting a mechanism is unreachable must trace the full
+path from producer to consumer and name EVERY break. An entry naming only the visible break is not
+an entry." And: "Both of your mischaracterisations were that same shape, and both dissolved on a
+trace. This is checkable at review time, which a lesson is not." This is recorded as a STANDING
+PROCEDURAL RULE, not as a note about this one incident, and it governs the three entries below.
+
+**WHY THE PRIOR F-2 COLUMN BATCH IS CANCELLED.** The planning turn that preceded this one proposed
+"one column and a read-back" to close F-2. That characterisation was wrong, and the mischaracterisation
+is attributed to the supervisor, not recorded as this builder's own error: the supervisor verified
+both halves directly -- `models/adaptation.AdaptationDecision` has fifteen fields and no
+`activate_recovery_flag`, discarded by the pinned `decide_adaptation` before its return is composed;
+and `decide_and_persist_adaptation` has zero callers under `app/`, only `test_c6b_policy_and_safety.py`.
+A new column would have had no possible producer -- a fresh instance of the same defect, one layer
+deeper. No migration was designed, none is added, the batch is cancelled in full.
+
+**THE THREE-LAYER F-2 TRACE, producer to consumer, every break named -- the substance of this
+entry and the test of the procedural rule above.**
+
+Producer: `safety.controller.apply_safety` computes and returns `activate_recovery_flag` on its
+`SafetyDecision` (vendored, pinned): field declared `controller.py:36`, computed `controller.py:66`,
+returned `controller.py:134`.
+
+- **BREAK 1 -- the flag never leaves the pinned composition function, closed from BOTH directions.**
+  `component_c_generator/adaptation.py:46-52` calls `apply_safety` and receives
+  `safety_decision.activate_recovery_flag` as a real, live value -- then `adaptation.py:56-71`
+  composes `AdaptationDecision(...)` and never reads that attribute in the constructor call.
+  `models/adaptation.py:70-91`: `AdaptationDecision`'s `model_config` is verified directly as
+  `{'frozen': True, 'extra': 'forbid'}` (`:75`), over exactly fifteen declared fields (`:77-91`),
+  none named `activate_recovery_flag`. Both halves of that config close this break independently:
+  `extra="forbid"` stops the field being passed in at construction; `frozen=True` stops it being
+  attached afterwards, even by the caller. This project's own domain mirror,
+  `app/domain/live_engine_c/types.py:301-316`, is the identical fifteen-field shape, confirmed by
+  direct count. `app/infrastructure/live_engine_c/adapter.py:1094-1119`'s `decide_adaptation`
+  returns `_map_adaptation_decision(decision)` -- a mapping of the same fifteen fields, nothing more.
+- **BREAK 2 -- the one function that persists `c_policy_decisions` has zero live callers.**
+  `app/application/live_engine_c/adaptation_service.py:170-239`'s `decide_and_persist_adaptation`
+  is the only code anywhere that constructs a `CPolicyDecisionRecord` from a real
+  `AdaptationDecision`. Grep-confirmed: the only call sites outside its own definition are
+  `tests/test_c6b_policy_and_safety.py:865` and `:897`, both direct test-side construction. Zero
+  references under `app/`. `adaptation_service.py:21-24` already discloses why, in its own words:
+  "the session-start gate (S2/X4) means no session can exist in production for this module's own
+  per-task call to ever run against. This module is exercised end-to-end only via direct calls with
+  `smoke_mode`-shaped test fixtures."
+- **BREAK 3 -- the literal at the consumer.** `task_service.py:626`:
+  `safety_forces_recovery=False,` -- hardcoded. This is the only break the prior F-1/F-2 entry
+  (immediately above, `Z5-d`/`F-1`/`F-2` paragraphs) named.
+
+All three breaks are independent and each is individually sufficient to keep the branch
+unreachable. Fixing only Break 3 would still leave the branch dead, because Breaks 1 and 2 mean
+there is nothing real to read back even if Break 3 were fixed. The `task_service.py:615` comment is
+EXPANDED (not deleted, not closed out) to name all three; see the file itself for the full text now
+in place, superseding the shorter F-1 comment quoted in this build log's own Phase 7 entry above.
+
+**R2-3 -- F-2's register entry, closing condition REWRITTEN, marked BLOCKED.** The closing
+condition recorded above (Phase 7 final step, quoted here rather than edited in place) reads:
+"closes when a prior safety decision's recovery flag can be read back at scaffold-decision time --
+i.e., when `submit_action`'s scaffold branch can look up the MOST RECENT `activate_recovery_flag`
+this session produced and pass the real value instead of the literal `False`." That closing
+condition presupposes a flag that exists, persisted, to be read back. Break 1 (above) establishes
+no such persisted flag can exist without an upstream, generator-side change. **F-2 IS NOW MARKED
+BLOCKED**, not open-with-a-migration: it closes only after the R2-5 upstream prerequisite lands
+(a Yass commit adding `activate_recovery_flag` to `AdaptationDecision`, a new pin, wheel rebuild,
+and re-provenance) AND a column/read-back batch of the shape previously planned is then re-run
+against a generator that can actually produce the value. The REJECTED mechanism named in the prior
+entry -- reconstructing the boolean from `safety_reason`'s own text -- stays rejected, for the same
+reason stated there: a human-readable audit string is not a governed machine contract.
+
+**R2-4 -- NEW ENTRY: Phase 6b's adaptation path is TEST-REACHABLE ONLY, disclosed in
+`adaptation_service.py`'s own docstring today but never previously in the register. Same class of
+finding as the three defects that took three phases to surface (CALIBRATION_PENDING over
+SPEC-specified values, a filename asserting an approval its own body denies, a merged cap number in
+the C-17 register) -- a record that disagreed with reality.**
+
+Trace, producer to the intended consumer:
+
+- Producer: `apply_safety`, called inside the pinned `decide_adaptation` (same as above).
+- **BREAK A (= Break 2 above).** `decide_and_persist_adaptation` (`adaptation_service.py:170`) has
+  no caller under `app/` -- no live request ever produces a `c_policy_decisions` row.
+- **BREAK B.** The one existing reader of `c_policy_decisions`,
+  `CPolicyDecisionRecordRepository.most_recent_for_session` (`repositories.py:281-293`), has
+  EXACTLY ONE consumer -- `adaptation_service.py`'s own `build_evidence_for_session` (`:154`),
+  feeding `evidence.safety_increase_block_remaining` for the NEXT adaptation decision -- a loop
+  entirely internal to the same unwired module. `CPolicyDecisionRecord` (the class itself) appears
+  in exactly three files under `app/`: `adaptation_service.py`, `persistence_models.py`,
+  `repositories.py`. Nothing in `task_service.py`, `scaffold_service.py`, or any route queries
+  `c_policy_decisions` at all today.
+- **BREAK C.** Even if something did query it, Break 1 (above) means the row's own columns never
+  carried `activate_recovery_flag` in the first place -- `evidence_snapshot`/`safety_reason`/
+  `action_overridden` are what the row has, never the flag.
+
+Register status: OPEN, TEST-REACHABLE ONLY, same shape as F-2's own status, closing only alongside
+F-2 once decide_and_persist_adaptation is wired to a real caller -- which no work order names or
+schedules, and which this entry does not schedule either.
+
+**R2-5 -- NEW ENTRY: the upstream generator change -- what it adds, its prerequisite, its gate.
+BLOCKED WITH A NAMED OWNER, not absent. This is Component C's GENERATOR (Yass-owned), never
+described as backend work.**
+
+What it adds: a sixteenth field, `activate_recovery_flag: bool`, on
+`component_c_generator.models.adaptation.AdaptationDecision` (`models/adaptation.py:70-91`), plus
+threading `safety_decision.activate_recovery_flag` into the `AdaptationDecision(...)` composition
+at `adaptation.py:56-71`. Checked against `ResearchProject/Yass/Component_C_Generator_v1.0/SPEC.md`
+(search scope, C-6, no commit hash -- see C-6): §6.4/§6.5 (`SPEC.md:276-281`) states
+`AdaptationDecision` is "internal only" and names only what must never cross C->3 (Q-values, action
+probabilities, exploration state, rolling strain, internal RL reward); it does not enumerate
+`AdaptationDecision`'s required fields and does not mandate `activate_recovery_flag` be one of
+them. This would be a genuinely NEW addition to the pinned generator, not a restoration of a
+spec-required field.
+
+Prerequisite: a Yass commit to `component_c_generator` -- out of this project's control, never
+performed here, never will be from this side.
+
+The gate it needs: the validators-batch entry (`buildLog1.md:3863-3867`, this same file) is cited
+ONLY as the SHAPE such a gate takes, never as one covering this change -- quoted there: "Authorised
+by the project owner, who states the Component B owner was notified of this change and agreed.
+Owner-relayed; no written sign-off record is cited." That gate was given, for a different, already-
+completed change, to a different vendored package. For THIS change, no equivalent gate has been
+given. **R2-5 IS BLOCKED PENDING A GATE THAT HAS NOT BEEN GIVEN.** No approval, approver, date, or
+anticipated signatory is recorded here or implied by the citation above.
+
+**R3 -- the double-call mechanism (option 3 from the prior planning turn) is REJECTED on
+determinism grounds, not on cost, in the owner's own terms, quoted:** "The double-call produces a
+DIFFERENT SafetyDecision, and nothing establishes it is bit-identical to the one acted on --
+seed_lineage is an input to that pipeline. Absent a determinism proof across both functions for
+identical inputs, the flag read belongs to a decision that did not happen, and a divergence would
+be silent, in a safety path, with no test shape that notices. Not 'the same answer twice'; possibly
+a different answer wearing the first one's label." And why it must be recorded rather than merely
+known: "the cost argument alone is one a future reader talks themselves out of."
+
+All three rejected mechanisms, together, with their reasons:
+
+1. **Text-parsing `safety_reason`** -- previously rejected (Phase 7 final step's own F-2 entry,
+   above): a human-readable audit string is not a governed machine contract.
+2. **Editing the vendored package directly, in place, without a Yass commit** -- rejected: breaks
+   the byte-identity discipline this codebase has held since Phase 1, and would require a wheel
+   rebuild and re-provenance performed on an artifact this project does not own the source of.
+3. **The double-call (re-deriving `selected_action` via a second `propose_action` call, then a
+   second `apply_safety` call, at the adapter layer)** -- rejected on the determinism grounds quoted
+   above, not on cost. Both underlying package functions are individually pinned and pure, but
+   nothing in this codebase has ever proven the SECOND, independently-invoked pipeline run produces
+   a bit-identical `SafetyDecision` to the one the FIRST, already-executed `decide_adaptation` call
+   acted on for the same nominal inputs -- and `seed_lineage` is itself an input to that pipeline,
+   not a passive label on it. Absent that proof, a flag obtained this way would belong to a decision
+   that did not happen, in a safety-critical path, with no existing test shape built to notice a
+   silent divergence between the two runs.
+
+**R4 -- PARKED RESEARCH AGAINST A CANCELLED BATCH.** The prior planning turn's column research is
+preserved here so re-deriving it is not wasted IF the R2-5 upstream fix ever lands -- marked
+explicitly so a later reader does not mistake it for work that was done, or for a plan currently in
+flight:
+
+- Candidate column name `safety_forces_recovery` (mirroring the existing sibling column on
+  `c_scaffold_events`) checked clean against BOTH nineteen-term lists: `PROHIBITED_COLUMN_TERMS`
+  (`test_be2_architecture_guards.py:70-74`) and `FORBIDDEN_FIELD_TERMS`
+  (`test_be5a_contract_freeze.py:25-29`) -- no substring collision in either.
+- Six appearance sites found by search, were a column ever added to `c_policy_decisions`:
+  `app/infrastructure/persistence_models.py` (the `CPolicyDecisionRecord` model); a new Alembic
+  migration; `app/application/live_engine_c/adaptation_service.py:202-238` (the `CPolicyDecisionRecord(...)`
+  construction); `tests/test_c3a_persistence.py:495-517` (round-trip construction); and
+  `tests/test_c3a_persistence.py:905-926` (`POLICY_DECISION_CHECK_CASES` values dict) -- both test
+  sites would need the new kwarg if the column were `NOT NULL` with no server default.
+  `AUTHORIZED_C_COLUMN_EXCEPTIONS` was confirmed as NOT needing an entry, since the candidate name
+  collides with neither term list.
+- Confirmed: a column addition to the existing `c_policy_decisions` table leaves the exactly-ten-
+  tables guard (`EXPECTED_TABLES`/`C3A_TABLES`, both table-name sets) unaffected -- no new table.
+- **THIS RESEARCH IS PARKED, NOT ACTIONABLE.** Break 1 (this entry, above) establishes that even a
+  perfectly-executed version of this column work would have no producer to populate it with a real
+  value. It is preserved only against the possibility that R2-5's upstream prerequisite lands someday.
+
+**Verified — full suite, clean, unchanged.**
+```
+530 passed, 74 skipped, 0 failed, 604 collected
+```
+Identical to the baseline this batch started from -- zero tests added, zero removed, zero
+behaviour changed. This is the expected result for a text-only batch (R5-a): any movement would
+have been a SIGNAL that something outside scope was touched.
+
+**Files changed this batch (git add list; owner commits):**
+`backend/app/application/live_engine_c/task_service.py` (one comment, `:600-628`, no code change),
+`backend/buildLog1.md` (this entry, appended). No git command beyond read-only verification
+(`status`, `rev-parse`) was run this batch; nothing was staged or committed.
+
+**Out of scope, confirmed.** No migration. No column. No new or modified test. No code change
+beyond the `task_service.py:615` comment. Phase 8/C-9, Phase 9, `c_to_3` -- untouched. No frontend
+file. No wheel/pyproject/provenance-manifest/requirements.*/Dockerfile/`.dockerignore` change. No
+Yass commit -- `SPEC.md` read-only throughout, cited by path, no commit hash (C-6). Not read this
+batch: `b_learner_skill_states`, `opportunity_selection.py`, `hint_request.py`. No gate lifted or
+weakened. No parameter value changed. C-17 Item A / the recovery-context guarantee -- not touched,
+not closed. No approval, approver, date, signature, scientific decision, difficulty threshold,
+safety threshold, or `CALIBRATION_PENDING` resolution recorded anywhere in this entry.
+
+**Remains open.** Everything named open at the end of the Phase 7 entry above, unchanged, plus:
+F-2 (now BLOCKED, not open-with-a-migration -- closing condition rewritten above); R2-4's
+test-reachable-only adaptation path (OPEN, same shape as F-2, closes alongside it); R2-5's upstream
+generator fix (BLOCKED pending a gate not yet given, owner is Yass/the generator, not this
+codebase).

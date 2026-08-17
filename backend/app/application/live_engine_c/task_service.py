@@ -601,21 +601,33 @@ class TaskService:
             # Phase 7, Z5: the ORDINARY escalation path -- decided from the real, just-persisted
             # event stream (never a caller-asserted count).
             #
-            # F-1 (Phase 7 final step, sharpened per the owner's own correction): the LITERAL
-            # `False` below means the safety-forced C4 branch is STRUCTURALLY UNREACHABLE in this
-            # application, not merely untested. No caller of decide_and_persist_scaffold_level
-            # anywhere under app/ ever passes a value other than this hardcoded constant, so
-            # safety.controller.SafetyDecision.activate_recovery_flag -- even if it were True on a
-            # real decision -- has no path from that decision into this parameter. This is the
-            # C-4 shape: a real branch, provably reachable at the unit level (Z5-d's own direct
-            # test against decide_scaffold_level), that the application itself can never trigger,
-            # because nothing wires a real value into the one parameter that would let it. Proven
-            # reachable in isolation is not the same claim as wired for real, and this comment
-            # exists so the gap is named at the exact line that creates it, not only in the build
-            # log. See the F-2 register entry (buildLog1.md) for the closing condition and why
-            # reconstructing the flag from safety_reason's own text was rejected, not merely
-            # deferred. v3.0's own Phase 7 hard constraint states "Safety may force C4" -- this is
-            # a PHASE CONSTRAINT NOT MET, not a deferred nicety (F-3).
+            # REGISTER RECONCILIATION (this batch, correcting F-1/F-2): the LITERAL `False` below
+            # is only the LAST of three independent breaks, not the whole story -- naming only
+            # this one was itself a defect (see the standing procedural rule in buildLog1.md).
+            # Full producer-to-consumer trace:
+            #   (1) safety.controller's hard-safety step DOES compute activate_recovery_flag on its
+            #       SafetyDecision (controller.py:36/66/134) -- but component_c_generator's own
+            #       pinned adaptation.decide_adaptation (adaptation.py:56-71) never reads it when
+            #       composing AdaptationDecision, whose fifteen fields (models/adaptation.py:70-91)
+            #       have no slot for it, closed from BOTH directions: model_config sets
+            #       extra="forbid" (stops the field being passed in at construction) AND
+            #       frozen=True (stops it being attached afterwards, even by the caller). The flag
+            #       never leaves the pinned function, verified both ways, not merely at the
+            #       constructor.
+            #   (2) Even if it did: adaptation_service.decide_and_persist_adaptation -- the only
+            #       code that would ever persist a c_policy_decisions row from a real decision --
+            #       has NO caller anywhere under app/ (grep-verified; only test-side direct calls
+            #       in test_c6b_policy_and_safety.py). No live request ever writes that row. The
+            #       one existing reader, CPolicyDecisionRecordRepository.most_recent_for_session
+            #       (repositories.py:281-293), has exactly one consumer -- adaptation_service.py's
+            #       own build_evidence_for_session (:154), internal to this same unwired module.
+            #       CPolicyDecisionRecord itself appears in exactly three files under app/
+            #       (adaptation_service.py, persistence_models.py, repositories.py) -- nothing else
+            #       in the application reads that table.
+            #   (3) This literal `False`, which is what a caller supplies in the absence of (1)/(2).
+            # A column and a read-back CANNOT close this alone -- see the F-2 register entry
+            # (buildLog1.md) for why that batch was cancelled, and the R2-5 entry for the real
+            # (upstream, generator-side, BLOCKED-pending-a-gate) fix.
             scaffold_level = await decide_and_persist_scaffold_level(
                 session,
                 adapter=adapter,
@@ -623,7 +635,7 @@ class TaskService:
                 c_task_opportunity_id=instance_record.c_task_opportunity_id,
                 c_task_instance_id=c_task_instance_id,
                 scaffold_config=scaffold_config,
-                safety_forces_recovery=False,  # STRUCTURALLY UNREACHABLE -- see comment above.
+                safety_forces_recovery=False,  # See breaks (1)-(3) above -- literal is only break (3).
                 request_id=request_id,
             )
 
