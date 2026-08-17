@@ -73,6 +73,20 @@ class TechnicalFailureError(ApplicationError):
     message = "A technical failure occurred; please retry."
 
 
+class MasteryPayloadRejectedError(ApplicationError):
+    """Phase 4b, Q2/B2-c: translates ``app.domain.live_engine_c.errors.
+    MasteryPayloadContractValidationError``. ``details`` must be built ONLY from that error's
+    ``field_errors`` (``[(loc, type), ...]``, never ``str(exc)``) — the same
+    ``[{"location": [...], "type": ...}]`` shape ``install_error_handlers``'s own
+    ``RequestValidationError`` handler already uses (``errors.py``, this file), so a client sees
+    one consistent validation-error shape across both paths. Never carries a mastery value, a B
+    identity field, or any pydantic ``msg``/``input``."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "MASTERY_PAYLOAD_REJECTED"
+    message = "The supplied mastery payload failed contract validation."
+
+
 def error_response(
     request: Request,
     *,

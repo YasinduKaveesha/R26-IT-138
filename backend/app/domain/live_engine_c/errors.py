@@ -90,6 +90,15 @@ class MasteryPayloadContractValidationError(LiveEngineCError):
         super().__init__(rendered)
 
 
+class SelectionConfigurationMissingError(LiveEngineCError):
+    """Phase 4b, owner condition 1: "If the loader structurally requires a field to be present,
+    it is labelled and the code path consuming W must refuse to run rather than proceed on a
+    placeholder. Fail-closed means halt, not default." Raised when a code path needs
+    ``SelectionConfig`` and the resolved ``CRuntimeBundle.selection_configuration`` is ``None``
+    (additive-only means this is a real, expected state for any bundle not yet republished with
+    the block, B1-b) -- never defaulted, never substituted."""
+
+
 class SF043OrderingError(LiveEngineCError):
     """Phase 4: the SF-043 ordering gate at session creation -- "B runs -> B completes ->
     B emits seven mastery values -> C validates the same-session payload -> C begins." Raised

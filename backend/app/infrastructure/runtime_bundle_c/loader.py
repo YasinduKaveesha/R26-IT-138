@@ -36,7 +36,7 @@ from app.domain.runtime_bundle.errors import (
     RuntimeBundleValidationError,
 )
 from app.domain.runtime_bundle.types import Checksum, Compatibility, SourceArtifact, VersionedArtifact
-from app.domain.runtime_bundle_c.types import CRuntimeBundle
+from app.domain.runtime_bundle_c.types import CRuntimeBundle, SelectionConfigurationArtifact
 
 
 def _read_json(path: str, *, not_found_message: str) -> Any:
@@ -79,6 +79,28 @@ def _checksum(raw: Mapping[str, Any]) -> Checksum:
 def _versioned_artifact(raw: Mapping[str, Any]) -> VersionedArtifact:
     return VersionedArtifact(
         version=raw["version"], checksum=_checksum(raw["checksum"]), approval_status=raw["approval_status"]
+    )
+
+
+def _selection_configuration(raw: Optional[Mapping[str, Any]]) -> Optional[SelectionConfigurationArtifact]:
+    """Phase 4b: absent (``None``) on any bundle that has not been republished with this block --
+    additive-only (owner condition 2). Never substitutes a placeholder; the caller of this
+    loader, not this function, decides whether an absent block is fatal for what it's about to
+    do (owner condition 1: "halt, not default" belongs at the consumer of W, not here)."""
+    if raw is None:
+        return None
+    window_raw = raw["familiarization_window_by_grade"]
+    return SelectionConfigurationArtifact(
+        version=raw["version"],
+        checksum=_checksum(raw["checksum"]),
+        approval_status=raw["approval_status"],
+        config_version=raw["config_version"],
+        parameter_source_status=raw["parameter_source_status"],
+        familiarization_window_by_grade={int(grade): window for grade, window in window_raw.items()},
+        familiarization_difficulty_level=raw["familiarization_difficulty_level"],
+        fallback_difficulty_level=raw["fallback_difficulty_level"],
+        familiarization_session_difficulty_cap=raw["familiarization_session_difficulty_cap"],
+        fallback_difficulty_cap=raw["fallback_difficulty_cap"],
     )
 
 
@@ -152,4 +174,5 @@ class CRuntimeBundleLoader:
             approval_status=approval_status,
             activation_date=manifest["activation_date"],
             compatibility=compatibility,
+            selection_configuration=_selection_configuration(manifest.get("selection_configuration")),
         )

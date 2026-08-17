@@ -249,6 +249,38 @@ def test_c4_combined_session_without_payload_raises_sf043() -> None:
     asyncio.run(exercise())
 
 
+def test_r5d_combined_session_with_payload_but_incomplete_identity_raises_sf043_not_assertionerror() -> None:
+    """X-10 provocation for R-5d (Phase 4b continuation): session_lifecycle.py:134-141 used to be
+    three bare ``assert`` statements -- input validation via assert is stripped under -O (would
+    silently let None flow into adapter.validate_mastery_payload) and, unstripped, raises
+    AssertionError (an unhandled 500, not a caught/translatable error). Proves the replacement is
+    a real, catchable SF043OrderingError, for each of the three identity fields missing
+    independently while mastery_by_skill IS present -- the exact caller-contract violation the
+    old asserts existed to catch."""
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
+        adapter = LiveEngineCAdapter()
+        async with factory() as session:
+            student_id, bundle_id = await _seed_learner_and_bundle(session)
+            for missing_field in (
+                "mastery_source_student_id",
+                "mastery_source_intervention_session_id",
+                "mastery_source_intervention_session_number",
+            ):
+                with pytest.raises(SF043OrderingError):
+                    await create_session(
+                        session, adapter, student_id=student_id, c_runtime_bundle_record_id=bundle_id,
+                        **_create_session_kwargs(
+                            request_id=f"req-{uuid4()}", **{missing_field: None},
+                        ),
+                    )
+        await database_engine.dispose()
+
+    asyncio.run(exercise())
+
+
 def test_c4_c_only_session_with_payload_raises_sf043() -> None:
     """SF-043 / v3.0 §11 Phase 4: C-only must not receive a B payload at all."""
     alembic("upgrade", "head")
@@ -408,19 +440,22 @@ def test_q2_sentinel_never_leaks_into_exception_string_or_field_errors(caplog: p
 # unreachable states are documented rather than assumed."
 # =====================================================================================
 
-PHASE_4_REACHABLE_STATES = frozenset({"active", "abandoned"})
+PHASE_4_REACHABLE_STATES = frozenset({"active", "abandoned", "completed"})
 ALL_SESSION_STATES = frozenset(
     {"starting", "active", "completing", "completed", "abandoned", "expired", "technical_failed"}
 )
 
 
 def test_s1_phase_4_reachable_state_subset_is_documented() -> None:
-    """SIGNAL: Phase 4's own create_session/abandon_session code paths produce ONLY
-    {"active", "abandoned"} -- confirmed by grepping this module's own source for every string
-    literal assigned to `.state` or `state="..."`. The other five SESSION_STATES values
-    (starting, completing, completed, expired, technical_failed) are NOT unreachable-by-mistake;
-    they are simply not this phase's job to produce, and the CHECK constraint constrains what may
-    be WRITTEN without requiring every value be reachable (S-1 ruling text)."""
+    """SIGNAL (UPDATED, Phase 4b/B4-c): Phase 4b's create_session/abandon_session/complete_session
+    code paths produce {"active", "abandoned", "completed"} -- confirmed by grepping this module's
+    own source for every string literal assigned to `.state` or `state="..."`. "completed" is new
+    this batch (B4-a's completion path); "active" and "abandoned" are unchanged from Phase 4a --
+    the underlying fact this test proves (which states Phase 4's code can actually reach) has
+    genuinely moved, an UPDATE, not a weakening. The remaining SESSION_STATES values (starting,
+    completing, expired, technical_failed) are NOT unreachable-by-mistake; they are simply not
+    this phase's job to produce, and the CHECK constraint constrains what may be WRITTEN without
+    requiring every value be reachable (S-1 ruling text)."""
     import re
     from pathlib import Path
 
@@ -429,7 +464,7 @@ def test_s1_phase_4_reachable_state_subset_is_documented() -> None:
     assert literal_states == PHASE_4_REACHABLE_STATES, literal_states
     assert PHASE_4_REACHABLE_STATES < ALL_SESSION_STATES
     assert ALL_SESSION_STATES - PHASE_4_REACHABLE_STATES == {
-        "starting", "completing", "completed", "expired", "technical_failed",
+        "starting", "completing", "expired", "technical_failed",
     }
 
 

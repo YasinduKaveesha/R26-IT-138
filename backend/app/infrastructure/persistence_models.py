@@ -713,7 +713,17 @@ class CSessionRecord(ProvenanceMixin, Base):
     not reach every one of the seven states from its own scope (create/start, resume, abandon) --
     see ``test_phase4_c_sessions_state_reachable_subset_is_documented`` for exactly which subset
     Phase 4's own code paths can produce (S-1); the unreached values are not dead, they are simply
-    not this phase's job to produce."""
+    not this phase's job to produce.
+
+    PHASE 4b: ``uq_c_sessions_one_starting_or_active_per_learner`` mirrors B's own
+    ``uq_b_sessions_one_starting_or_active_per_learner`` (``persistence_models.py``,
+    ``b_sessions``) exactly -- same predicate shape, ``state IN ('starting', 'active')``, matching
+    ``CSessionRecordRepository.find_starting_or_active_for_learner``'s own query predicate
+    field-for-field (both must cover the same set or the index prevents a race that isn't the
+    race). ``create_session`` currently writes ``state="active"`` only -- ``'starting'`` is NOT
+    reachable by any Phase 4 code path today; the predicate still names it, matching the query
+    predicate's own two-state set exactly, rather than being narrowed to the one state C actually
+    produces. This is recorded here, not silently narrowed."""
 
     __tablename__ = "c_sessions"
     __table_args__ = (
@@ -733,6 +743,12 @@ class CSessionRecord(ProvenanceMixin, Base):
         CheckConstraint(
             "state IN ('starting', 'active', 'completing', 'completed', 'abandoned', 'expired', 'technical_failed')",
             name="ck_c_sessions_state",
+        ),
+        Index(
+            "uq_c_sessions_one_starting_or_active_per_learner",
+            "student_id",
+            unique=True,
+            postgresql_where=text("state IN ('starting', 'active')"),
         ),
         *ProvenanceMixin.provenance_constraints("c_sessions"),
     )

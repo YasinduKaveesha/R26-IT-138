@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "bundle_version": "c2-test-fixture-1.0",
   "publication_state": "DRAFT",
   "immutable_after_publication": true,
@@ -23,6 +23,24 @@
     "approval_status": "CALIBRATION_PENDING"
   },
   "approval_status": "CALIBRATION_PENDING",
+  "selection_configuration": {
+    "version": "c4.0-selection-1.0.0",
+    "checksum": {
+      "algorithm": "sha256",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "approval_status": "CALIBRATION_PENDING",
+    "config_version": "c4.0-selection-1.0.0",
+    "parameter_source_status": "TEST_FIXTURE_ONLY",
+    "familiarization_window_by_grade": {
+      "2": 2,
+      "3": 3
+    },
+    "familiarization_difficulty_level": 1,
+    "fallback_difficulty_level": 1,
+    "familiarization_session_difficulty_cap": 2,
+    "fallback_difficulty_cap": 2
+  },
   "activation_date": null,
   "compatibility": {
     "backend_api_major": 1,

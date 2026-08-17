@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence_models import (
     AppUser, AppUserLearnerLink, AttemptRecord, AuditEvent, Base, Classroom, ClassroomInvite,
-    ClassroomMembership, CLearnerLocalStateRecord, CSessionRecord, HintEventRecord,
-    IdempotencyRecord, ItemOpportunityRecord, Learner, LearnerSkillStateRecord,
+    ClassroomMembership, CLearnerLocalStateRecord, CRuntimeBundleRecord, CSessionRecord,
+    HintEventRecord, IdempotencyRecord, ItemOpportunityRecord, Learner, LearnerSkillStateRecord,
     PresentationTokenRecord, RuntimeBundleRecord, SessionAggregateResultRecord, SessionEvent,
     SessionRecord, SkillCertificationResultRecord, SkillStateTransitionRecord, TaskInstanceRecord,
     TeacherProfile,
@@ -102,6 +102,15 @@ class SessionRecordRepository(SqlAlchemyNeutralRepository[SessionRecord]):
                 SessionRecord.session_id == session_id,
                 SessionRecord.learner_id == learner_id,
             )
+        )
+
+
+class CRuntimeBundleRecordRepository(SqlAlchemyNeutralRepository[CRuntimeBundleRecord]):
+    model_type = CRuntimeBundleRecord
+
+    async def find_by_version(self, bundle_version: str) -> CRuntimeBundleRecord | None:
+        return await self.session.scalar(
+            select(CRuntimeBundleRecord).where(CRuntimeBundleRecord.bundle_version == bundle_version)
         )
 
 

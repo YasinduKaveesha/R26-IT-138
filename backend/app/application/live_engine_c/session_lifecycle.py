@@ -24,10 +24,13 @@ from datetime import UTC, datetime
 from typing import Mapping, Optional
 from uuid import UUID, uuid4
 
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ConflictError, ResourceNotFoundError
 from app.domain.live_engine_c.errors import SF043OrderingError
-from app.domain.live_engine_c.types import Grade, LearnerSessionState, SelectionConfig, SessionMode
+from app.domain.live_engine_c.types import AttendanceStatus, Grade, LearnerSessionState, SelectionConfig, SessionMode
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import CLearnerLocalStateRecord, CSessionRecord
 from app.infrastructure.repositories import CLearnerLocalStateRepository, CSessionRecordRepository
@@ -96,7 +99,23 @@ async def create_session(
     """v3.0 §11 Phase 4: ``POST /api/v1/c/sessions`` (idempotent by learner state -- an existing
     starting/active session for this student is returned unchanged rather than creating a
     second). ``session_creation_spy``, when supplied, has one item appended to it each time (and
-    only when) a ``CSessionRecord`` is actually added -- Q1's non-arrival proof."""
+    only when) a ``CSessionRecord`` is actually added -- Q1's non-arrival proof.
+
+    Phase 4b concurrency (B3): mirrors ``app.application.b_session_lifecycle.start_session``'s
+    own mechanism exactly -- a ``pg_advisory_xact_lock`` before the existence check serializes
+    concurrent callers for the SAME student, and the eventual INSERT is wrapped in an
+    ``IntegrityError`` catch translating a real race (two concurrent callers both passing the
+    pre-lock check for different ``intervention_session_id`` values, or a duplicate) into
+    ``ConflictError`` rather than an unhandled 500. Mirroring B's mechanism is NOT the same as
+    proving it holds under two real concurrent connections -- this suite has no two-connection
+    harness, so only the SEQUENTIAL shape (lock acquired, then checked) is exercised by test; the
+    partial unique index on ``c_sessions`` (``uq_c_sessions_one_starting_or_active_per_learner``,
+    migration 20260816_0005) is the actual, DB-enforced backstop if the advisory lock is ever
+    bypassed or the race window is hit anyway."""
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+        {"scope": f"c_session.create:{student_id}"},
+    )
     repository = CSessionRecordRepository(session)
     existing = await repository.find_starting_or_active_for_learner(student_id)
     if existing is not None:
@@ -112,12 +131,29 @@ async def create_session(
             raise SF043OrderingError(
                 "combined session requires a same-session B mastery payload (SF-043)"
             )
-        assert mastery_source_student_id is not None
-        assert mastery_source_intervention_session_id is not None
-        assert mastery_source_intervention_session_number is not None
-        # Validated here, BEFORE any session row exists -- Q1's chokepoint. A
-        # MasteryPayloadContractValidationError propagates straight out; nothing below this
-        # point executes, and nothing is added to `session`.
+        # R-5d: input validation must never use bare `assert` -- Python strips it under -O
+        # (silently letting None reach validate_mastery_payload/CSessionRecord below), and
+        # unstripped it surfaces as an unhandled 500 rather than a caught, translatable error.
+        # A combined-mode caller (CSessionService.create, via the fixture producer) must always
+        # pair mastery_by_skill with all three identity fields together; reaching here with one
+        # present and another absent is a caller-contract violation of the same SF-043 ordering
+        # this function already owns, so it is raised as the same SF043OrderingError type rather
+        # than a new one.
+        if (
+            mastery_source_student_id is None
+            or mastery_source_intervention_session_id is None
+            or mastery_source_intervention_session_number is None
+        ):
+            raise SF043OrderingError(
+                "combined session requires mastery_by_skill and all three B identity fields "
+                "together (SF-043) -- caller supplied mastery_by_skill without a complete "
+                "identity triple"
+            )
+        # Validated here, BEFORE any session row exists -- Q1's chokepoint. Raises the raw
+        # domain MasteryPayloadContractValidationError (unchanged from Phase 4a, preserving its
+        # own tests); the HTTP-facing translation into MasteryPayloadRejectedError (B2-c,
+        # structured (loc, type) pairs only) happens at the route boundary, not here -- nothing
+        # below this point executes on rejection, and nothing is added to `session`.
         adapter.validate_mastery_payload(
             mastery_by_skill,
             mastery_source_student_id=mastery_source_student_id,
@@ -149,7 +185,10 @@ async def create_session(
         row_version=0,
         **_provenance("c_session", c_session_id, request_id, "c_session.started"),
     )
-    await repository.add(record)
+    try:
+        await repository.add(record)
+    except IntegrityError as exc:
+        raise ConflictError() from exc
     if session_creation_spy is not None:
         session_creation_spy.append(c_session_id)
     return record
@@ -162,9 +201,10 @@ async def get_active_session(session: AsyncSession, student_id: UUID) -> Optiona
 
 async def abandon_session(session: AsyncSession, c_session_id: UUID, student_id: UUID) -> CSessionRecord:
     """v3.0 §11 Phase 4: ``POST /api/v1/c/sessions/{id}/abandon`` -- safe termination. Reachable
-    Phase-4 states: active -> abandoned only (S-1)."""
-    from app.core.errors import ConflictError, ResourceNotFoundError
-
+    Phase-4 states: active -> abandoned only (S-1). Never an eligible combined handoff (B4-b) --
+    abandonment is deliberately excluded from N's increment, mirroring
+    ``is_eligible_combined_handoff``'s own semantics (a session that did not complete is not an
+    eligible completed combined handoff)."""
     repository = CSessionRecordRepository(session)
     record = await repository.get_owned(c_session_id, student_id)
     if record is None:
@@ -173,5 +213,71 @@ async def abandon_session(session: AsyncSession, c_session_id: UUID, student_id:
         raise ConflictError()
     record.state = "abandoned"
     record.row_version += 1
+    await session.flush()
+    return record
+
+
+async def complete_session(
+    session: AsyncSession,
+    adapter: LiveEngineCAdapter,
+    c_session_id: UUID,
+    student_id: UUID,
+    *,
+    attendance_status: AttendanceStatus,
+    technical_blocked_bootstrap: bool = False,
+) -> CSessionRecord:
+    """Phase 4b, B4-a: ``POST /api/v1/c/sessions/{id}/complete``, mirroring
+    ``app.api.routes.b_session``'s own ``complete_session`` route shape (``b_session.py:67``).
+    v3.0 §11 Phase 4's own Scope names NO completion endpoint -- this fills a gap in that plan
+    under the owner's ruling ("do Phase 4b for the three routes + legitimate production
+    SelectionConfig source + completion/N-increment path"), not something v3.0 itself specifies.
+
+    B4-b: N increments ONLY when ``is_eligible_combined_handoff`` holds, evaluated THROUGH THE
+    ADAPTER (never reimplemented here) -- the five-condition predicate the cold-start assessment
+    names, translated verbatim by ``LiveEngineCAdapter.is_eligible_combined_handoff``.
+    ``b_payload_valid`` is derived from ``session_mode == "combined"`` (a fresh, validated payload
+    is a precondition of ``create_session`` ever reaching `state="active"` in combined mode --
+    SF-043 already enforced it at creation time; there is no cached payload to re-validate here,
+    R3).
+
+    B4-d / SF-040: a fully missed slot never reaches this function at all -- SF-040 says a fully
+    missed slot emits NO row, so there is no ``CSessionRecord`` to complete; ``attendance_status``
+    here describes THIS session's own completion context (used only by the eligibility
+    predicate), not a substitute row for a missed one."""
+    repository = CSessionRecordRepository(session)
+    record = await repository.get_owned(c_session_id, student_id)
+    if record is None:
+        raise ResourceNotFoundError()
+    if record.state != "active":
+        raise ConflictError()
+
+    eligible = adapter.is_eligible_combined_handoff(
+        record.session_mode,
+        record.session_mode == "combined",
+        attendance_status,
+        technical_blocked_bootstrap,
+    )
+
+    record.state = "completed"
+    record.completed_at_utc = datetime.now(UTC)
+    record.row_version += 1
+
+    if eligible:
+        state_repository = CLearnerLocalStateRepository(session)
+        local_state = await state_repository.find_by_student(student_id)
+        if local_state is None:
+            local_state_id = uuid4()
+            local_state = CLearnerLocalStateRecord(
+                c_learner_local_state_id=local_state_id,
+                student_id=student_id,
+                eligible_combined_handoffs_completed=1,
+                sessions_since_last_practice={},
+                prior_session_end_state=None,
+                **_provenance("c_learner_local_state", local_state_id, f"complete-{c_session_id}", "c_session.completed"),
+            )
+            session.add(local_state)
+        else:
+            local_state.eligible_combined_handoffs_completed += 1
+
     await session.flush()
     return record

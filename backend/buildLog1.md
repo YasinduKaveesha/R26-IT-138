@@ -4262,3 +4262,238 @@ level of production-readiness is later required; `select_task` wiring (Phase 5, 
 consumer of the validated `BToCMasteryPayload` this batch's `validate_mastery_payload` proves is
 reachable); the SKILLS/`_SEVEN_SKILLS` coupling risk (register entry, not fixed); every item still
 open from prior phase entries.
+
+## 2026-08-17 — Component C Phase 4b: the three routes, B's legitimate SelectionConfig source,
+## completion/N-increment — closes C-16 and closes Phase 4
+
+**Scope.** Builds the three routes Phase 4a deferred (`POST /api/v1/c/sessions`,
+`GET /api/v1/c/sessions/active`, `POST /api/v1/c/sessions/{id}/abandon`), a fourth completion
+route not named anywhere in v3.0 (see item 8 below), a governed, non-default source for
+`SelectionConfig` (the gap Phase 4a's own entry named as the supervisor's error, not the
+builder's), and the concurrency mirroring + partial unique index backstopping "idempotent by
+learner state." This closes C-16 (the cold-start/familiarization mechanism — session_phase
+derivation, the eligible-handoff counter, and now a real HTTP path to reach both) and, per the
+owner's own Phase 4a-closing instruction ("do Phase 4b for the three routes + legitimate
+production SelectionConfig source + completion/N-increment path -> then close Phase 4"), closes
+Phase 4 itself.
+
+This batch was interrupted by two correctly-reported BLOCKs (a missing qualified source for
+`familiarization_session_difficulty_cap`, and a collision with the previously-untouched BE5a
+frozen-contract guard) and resumed twice by separate supervisor rulings. Both blocks are recorded
+below with the ruling that resolved each.
+
+**1. B1 — SUPERVISOR RULING (lead), quoted, no more: "Ok based on what you understand lets do
+the best solution."** The owner selected OPTION 1 (all seven `CSelectionConfig` fields move into
+the governed bundle block) from three options the supervisor's work order framed; the owner's
+words select an option, they do not endorse or re-derive the engineering reasoning behind it, and
+they resolve no `CALIBRATION_PENDING` parameter value — none of `familiarization_window_by_grade`,
+`familiarization_difficulty_level`, `fallback_difficulty_level`,
+`familiarization_session_difficulty_cap`, or `fallback_difficulty_cap` is approved by this
+ruling; every one of them stays `CALIBRATION_PENDING`, carried as bundle-manifest DATA under
+`parameter_source_status: "TEST_FIXTURE_ONLY"`, exactly as before.
+
+The owner's five conditions, and how each is met:
+- Condition 1, "fail-closed means halt, not default": `resolve_selection_config` raises
+  `SelectionConfigurationMissingError` when `CRuntimeBundle.selection_configuration is None` —
+  never a default, never a partial construction. Proven both ways:
+  `test_b1d_b_absent_selection_configuration_halts_the_consumer`.
+- Condition 2, additive-only (schema_version bump, no existing bundle broken): see item 3 below.
+- Condition 3, the vocabulary must not be coerced: see item 4 below.
+- Condition 4 (T4, restated as condition 1's own binding text): identical to condition 1, verified
+  by the same test.
+- Condition 5, `selection_configuration` and anything derived from it never appears in a response
+  DTO: asserted directly in `test_b2a_create_response_exact_key_set` (`"selection_configuration"
+  not in body`, `"familiarization_window_by_grade" not in str(body)`), and by construction —
+  `CSessionFields`/`CSessionCommandResponse`/`CActiveSessionResponse` are allow-list DTOs (X-4)
+  built from named `CSessionRecord` columns only, none of which carry a `selection_configuration`
+  value.
+
+**2. Schema shape — SUPERVISOR RULING (lead).** `schema_version` becomes `enum: ["1.0", "1.1"]`
+(not `const`); `selection_configuration` is added as an OPTIONAL block; any code path needing
+`SelectionConfig` halts (condition 1) rather than defaulting when the block is absent. Recorded
+here because it was checked, not assumed: **condition 2 (additive-only) had NO B precedent to
+mirror.** Both `provenance/runtime-bundle.schema.json` (B's own) and the pre-Phase-4b
+`provenance/c-runtime-bundle.schema.json` declared `schema_version` as a `const "1.0"` literal —
+neither schema in this repository had ever been version-bumped before. This is the repository's
+first schema-version bump, and the enum-plus-optional-block shape (rather than, say, a new
+top-level schema file, or an unversioned additive field) was established in this batch, not
+copied from an existing pattern.
+
+**3. T3 — the vocabulary mapping, field by field, reported here (deliverable 3 of the resumption
+work order — never delivered in the turn that produced it; recorded now, corrected not
+invented).** `resolve_selection_config` performs a direct, uncoerced carry:
+- `config_version` (required on `CSelectionConfig`) is read from the block's own
+  `config_version` manifest field — an INDEPENDENT field, never derived from the block's
+  `version` (which stays the bundle-governance version identifier, unread by this function).
+- `parameter_source_status` (required on `CSelectionConfig`, package-verified to carry no closed
+  vocabulary and no consuming gate anywhere in the installed wheel) is read from the block's own,
+  equally INDEPENDENT `parameter_source_status` manifest field — never derived from
+  `approval_status`.
+- `approval_status` is read ONLY by the bundle's own approval gate
+  (`resolve_c_bundle_and_catalogue`'s `require_approved`) — never by `resolve_selection_config`,
+  never repurposed as `parameter_source_status`.
+- The five `CALIBRATION_PENDING` value fields
+  (`familiarization_window_by_grade`/`familiarization_difficulty_level`/
+  `fallback_difficulty_level`/`familiarization_session_difficulty_cap`/`fallback_difficulty_cap`)
+  are copied verbatim, no unit or vocabulary conversion.
+
+No enum was widened anywhere to make this mapping work, and no vocabulary was silently coerced
+from one meaning into another — the two new fields exist independently in the schema precisely so
+neither borrowing was necessary. Positive control:
+`test_widened_bundle_with_full_selection_configuration_resolves_to_a_real_selection_config`.
+
+**4. R-1 — SUPERVISOR RULING (lead), correcting the supervisor's own earlier ratification.**
+`mastery_context_mode` is removed from the response DTO (`CSessionFields`,
+`app/domain/c_session.py`). The B2-a field set that named it in the first BLOCKED-resumption turn
+was the SUPERVISOR's ratification, and it was wrong — recording the correction here, not the
+original ratification. Reasoning, quoted from the ruling: `mastery_context_mode_for` is a total
+function of `session_mode` alone ("fixed by mode, never inferred from anything else", v3.0 §11
+Phase 4), and `session_mode` is already a response field, so the value is fully derivable
+client-side with zero information loss; exposing a redundant field that trips a governance guard
+is strictly worse than not exposing it. **The frozen guard itself
+(`tests/test_be5a_contract_freeze.py`'s `FORBIDDEN_FIELD_TERMS`) was NOT touched** — no
+allow-list was added, no guard logic modified; the field was removed instead, per the ruling's own
+explicit instruction not to touch that file. `test_mastery_context_mode_fixed_by_session_mode`
+(`test_c4_session_lifecycle.py:136`) still passes unchanged — the underlying persistence-layer
+invariant (the CHECK constraint, the column, the total function itself) was never in question,
+only the response DTO's exposure of it.
+
+**5. R-5 — SUPERVISOR RULING (lead), correcting the supervisor's own imprecise wording.** The
+three B-identity fields (`mastery_source_student_id`, `mastery_source_intervention_session_id`,
+`mastery_source_intervention_session_number`) are removed from `CreateCSessionRequest` entirely.
+R1's original text — "identity is caller-supplied, never derived" — meant the SERVER-SIDE fixture
+producer standing in for B, not the HTTP client; reading "caller" as the HTTP client was a
+reasonable reading of imprecise text, and the resulting shape (accepting these three from an
+HTTP request body) was strictly WORSE than the failure R1 was written to prevent: R1 stopped C
+manufacturing B's own provenance internally; the prior shape let an untrusted HTTP caller ASSERT
+B provenance it never produced, with nothing checking it against a real B session. Corrected: the
+same fixture producer (`fixture_b_mastery_payload_for_phase_4`, extended with a new
+`fixture_b_provenance_for_phase_4`) now supplies all four things — the seven mastery values and
+the three identity fields — for every combined-mode session, server-side only, never from the
+client. Proven both ways by `test_r5e_client_cannot_influence_b_provenance` (extra-key rejection,
+plus the persisted row's `intervention_session_id` verified equal to the fixture's own constant,
+never a client-asserted one).
+
+Also fixed, same batch, same root cause (input validation done unsafely): `session_lifecycle.py`
+used three bare `assert mastery_source_* is not None` statements to check that a combined-mode
+session's mastery identity arrived complete. `assert` is never appropriate for input validation —
+Python strips it entirely under `-O` (silently letting `None` flow into
+`adapter.validate_mastery_payload` and, downstream, the `CSessionRecord` construction), and even
+unstripped it surfaces as an uncaught `AssertionError` (an unhandled 500), not a caught,
+translatable domain error. Replaced with an explicit `if` raising the same `SF043OrderingError`
+this function already uses for the SF-043 ordering gate, since an incomplete identity triple
+alongside a present mastery payload is the same class of caller-contract violation. Provoked
+independently per field by
+`test_r5d_combined_session_with_payload_but_incomplete_identity_raises_sf043_not_assertionerror`
+(X-10).
+
+**6. REGISTER FINDING — recorded, not resolved.** `derive.py:137`'s in-source comment
+"(familiarization cap 2, c_only cap 1)" contradicts both v3.0 §11 Phase 4's own
+`fallback_difficulty_cap = 2` and the package's installed `CSelectionConfig` fixture value of 2
+for the same field. v3.0 governs today — its value is what this batch's bundle fixture carries;
+the comment is the outlier. `derive.py:134` attributes the comment to "C Parameters line 206," an
+unsigned document; C-19 (v3.0 §8) makes this comment load-bearing for Phase 9 aggregation, so it
+is a live discrepancy with downstream reach, not a footnote, and is settled only when the
+Parameters document is signed — not here, not by this batch, not by picking a value now.
+
+Separately, and NOT the same finding: `familiarization_session_difficulty_cap` has NO qualified
+source of its own. Both values available for it before this batch's ruling (an unsigned-document-
+citing prose comment, and a `TEST_FIXTURE_ONLY` builder value) happened to agree on 2, but both
+were disqualified as sources on their own terms — this is an ABSENCE of a qualified source, not a
+contradiction between two qualified ones (that is `fallback_difficulty_cap`'s problem, above, a
+different field). B1's ruling (item 1) resolves the engineering question of WHERE the value
+travels from (bundle-manifest DATA, `CALIBRATION_PENDING`) without resolving WHAT the value
+should be — the value question for both fields stays open, unchanged by this batch.
+
+**7. B4 — completion endpoint, gap explicitly filled, not specified by v3.0.** v3.0 §11 Phase 4's
+own Scope names three endpoints only (create, active, abandon) — NO completion endpoint. Its Goal
+text says "start / resume / complete / abandon" and its orchestration step 4 requires an action
+at session close, but its Scope never supplies a route for it — a defect in the plan itself, found
+in Phase 4a and left for the owner rather than patched. `POST /api/v1/c/sessions/{id}/complete`
+fills that gap under the owner's own ruling ("do Phase 4b for the three routes + legitimate
+production SelectionConfig source + completion/N-increment path"), quoted in Phase 4a's own entry
+above — this route is NOT something v3.0 itself specifies, and this entry does not imply
+otherwise. `N` increments only when `is_eligible_combined_handoff` holds, evaluated through the
+adapter (`LiveEngineCAdapter.is_eligible_combined_handoff`), never reimplemented — C-4's
+single most repeated finding in this component's register.
+
+**8. B3 — concurrency mirroring, both predicates shown side by side, disclosed honestly.**
+`CSessionRecordRepository.find_starting_or_active_for_learner` queries
+`state.in_(("starting", "active"))`; the new partial unique index
+(`uq_c_sessions_one_starting_or_active_per_learner`, migration `20260816_0005`) carries
+`postgresql_where=text("state IN ('starting', 'active')")` — the same set, verified by reading
+both from source (`test_b3_predicates_cover_the_same_set`), not asserted from memory. **'starting'
+is currently unreachable in C** — `create_session` writes only `state="active"`, never
+`"starting"`; the predicate still names it to match B's own mechanism exactly and to stay correct
+if a future phase ever introduces a `"starting"` write path. Mirroring B's mechanism (advisory
+lock before the existence check, `IntegrityError` -> `ConflictError` on the insert) is NOT the
+same as proving it holds under two real concurrent connections — this suite has no
+two-connection harness, so only the SEQUENTIAL shape is exercised by test; the partial unique
+index is the actual DB-enforced backstop if the advisory lock is ever bypassed or the race window
+is hit anyway (`test_b3_partial_unique_index_backstops_a_duplicate_active_session_directly`,
+which bypasses the application layer entirely and hits the index directly).
+
+**9. C-16 closure table, eight rows, every row a named passing test.**
+
+| Row | Passing test |
+|---|---|
+| `session_phase` column exists, populated at creation | `test_b2a_create_response_exact_key_set` |
+| Phase gate derived, not hardcoded — both sides of N/W | `test_c4_familiarization_at_n_zero_and_mastery_driven_at_n_equals_w` |
+| `c_only` phase always `c_only` regardless of N | `test_c4_c_only_session_phase_is_always_c_only_regardless_of_n` |
+| SF-043 ordering gate, both directions | `test_c4_combined_session_without_payload_raises_sf043`, `test_c4_c_only_session_with_payload_raises_sf043` |
+| No cached/stale mastery reuse (R3) | `test_c4_r3_second_session_does_not_reuse_first_sessions_mastery_payload` |
+| `mastery_context_mode` fixed by mode, not inferred | `test_mastery_context_mode_fixed_by_session_mode` (`test_c4_session_lifecycle.py:136`) — still passing after R-1 removed the field from the RESPONSE; the persistence-layer invariant this row actually tests survived that change unchanged |
+| Eligible-handoff counter (N) increments only when eligible, through the adapter | `test_b4_eligible_combined_completion_increments_n`, `test_b4_c_only_completion_never_increments_n_is_eligible_combined_handoff_returns_false` |
+| Cold-start mechanism reachable via a real HTTP request path (not function-level only) | `test_b2a_create_response_exact_key_set` (combined mode, through the real router) |
+
+All eight rows have a named, currently-passing test. **Verdict: C-16 CLOSES.**
+
+**10. Verified block.** Real `docker compose build api` (clean), then `docker compose run --rm api
+python -m pytest -q`:
+```
+439 passed, 74 skipped, 0 failed, 513 collected, 401.95s (0:06:41)
+```
+Reconciled exactly against the 421/74/495 baseline: `421 + 18 = 439` passed; skipped unchanged at
+`74`; collected `495 + 18 = 513`. The 18: 16 new tests in the new
+`tests/test_c4b_routes_and_bundle_config.py` (B1-d x2, T5 x2, B2-a x3, Q2 x1, B3 x3, B4 x3, R5e
+x1), 1 new in `test_be2_architecture_guards.py`
+(`test_openapi_contains_exactly_the_four_authorized_c_session_lifecycle_operations`), 1 new in
+`test_c4_session_lifecycle.py` (R-5d's provocation test). No existing test weakened, xfailed, or
+deleted; no skip-count change.
+
+The BE5a frozen contract (`backend/contract/openapi.v1.json`, `openapi.v1.meta.json`) was
+regenerated from the live `app.openapi()` inside the pinned image, `indent=2, sort_keys=True`
+matching the committed file's own prior convention exactly. Diffed against the pre-regeneration
+file: **additive-only** — 5 new component schemas (`CActiveSessionResponse`,
+`CSessionCommandResponse`, `CSessionFields`, `CompleteCSessionRequest`, `CreateCSessionRequest`)
+and 4 new paths (the four C routes); nothing else in the snapshot moved, no B schema touched, no
+existing path altered. Every property name on every new schema checked against all 19
+`FORBIDDEN_FIELD_TERMS` — none match. New checksum:
+`4ee2dad8abc35e3305aa04c4828f9521ae30e5326ca29e9d5aecac6d4c543e84`, written to
+`openapi.v1.meta.json`; `contract_version` stays `"v1"`.
+
+**11. Remains open.** `frontend/src/api/generated/openapi-types.ts` is now stale against the
+regenerated backend contract — no frontend file was touched this batch (out of scope), and no
+backend test catches this staleness; reconciling it is frontend work, a separate batch. The
+two-connection concurrency harness still does not exist anywhere in this suite (same disclosure
+as Phase 3b's I2/I3 and this batch's own B3). `W` and the six other `CALIBRATION_PENDING`
+parameters this batch's schema now carries as bundle-manifest DATA remain unresolved, pending
+calibration and the Parameters document's signature — nothing in this batch approves, sets, or
+narrows any of them.
+
+**Files changed this batch (git add list, dependency order; owner commits):**
+`backend/provenance/c-runtime-bundle.schema.json`, `backend/app/domain/runtime_bundle_c/types.py`,
+`backend/app/infrastructure/runtime_bundle_c/loader.py`, `backend/app/domain/live_engine_c/errors.py`,
+`backend/app/application/live_engine_c/bundle_resolution.py`,
+`backend/app/application/live_engine_c/mastery_fixture.py`,
+`backend/app/application/live_engine_c/session_lifecycle.py`,
+`backend/app/infrastructure/persistence_models.py`,
+`backend/migrations/versions/20260816_0005_c4b_one_active_session_per_learner.py`,
+`backend/app/infrastructure/repositories.py`, `backend/app/core/errors.py`,
+`backend/app/domain/c_session.py`, `backend/app/application/live_engine_c/c_session_service.py`,
+`backend/app/api/routes/c_session.py`, `backend/app/main.py`,
+`backend/tests/test_be2_architecture_guards.py`, `backend/tests/test_c4_session_lifecycle.py`,
+`backend/tests/fixtures/runtime_bundle_c/valid_unapproved_bundle_c.json`,
+`backend/tests/test_c4b_routes_and_bundle_config.py`, `backend/contract/openapi.v1.json`,
+`backend/contract/openapi.v1.meta.json`. No git command beyond read-only verification (`status`,
+`rev-parse`, `docker version`) was run this batch; nothing was staged or committed.

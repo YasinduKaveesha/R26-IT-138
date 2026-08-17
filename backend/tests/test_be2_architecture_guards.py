@@ -154,6 +154,12 @@ EXPECTED_ROUTES = {
     # BE4e (BEplan §9 BE4.6) — the two authorized next-or-complete / SAFE-standing routes.
     ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/complete", ("POST",)),
     ("/api/v1/b/sessions/{session_id}/summary", ("GET",)),
+    # Phase 4b — the four authorized Component C session-lifecycle routes (create/start, resume,
+    # abandon, complete). See AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS below.
+    ("/api/v1/c/sessions", ("POST",)),
+    ("/api/v1/c/sessions/active", ("GET",)),
+    ("/api/v1/c/sessions/{c_session_id}/abandon", ("POST",)),
+    ("/api/v1/c/sessions/{c_session_id}/complete", ("POST",)),
 }
 AUTHORIZED_INVITE_MEMBERSHIP_OPERATIONS = {
     ("/api/v1/classrooms/{classroom_id}/invites", ("POST",)),
@@ -185,6 +191,14 @@ AUTHORIZED_B_SESSION_COMPLETION_OPERATIONS = {
     ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/complete", ("POST",)),
     ("/api/v1/b/sessions/{session_id}/summary", ("GET",)),
 }
+# Phase 4b — the four authorized Component C session-lifecycle routes, mirroring
+# AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS' own role for B exactly.
+AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS = {
+    ("/api/v1/c/sessions", ("POST",)),
+    ("/api/v1/c/sessions/active", ("GET",)),
+    ("/api/v1/c/sessions/{c_session_id}/abandon", ("POST",)),
+    ("/api/v1/c/sessions/{c_session_id}/complete", ("POST",)),
+}
 PROHIBITED_SCIENTIFIC_PATH_TERMS = (
     "session", "attempt", "hint", "progress", "bkt", "mastery", "sequenc", "certif", "guess",
 )
@@ -199,7 +213,12 @@ def _current_routes() -> set[tuple[str, tuple[str, ...]]]:
 
 def test_no_new_api_route_or_lifecycle_service() -> None:
     assert _current_routes() == EXPECTED_ROUTES
-    assert not any(Path("app").rglob("*session*service*.py"))
+    # Phase 4b work order (B2) explicitly authorizes Component C's own session-lifecycle
+    # application-service layer, behind the four AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS
+    # routes above -- app/application/live_engine_c/c_session_service.py is that one, named
+    # exemption; every OTHER *session*service*.py file anywhere under app/ stays prohibited.
+    matches = {str(path) for path in Path("app").rglob("*session*service*.py")}
+    assert matches == {"app/application/live_engine_c/c_session_service.py"}, matches
 
 
 def test_openapi_contains_exactly_the_nine_authorized_invite_membership_operations() -> None:
@@ -215,11 +234,12 @@ def test_no_session_question_answer_or_scientific_route_exists() -> None:
     authorized BE2.3-BE2.4 neutral session-lifecycle routes plus the one BE4b adaptive-
     selection route (BEplan §9 BE4.2) plus the one BE4c attempt-submission route (BEplan §9
     BE4.3 + BE4.4) plus the one BE4d hint-request route (BEplan §9 BE4.5) plus the two BE4e
-    next-or-complete / SAFE-standing routes (BEplan §9 BE4.6); every other prohibited scientific
-    term remains prohibited unconditionally, including on those routes themselves — in
+    next-or-complete / SAFE-standing routes (BEplan §9 BE4.6) plus the four Phase 4b Component C
+    session-lifecycle routes (AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS); every other prohibited
+    scientific term remains prohibited unconditionally, including on those routes themselves — in
     particular every route must never contain "attempt", "hint", "progress", "bkt", "mastery",
     "sequenc", "certif", or "guess" (the BE4e routes spell completion as "complete"/"summary",
-    never "progress")."""
+    never "progress"; the C routes spell it the same way)."""
     for route in _current_routes():
         path, _ = route
         lowered = path.lower()
@@ -230,6 +250,7 @@ def test_no_session_question_answer_or_scientific_route_exists() -> None:
             or route in AUTHORIZED_B_ATTEMPT_SUBMISSION_OPERATIONS
             or route in AUTHORIZED_B_HINT_REQUEST_OPERATIONS
             or route in AUTHORIZED_B_SESSION_COMPLETION_OPERATIONS
+            or route in AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS
         ):
             terms = tuple(term for term in terms if term != "session")
         assert not any(term in lowered for term in terms), path
@@ -261,6 +282,17 @@ def test_openapi_contains_exactly_the_four_authorized_b_session_lifecycle_operat
     assert AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS <= _current_routes()
     non_session_routes = {route for route in EXPECTED_ROUTES if route not in AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS}
     assert _current_routes() - AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS == non_session_routes
+
+
+def test_openapi_contains_exactly_the_four_authorized_c_session_lifecycle_operations() -> None:
+    """Phase 4b: mirrors the B session-lifecycle route-count guard exactly, for C's own four
+    routes (create/start, resume, abandon, complete)."""
+    assert len(AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS) == 4
+    assert AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS <= _current_routes()
+    non_c_session_routes = {
+        route for route in EXPECTED_ROUTES if route not in AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS
+    }
+    assert _current_routes() - AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS == non_c_session_routes
 
 
 def test_b_session_dto_contains_no_scientific_expiry_or_attempt_fields() -> None:
