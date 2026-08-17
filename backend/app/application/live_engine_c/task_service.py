@@ -75,11 +75,26 @@ MASTERY SOURCE + IDENTITY: reuses the exact same fixture producer as ``c_session
 (``fixture_b_mastery_payload_for_phase_4`` / ``fixture_b_provenance_for_phase_4``) for combined-
 mode sessions — never from the client, same R-5 reasoning.
 
-RAW EVENTS ONLY (S6): this module writes ``CGameplayEventRecord`` rows directly
-(``game_task_offered`` on ``next_task``, ``answer_evaluated`` on ``submit_action``) and nothing
-else — no ``CTaskOpportunitySummaryRecord`` derivation. v3.0's own Phase 5 scope text names no
-summary derivation and ``SummaryPort.derive_task_opportunity_summary``'s own docstring names
-Phase 8 explicitly.
+RAW EVENTS ONLY, THROUGH PHASE 5 (S6): Phase 5 left this module writing ``CGameplayEventRecord``
+rows directly (``game_task_offered`` on ``next_task``, ``answer_evaluated`` on ``submit_action``)
+and nothing else — no terminal event, no ``CTaskOpportunitySummaryRecord`` derivation. That was
+correct for Phase 5's own scope; it was NOT because derivation belongs to Phase 8 (S6's stated
+reason was wrong even though its effect was right — see ``app/domain/live_engine_c/ports.py``'s
+``SummaryPort`` docstring, corrected this batch, T2).
+
+TERMINAL EVENT + SUMMARY DERIVATION (T1/T6, Phase 6a work order): ``submit_action`` now writes a
+``game_task_completed``/``completed_correct`` terminal event and derives+persists a
+``CTaskOpportunitySummaryRecord`` when — and only when — the submitted action evaluates correct.
+Owner ruling (T1), quoted verbatim: "One opportunity carries one ``correct_answer_payload`` and
+the evaluator returns one verdict against it. I cannot construct a coherent reading in which a
+correctly-answered opportunity stays open — a follow-on activity is a new opportunity, not a
+continuation of a solved one. And it needs no unsigned parameter: a correct answer on attempt 2 of
+a cap of 3 is ``completed_correct``, so the attempt bound never enters. The cap only governs the
+incorrect path, which is exactly why your asymmetry is real rather than an oversight." The other
+eight terminal reasons are NOT built — see ``app/application/live_engine_c/terminal_event.py``'s
+module docstring for the full mapping and T1-5's plain statement of what that leaves unclosed. The
+terminal write and the summary derivation themselves live in ``terminal_event.py`` and
+``summary_service.py`` respectively (T6-b: this module already carried three concerns).
 """
 
 from __future__ import annotations
@@ -99,6 +114,8 @@ from app.application.live_engine_c.mastery_fixture import (
     fixture_b_provenance_for_phase_4,
 )
 from app.application.live_engine_c.session_lifecycle import _learner_session_state, _provenance
+from app.application.live_engine_c.summary_service import derive_and_persist_summary
+from app.application.live_engine_c.terminal_event import write_completed_correct_terminal_event
 from app.core.errors import ActionPayloadRejectedError, ConflictError, ResourceNotFoundError
 from app.domain.c_task import CNextTaskResponse, CSubmitActionResult, CTaskFields
 from app.domain.live_engine_c.action_payload_validation import (
@@ -404,6 +421,17 @@ class TaskService:
         if instance_record is None:
             raise ResourceNotFoundError()
 
+        event_repo = CGameplayEventRecordRepository(session)
+        # T1-4 (owner ruling): checked BEFORE evaluate() is ever called -- "A network retry or a
+        # double-tap on a correct answer is an ordinary event, not an edge case, and Q4 left
+        # action submission with no idempotency key -- so this check is the only thing standing
+        # between a retry and a duplicated terminal write." A structured 409, never a second
+        # scoring.
+        if await event_repo.has_terminal_for_instance(c_task_instance_id):
+            raise ConflictError(
+                details=[{"location": ["c_task_instance_id"], "type": "task_already_terminal"}]
+            )
+
         try:
             validate_action_payload(instance_record.valid_action_space, action_payload)
         except ActionPayloadValidationError as exc:
@@ -424,19 +452,88 @@ class TaskService:
         if submission_spy is not None:
             submission_spy.append(c_task_instance_id)
 
-        event_repo = CGameplayEventRecordRepository(session)
+        # Phase 6a, LATENT DEFECT SINCE PHASE 5 (found by this batch's own derivation wiring,
+        # never visible before -- same shape as R-7's catalogue-status finding): Phase 5 wrote a
+        # SINGLE event typed "answer_evaluated" carrying action_payload directly on it. The
+        # package's own GameplayEvent model (component_c_generator.models.gameplay) permits
+        # action_payload ONLY on ('action_performed', 'answer_submitted') and forbids it on
+        # 'answer_evaluated' -- a real, structural violation, invisible through Phase 5 because
+        # nothing ever translated a persisted event back into the package's own model until this
+        # batch's derive_task_opportunity_summary call did. It also meant no "answer_submitted"
+        # event ever existed, so derive_task_opportunity_summary's own total_attempts/retry_count
+        # (both counted from answer_submitted events, behaviour/summary.py:43-46) could never
+        # have been anything but zero. Fixed here to two events, mirroring the package's real
+        # event vocabulary: submitted (action_payload only) then evaluated (evaluation_payload
+        # only), same attempt_number, consecutive event_index.
         max_index, max_timestamp = await event_repo.max_index_and_timestamp_for_instance(c_task_instance_id)
-        event_id = uuid4()
-        evaluated_event = CGameplayEventRecord(
-            c_gameplay_event_id=event_id,
+
+        # Phase 6a, second LATENT DEFECT SINCE PHASE 5 found by the same exercise: no code path
+        # anywhere ever wrote "game_task_started" (next_task writes only "game_task_offered").
+        # derive_task_opportunity_summary's own invariant requires task_started before
+        # task_completed -- see CGameplayEventRecordRepository.has_started_for_instance's own
+        # docstring. Guarded so a wrong-answer retry (still permitted; only a TERMINAL instance
+        # is blocked by T1-4) never writes it twice.
+        if not await event_repo.has_started_for_instance(c_task_instance_id):
+            started_event_id = uuid4()
+            started_event = CGameplayEventRecord(
+                c_gameplay_event_id=started_event_id,
+                c_session_id=c_session_id,
+                game_task_instance_id=c_task_instance_id,
+                task_index=instance_record.task_index,
+                event_type="game_task_started",
+                event_index=max_index + 1,
+                attempt_number=None,
+                event_timestamp_relative_ms=max_timestamp + 1,
+                action_payload=None,
+                evaluation_payload=None,
+                scaffold_code=None,
+                technical_flag=False,
+                terminal_reason=None,
+                seed_lineage_global_seed=instance_record.seed_lineage_global_seed,
+                seed_lineage_path=instance_record.seed_lineage_path,
+                seed_lineage_seed=instance_record.seed_lineage_seed,
+                generator_version=instance_record.generator_version,
+                config_checksum=_generation_config_checksum(generation_config),
+                **_provenance("c_gameplay_event", started_event_id, request_id, "c_task.started"),
+            )
+            await event_repo.add(started_event)
+            max_index, max_timestamp = max_index + 1, max_timestamp + 1
+
+        submitted_event_id = uuid4()
+        submitted_event = CGameplayEventRecord(
+            c_gameplay_event_id=submitted_event_id,
             c_session_id=c_session_id,
             game_task_instance_id=c_task_instance_id,
             task_index=instance_record.task_index,
-            event_type="answer_evaluated",
+            event_type="answer_submitted",
             event_index=max_index + 1,
             attempt_number=1,
             event_timestamp_relative_ms=max_timestamp + 1,
             action_payload=dict(action_payload),
+            evaluation_payload=None,
+            scaffold_code=None,
+            technical_flag=False,
+            terminal_reason=None,
+            seed_lineage_global_seed=instance_record.seed_lineage_global_seed,
+            seed_lineage_path=instance_record.seed_lineage_path,
+            seed_lineage_seed=instance_record.seed_lineage_seed,
+            generator_version=instance_record.generator_version,
+            config_checksum=_generation_config_checksum(generation_config),
+            **_provenance("c_gameplay_event", submitted_event_id, request_id, "c_task.action_submitted"),
+        )
+        await event_repo.add(submitted_event)
+
+        evaluated_event_id = uuid4()
+        evaluated_event = CGameplayEventRecord(
+            c_gameplay_event_id=evaluated_event_id,
+            c_session_id=c_session_id,
+            game_task_instance_id=c_task_instance_id,
+            task_index=instance_record.task_index,
+            event_type="answer_evaluated",
+            event_index=max_index + 2,
+            attempt_number=1,
+            event_timestamp_relative_ms=max_timestamp + 2,
+            action_payload=None,
             # NEVER correctness_function_id, NEVER the correct_answer_payload -- only the
             # boolean verdict (P1-d: evaluator internals must never leak).
             evaluation_payload={"is_correct": evaluation.is_correct},
@@ -448,9 +545,36 @@ class TaskService:
             seed_lineage_seed=instance_record.seed_lineage_seed,
             generator_version=instance_record.generator_version,
             config_checksum=_generation_config_checksum(generation_config),
-            **_provenance("c_gameplay_event", event_id, request_id, "c_task.action_evaluated"),
+            **_provenance("c_gameplay_event", evaluated_event_id, request_id, "c_task.action_evaluated"),
         )
         await event_repo.add(evaluated_event)
+
+        # T1 (owner ruling): completed_correct is the ONLY terminal reason built this batch. See
+        # terminal_event.py's module docstring for the full nine-reason mapping and T1-5's
+        # statement of what remains unclosed.
+        if evaluation.is_correct:
+            await write_completed_correct_terminal_event(
+                session,
+                c_session_id=c_session_id,
+                c_task_instance_id=c_task_instance_id,
+                task_index=instance_record.task_index,
+                seed_lineage_global_seed=instance_record.seed_lineage_global_seed,
+                seed_lineage_path=instance_record.seed_lineage_path,
+                seed_lineage_seed=instance_record.seed_lineage_seed,
+                generator_version=instance_record.generator_version,
+                config_checksum=_generation_config_checksum(generation_config),
+                request_id=request_id,
+            )
+            await derive_and_persist_summary(
+                session,
+                adapter=adapter,
+                c_session_id=c_session_id,
+                c_task_instance_id=c_task_instance_id,
+                student_id=FIXTURE_MASTERY_SOURCE_STUDENT_ID,
+                stu_session_id=_stu_session_id(),
+                game_task_instance_id=domain_instance.game_task_instance_id,
+                request_id=request_id,
+            )
 
         return CSubmitActionResult(
             c_task_instance_id=c_task_instance_id,

@@ -4780,3 +4780,255 @@ reaches every one of the 30 templates in practice. `is_recovery_context`'s own u
 (scaffold/recovery machinery) remains unbuilt, unrelated to and not blocking C-17's containment.
 Every `CALIBRATION_PENDING` parameter — `W`, the other six selection parameters, every generation
 parameter — remains unresolved, untouched, unapproved.
+
+## 2026-08-17 — Component C Phase 6a: task-opportunity summary derivation, wired to a real trigger
+
+**Baseline.** HEAD `6b4a7f2cb41265462f09dbfc4e41c70a9f5fd692` (Phase 5), 458 passed / 74 skipped /
+0 failed / 532 collected, verified by the supervisor's own run before this batch's work order.
+
+**Headline, stated plainly (T1-5).** As of this batch, the ONLY route by which a
+`c_task_opportunity` can ever reach a terminal state anywhere in this codebase is a
+correctly-evaluated `submit_action` call. A session that is abandoned, quit, times out, or is
+answered incorrectly forever (no attempt cap exists to close it) never terminates. This is not
+inferred from the nine-reason mapping below — it is this batch's own, disclosed boundary.
+
+**T1 — THE TERMINAL TRIGGER (OWNER RULING, not an engineering default).** Quoted verbatim: "One
+opportunity carries one `correct_answer_payload` and the evaluator returns one verdict against
+it. I cannot construct a coherent reading in which a correctly-answered opportunity stays open —
+a follow-on activity is a new opportunity, not a continuation of a solved one. And it needs no
+unsigned parameter: a correct answer on attempt 2 of a cap of 3 is `completed_correct`, so the
+attempt bound never enters. The cap only governs the incorrect path, which is exactly why your
+asymmetry is real rather than an oversight." `submit_action` now writes a
+`game_task_completed`/`completed_correct` terminal event, and only that one, when — and only
+when — the submitted action evaluates correct.
+
+- **T1-1.** All nine terminal reasons (`component_c_generator.models.gameplay.
+  TERMINAL_REASON_EVENT_TYPE`) are enumerated in `app/application/live_engine_c/terminal_event.py`
+  as `_BLOCKER_BY_TERMINAL_REASON`, each of the eight unbuilt ones mapping to its SPECIFIC
+  blocker (I4/unsigned attempt bound for `attempt_cap_exhausted`; unsigned timeout parameter for
+  `timeout_no_response`; Phase 8 untrusted-input ingestion for `skipped`/`quit_after_error`/
+  `quit_without_recent_error`/`technical_issue`; 6b's hard safety controller for
+  `safe_session_stop`; and `completed_incorrect`, reachable only via the two blocked routes
+  above). `assert_terminal_reason_built` raises `TerminalReasonNotBuiltError` carrying that exact
+  blocker for every reason but `completed_correct`. Verified against the package's LIVE
+  vocabulary at runtime (R-I pattern, R-7's precedent) — `test_t1_1_blocker_mapping_covers_
+  exactly_the_packages_own_nine_terminal_reasons`.
+- **T1-2.** `completed_correct` is the only terminal write site anywhere under `app/` —
+  AST-guard-tested (`test_only_completed_correct_writes_a_terminal_gameplay_event`, `tests/
+  test_be2_architecture_guards.py`), with a synthetic positive control proving the guard actually
+  fires on a wrong literal, a dynamic value, and correctly passes the one legitimate literal and
+  the non-terminal `None` case. A behavioral companion
+  (`test_t1_2_only_completed_correct_writes_a_terminal_event_behaviorally`) proves an incorrect
+  submission never writes a terminal event and never persists a summary.
+- **T1-3/T1-4.** Supervisor correction applied: the named migration
+  (`uq_c_gameplay_events_one_terminal_per_opportunity`) already exists under a different name —
+  `uq_c_gameplay_events_at_most_one_terminal_per_instance` (Phase 3b, `migrations/versions/
+  20260816_0003_c3b_gameplay_event_invariants.py:96`, model at `persistence_models.py:923-930`).
+  NO MIGRATION THIS BATCH. The other two thirds of the triple were built instead:
+  `CGameplayEventRecordRepository.has_terminal_for_instance` (the service-level check, called
+  TWICE — once at the top of `submit_action`, before `evaluate` is ever invoked (T1-4: "A
+  network retry or a double-tap on a correct answer is an ordinary event, not an edge case, and
+  Q4 left action submission with no idempotency key"), and again inside
+  `write_completed_correct_terminal_event` immediately before the terminal insert), and an
+  `IntegrityError` → `ConflictError` catch around that insert, backstopped by the existing
+  partial unique index. A retry against an already-terminal instance returns a structured 409
+  (`{"location": ["c_task_instance_id"], "type": "task_already_terminal"}`) and the
+  `submission_spy` proves `evaluate()` is never reached a second time — proven end-to-end in
+  `test_t1_3_t1_4_correct_answer_terminates_and_a_retry_is_a_structured_409_not_a_rescoring`.
+
+**Two latent defects since Phase 5 (commit `6b4a7f2cb41265462f09dbfc4e41c70a9f5fd692`), found by
+this batch's own exercise of the derivation path — the THIRD instance of this exact pattern in
+this register, after the fixture catalogue's unrecognised `status` (R-7, Phase 5 continuation) and
+the parked generation guard: something goes unbuilt or unvalidated at the point it is written, and
+stays invisible until a LATER phase becomes the first real consumer of the thing it broke. Here,
+nothing ever translated a persisted `c_gameplay_events` row back into the package's own
+`GameplayEvent` model until this batch's `derive_task_opportunity_summary` call did — Phase 5
+itself never needed to, S6 having deferred derivation.**
+
+1. Commit `6b4a7f2c` persisted `answer_evaluated` rows carrying `action_payload` directly on them.
+   `component_c_generator.models.gameplay.ACTION_PAYLOAD_EVENT_TYPES` (`models/gameplay.py:43`)
+   permits `action_payload` only on `('action_performed', 'answer_submitted')` and excludes
+   `answer_evaluated` — so those rows, exactly as persisted by that commit, could never be read
+   back into the package model at all; the very first attempt raised `pydantic.ValidationError`.
+   It also meant no `answer_submitted` event ever existed, so `total_attempts`/`retry_count`
+   (both counted from `answer_submitted` events, `behaviour/summary.py:43-46`) could never have
+   been anything but zero for any real submission. Fixed to two events — `answer_submitted`
+   (action_payload only) then `answer_evaluated` (evaluation_payload only), same
+   `attempt_number`, consecutive `event_index`.
+2. No code path anywhere ever wrote a `game_task_started` event (`next_task` writes only
+   `game_task_offered`). `derive_task_opportunity_summary`'s own invariant requires
+   `task_started` whenever `task_completed` is true, so no real submission could ever have
+   produced a valid summary. Fixed: `submit_action` now writes `game_task_started` once per
+   instance (guarded by `CGameplayEventRecordRepository.has_started_for_instance`, so a
+   wrong-answer retry — still permitted, only a terminal instance is blocked — never duplicates
+   it).
+
+Both are disclosed here as findings this batch made and fixed because they blocked T1's own
+named deliverable outright, not as a scope expansion chosen independently — reported, not
+silently absorbed. WHY NO BACKFILL IS NEEDED, stated rather than left as an open risk: nothing in
+Component C is live, the Q1 smoke gate has never lifted, and every `c_gameplay_events` row in
+existence anywhere was written by this test suite's own fixtures, never by a real learner session
+— so there is no real data in the old, invalid shape to migrate, and none can have been created
+since commit `6b4a7f2c` because nothing outside this suite has ever called `submit_action`.
+
+**T2 — THE S6 CORRECTION (A1), not a reversal.** Owner ruling, quoted verbatim: "Derivation is
+Phase 6's first act, not Phase 8's... Keeping Phase 5 clear of it was still correct, so the S6
+ruling's effect was right and its stated reason was wrong. Record it that way rather than as a
+reversal." `app/domain/live_engine_c/ports.py`'s `SummaryPort` docstring corrected from "Phase 8"
+to "Phase 6", with a note naming the tell: `PolicyEvidencePort` sits directly below it, marked
+Phase 6, and consumes exactly what `SummaryPort` produces.
+
+**T3 — THE PARITY TEST, NARROWED (owner's own self-correction).** Quoted verbatim: "I called the
+pinned research function an oracle and let the implied subject be derivation correctness. It is
+not. Both paths bottom out in the same shipped function, so a pass establishes that the backend
+persists events faithfully and reconstitutes the summary without dropping or mistranslating a
+field — and establishes nothing whatever about whether the derivation is right. C-9 is standing
+proof of that, since the derivation is demonstrably wrong on overlapping pauses and this test
+would pass anyway." And: "The cannot-pass-by-construction property survives for the narrower
+claim, because path 1 bypasses every line of backend code." Built exactly that way in
+`tests/test_c6a_summary_derivation.py::test_t3_parity_backend_persists_and_reconstitutes_
+without_dropping_or_mistranslating_a_field`: path 1 calls `derive_task_opportunity_summary`
+directly on hand-built package `GameplayEvent` objects; path 2 persists the same fixture as real
+`CGameplayEventRecord` rows, runs `derive_and_persist_summary` (through the adapter), and reads
+the row back. Fields enumerated from the package's own `CTaskOpportunitySummary.model_fields`,
+never hand-listed. The docstring states the limit in its own words (T3-b) and discloses that four
+of twenty-five fields — the STU-formatted identity strings, never persisted in string form on
+`c_task_opportunity_summaries` — are compared BY CONSTRUCTION, not by an independent round trip;
+the other twenty-one are genuinely independently verified. Both negative controls kept: a
+mutated-timestamp fixture proves `task_latency_sec` is a real computed field, not a constant
+(A2-c1); a single-field flip on path 2's own values proves the comparison itself is sensitive
+(A2-c2).
+
+**T4 — THE EVIDENCE-CONSTRUCTION GUARD, two classes, two rules, both built, symmetric.** Owner:
+"you tightened my rule correctly. My wording named only the package type and would have been
+defeated by constructing the domain mirror and passing it where evidence is expected." T4-b (the
+DOMAIN `PolicyObservableEvidence`, constructed ONLY in
+`app/infrastructure/live_engine_c/adapter.py`) was built in this batch's first pass, with a
+positive-presence check and synthetic violation controls
+(`test_domain_policy_observable_evidence_constructed_only_in_the_c_adapter`,
+`test_domain_evidence_guard_fires_on_synthetic_violations`).
+
+**T4-a — first reported BLOCKED, then built under a SUPERVISOR RULING (not an owner approval).**
+The owner's original wording ("package `CPolicyObservableEvidence` NEVER constructed anywhere
+under app/") collided with `app/infrastructure/live_engine_c/adapter.py:478`'s
+`_to_pkg_policy_observable_evidence` (already built, Phase 1b/2, unwired until 6b's
+`decide_adaptation` is called) — a pure field-by-field domain → package translation, the same X-3
+boundary shape as `_to_pkg_mastery_payload`, an already-uncontested translation in the same file.
+That block, filed in this batch's first implementation pass, was correct: the owner did not have
+this call site in view when the absolute wording was written. SUPERVISOR RULING, correcting that
+wording rather than ratifying it: the package class may be constructed ONLY in
+`app/infrastructure/live_engine_c/adapter.py` — the SAME adapter-only shape already ruled for the
+domain mirror (T4-b), not the absolute "never anywhere under app/" the earlier order stated. Built
+symmetric: `_package_policy_observable_evidence_violations`/
+`test_package_policy_observable_evidence_constructed_only_in_the_c_adapter`/
+`test_package_evidence_guard_fires_on_synthetic_violations` mirror the domain-side guard exactly,
+matching both the real class name and the adapter's own `_PkgCPolicyObservableEvidence` import
+alias. Both halves' "does not scan `tests/`" proof merged into one test
+(`test_evidence_construction_guards_do_not_scan_tests_directory`, T4-d: 6b's own criterion-1
+positive controls require test-side construction of either class and neither guard may ever be
+read as forbidding that). THE RESIDUAL, recorded rather than solved: inside `adapter.py` itself,
+nothing structurally prevents building either evidence object from fabricated values and
+translating/passing it on — the guard's boundary is the FILE, not the construction's own
+provenance, the same pre-existing trust model `_to_pkg_mastery_payload` already lives under. Not a
+new gap this batch introduces; inherited, not closed.
+
+**T5 — THE C-9 CHARACTERIZATION TEST.** `behaviour/summary.py:97-107` pairs `pause_starts`/
+`pause_ends` POSITIONALLY via `zip`, with no interval matching. Stream start1=0, start2=1000,
+end1=2000, end2=3000 (both non-technical): the shipped derivation ACTUALLY produces
+`inactive_time_sec=4.0` (pairs (0,2000)=2000ms and (1000,3000)=2000ms, summed). The CORRECT value
+is the union of `[0,2000]` and `[1000,3000]`, which overlap on `[1000,2000]`: union length
+3000ms = 3.0s. The derivation double-counts the overlapping second.
+`test_t5_c9_overlapping_pauses_are_double_counted_not_unioned` asserts the ACTUAL value (4.0),
+never the correct one, and is NOT marked xfail — a characterization test records present
+behaviour so a future change to the pinned function becomes visible. Not fixed: no validation,
+no pre-sorting, the shipped derivation is byte-identical pinned code. Phase 8's stricter
+telemetry-validation layer owns the fix.
+
+**T6 — scope.** Derivation runs through the adapter (`SummaryPort`, `adapter.py:1056-1059` — built
+and unwired since Phase 1b, called for the first time by this batch) — never reimplemented in
+application code (C-4). Split into a new `app/application/live_engine_c/summary_service.py`
+(`task_service.py` already carried three concerns). A summary is derived ONLY on the terminal
+write, never a sweep/cron/batch — `test_t6c_sf040_analogue_an_instance_with_no_terminal_event_
+produces_no_summary` proves an instance with no terminal event produces no summary row, enforced
+by `derive_task_opportunity_summary` itself raising on an incoherent stream, not by application
+code (A5-c/T6-c, the C analogue of SF-040's "no row for the thing that didn't happen" — B's own
+vocabulary not imported). T6-d ("derived only, never sampled") is proven with a stub adapter
+carrying a sentinel value no real derivation could produce
+(`test_t6d_summary_record_fields_are_a_pure_passthrough_of_the_derivation_output`) — every
+persisted field is a straight `summary.<field>` copy in `summary_service.py`, nothing computed
+there. No migration this batch — `c_task_opportunity_summaries` already existed (Phase 3a).
+
+**T7 — recorded for 6b (finding, not a decision).** Windowing happens entirely inside the shipped,
+installed `pipeline/evidence.py:95` (`window = history[-config.recent_window_task_count:]`,
+inside `build_policy_evidence`). `pipeline/session.py` is genuinely absent from the packaged tree
+(confirmed against Batch 1a's own 16-module never-ship inventory). Per the owner's own framing,
+this means criterion 2's parity reduces to completeness and ordering of the backend's own history
+assembly and needs no externally-generated fixture — 6b's work order rules on this.
+
+**T8 — register, two items, separate closing conditions, Item 2 broadened.** Item 1
+(`mastery_driven` initial difficulty never routed through `apply_safety`) closes when
+`prior_session_end_state` exists AND a pre-task-1 check is authorized. Item 2 (the recovery cap
+receives no live input at any moment, pre- or post-task) closes when Phase 9 produces and
+persists `prior_session_end_state` — BROADER than the original C-17 scoping (pre-task-1 only);
+the owner's own sharpening, not this batch's invention. Both remain contained by the Q1 smoke
+gate and both block it lifting. Owner: "Phase 6's positive controls will prove the branch can
+fire while production never feeds it — B-1's exact shape, caught in advance this time" (6b's own
+job).
+
+**Verified — full suite, clean (T4-a's final step included).**
+```
+477 passed, 74 skipped, 0 failed, 551 collected
+```
+Reconciles exactly against the batch's true starting baseline, 458/74/532:
+`458 + 19 = 477` passed, `532 + 19 = 551` collected, skips unchanged. The +19 breaks down as: 17
+from this batch's first pass (12 new tests in `tests/test_c6a_summary_derivation.py` + 5 new tests
+in `tests/test_be2_architecture_guards.py`) plus 2 more from T4-a's build (
+`test_package_policy_observable_evidence_constructed_only_in_the_c_adapter`,
+`test_package_evidence_guard_fires_on_synthetic_violations`, both **SIGNAL**, new). ONE existing
+test was renamed and materially expanded rather than left alone —
+`test_domain_evidence_guard_does_not_scan_tests_directory` became
+`test_evidence_construction_guards_do_not_scan_tests_directory`, now proving the "does not scan
+tests/" property for BOTH evidence classes instead of only the domain one — labelled **UPDATE**.
+No other existing test's assertions were touched.
+
+**Files changed this batch (git add list, dependency order; owner commits):**
+`backend/app/domain/live_engine_c/ports.py`,
+`backend/app/infrastructure/repositories.py`,
+`backend/app/application/live_engine_c/terminal_event.py`,
+`backend/app/application/live_engine_c/summary_service.py`,
+`backend/app/application/live_engine_c/task_service.py`,
+`backend/tests/test_be2_architecture_guards.py`,
+`backend/tests/test_c6a_summary_derivation.py`. No git command beyond read-only verification
+(`status`, `rev-parse`, `docker version`) was run this batch; nothing was staged or committed.
+
+**Unverified / disclosed, plainly.** T4-a's residual (recorded above: nothing inside `adapter.py`
+structurally proves an evidence construction there is fed from `build_policy_evidence`'s real
+output, only that it happens in the one audited file) is an inherited property of the X-1/X-3
+boundary, not resolved by this guard and not claimed to be.
+`app/application/live_engine_c/summary_service.py`'s reuse of
+`FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID` for `GameplayEvent.intervention_session_id` in
+EVERY session mode is BUILDER JUDGMENT — UNRATIFIED: R-8 named only `student_id`/`c_session_id`
+for this exact reasoning, not this field, so this is a disclosed, unratified extension by direct
+analogy, not something R-8's own text covers. `_generation_config_checksum`'s BUILDER JUDGMENT —
+UNRATIFIED status (Phase 5, unchanged) still stands. The `game_task_started` and
+`answer_submitted`/`answer_evaluated` fixes above were necessary to make T1's own deliverable
+work at all and are disclosed as findings, not pre-authorized scope.
+
+**Out of scope, confirmed.** Policy, adaptation, `decide_adaptation`, `apply_safety`, evidence
+assembly, the increase-block loop, Q-learning — none touched; all 6b. Phase 8 telemetry
+validation, including fixing C-9 or ingesting any client-reported terminal reason — not touched.
+Aggregation and `prior_session_end_state` (Phase 9) — not touched. Scaffolds, rewards, `c_to_3` —
+not touched. No frontend file touched. No wheel, pyproject, provenance manifest, requirements.*,
+Dockerfile, or `.dockerignore` change. No Yass commit. `b_learner_skill_states` and
+`opportunity_selection.py` not read. The smoke-mode gate was neither lifted nor weakened. No new
+scientific parameter, threshold, or bound was introduced. No migration was added or modified.
+
+**Remains open.** Everything named as open at the end of the Phase 5 entry above, unchanged and
+still open. Additionally: the terminal-trigger gap named in T1-5 (eight of nine terminal reasons
+still have no route to close a task opportunity at all — T4-a's completion does not touch this);
+T4-a's own residual (adapter.py's single-audited-file trust model does not itself prove an
+evidence construction there traces back to `build_policy_evidence`'s real output — recorded, not
+solved, not blocking 6b by name); and confirmation, not merely absence, that no backfill is
+needed for the two latent Phase-5 event-shape defects fixed this batch — nothing is live, the
+smoke gate has never lifted, and every existing `c_gameplay_events` row was written by this test
+suite's own fixtures, so no real learner data exists in the old, invalid shape.

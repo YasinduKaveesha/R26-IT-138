@@ -195,7 +195,17 @@ class EvaluationPort(Protocol):
 
 
 class SummaryPort(Protocol):
-    """Pure gameplay-event -> task-opportunity-summary derivation (v3.0 §7, Phase 8)."""
+    """Pure gameplay-event -> task-opportunity-summary derivation (v3.0 §7, Phase 6).
+
+    T2 (Phase 6a work order, correcting Phase 5's own S6 ruling): this docstring previously said
+    "Phase 8" -- taken from the same misattribution S6 made when it deferred summary derivation
+    out of Phase 5. Owner ruling, quoted verbatim: "Derivation is Phase 6's first act, not Phase
+    8's... Keeping Phase 5 clear of it was still correct, so the S6 ruling's effect was right and
+    its stated reason was wrong. Record it that way rather than as a reversal." The tell was
+    always visible one class down: ``PolicyEvidencePort`` sits directly below this one, is marked
+    Phase 6 in its own docstring, and consumes exactly what this port produces (``history:
+    Sequence[TaskOpportunitySummary]``) -- a Phase-8 consumer for a Phase-6 producer was never a
+    coherent reading."""
 
     def derive_task_opportunity_summary(self, events: Sequence[GameplayEvent]) -> TaskOpportunitySummary: ...
 

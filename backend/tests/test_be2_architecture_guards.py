@@ -890,3 +890,280 @@ def test_default_config_guard_mechanism_fires_on_synthetic_violations() -> None:
             clean_tree, param_name=param_name, factory_name=factory_name
         )
         assert not clean_violations, (param_name, factory_name, clean_violations)
+
+
+# =====================================================================================
+# Phase 6a — T1-2: completed_correct is the ONLY terminal_reason any CGameplayEventRecord(...)
+# construction under app/ may carry (owner ruling T1, "record it as an owner ruling... not an
+# engineering default" -- see app/application/live_engine_c/terminal_event.py's module docstring
+# for the full nine-reason mapping this guard-tests the single built exception of).
+# =====================================================================================
+
+
+def _terminal_event_write_violations(tree: ast.AST) -> tuple[list[tuple[str, str]], int]:
+    """Scans for CGameplayEventRecord(...) calls whose terminal_reason keyword is anything other
+    than the literal string "completed_correct" or the literal None. Returns
+    (violations, legitimate_site_count) rather than asserting inline, so the same logic drives
+    both the real app/ scan and the synthetic positive control below."""
+    violations: list[tuple[str, str]] = []
+    legitimate_count = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        callee = node.func
+        name = callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", None)
+        if name != "CGameplayEventRecord":
+            continue
+        for kw in node.keywords:
+            if kw.arg != "terminal_reason":
+                continue
+            value = kw.value
+            if isinstance(value, ast.Constant) and value.value is None:
+                break
+            if isinstance(value, ast.Constant) and value.value == "completed_correct":
+                legitimate_count += 1
+                break
+            violations.append(("non_completed_correct_terminal_write", ast.dump(node)[:200]))
+            break
+    return violations, legitimate_count
+
+
+def test_only_completed_correct_writes_a_terminal_gameplay_event() -> None:
+    """SIGNAL (T1-2): no CGameplayEventRecord(...) construction anywhere under app/ ever sets
+    terminal_reason to anything but the literal "completed_correct" or None, and exactly ONE such
+    "completed_correct" site exists app-wide (app/application/live_engine_c/terminal_event.py).
+    Would FAIL if a future edit added a second terminal-event write site, gave terminal_reason a
+    dynamically-computed value this guard cannot prove safe, or set it to any of the other eight
+    terminal reasons T1-1 leaves unbuilt -- "Otherwise Phase 8 can wire the client-reported
+    reasons in without confronting this ruling, which is the failure mode the fail-closed mapping
+    exists to prevent.\""""
+    total_violations: list[tuple[Path, tuple[str, str]]] = []
+    total_legitimate = 0
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        violations, legitimate = _terminal_event_write_violations(tree)
+        total_violations.extend((path, v) for v in violations)
+        total_legitimate += legitimate
+    assert not total_violations, total_violations
+    assert total_legitimate == 1, (
+        "expected exactly one completed_correct terminal-write site", total_legitimate
+    )
+
+
+def test_terminal_event_write_guard_fires_on_synthetic_violations() -> None:
+    """POSITIVE CONTROL (T1-2): proves _terminal_event_write_violations actually detects a
+    non-completed_correct literal terminal_reason and a dynamically-supplied one, and correctly
+    distinguishes (never flags) the one legitimate literal shape and the non-terminal None shape."""
+    wrong_literal_violations, wrong_literal_legit = _terminal_event_write_violations(
+        ast.parse("CGameplayEventRecord(terminal_reason='skipped')\n", filename="<synthetic-violation>")
+    )
+    assert wrong_literal_violations and wrong_literal_legit == 0
+
+    dynamic_violations, dynamic_legit = _terminal_event_write_violations(
+        ast.parse(
+            "reason = get_reason()\nCGameplayEventRecord(terminal_reason=reason)\n",
+            filename="<synthetic-violation>",
+        )
+    )
+    assert dynamic_violations and dynamic_legit == 0
+
+    legitimate_violations, legitimate_count = _terminal_event_write_violations(
+        ast.parse(
+            "CGameplayEventRecord(terminal_reason='completed_correct')\n",
+            filename="<synthetic-legitimate>",
+        )
+    )
+    assert not legitimate_violations and legitimate_count == 1
+
+    none_violations, none_legit = _terminal_event_write_violations(
+        ast.parse("CGameplayEventRecord(terminal_reason=None)\n", filename="<synthetic-clean>")
+    )
+    assert not none_violations and none_legit == 0
+
+
+# =====================================================================================
+# Phase 6a — T4: the evidence-construction guard, TWO classes, TWO rules, SYMMETRIC (owner:
+# "you tightened my rule correctly. My wording named only the package type and would have been
+# defeated by constructing the domain mirror and passing it where evidence is expected.").
+#
+# T4-a was reported BLOCKED in this batch's first implementation pass: the owner's literal
+# wording ("NEVER constructed anywhere under app/") collided with app/infrastructure/
+# live_engine_c/adapter.py:478's _to_pkg_policy_observable_evidence -- already built, Phase 1b/2,
+# unwired until 6b's decide_adaptation is called -- which constructs exactly this package class,
+# by design, to cross X-3 back into package form for the AdaptationPort call. That block was
+# correct: the owner did not have this file in view when the absolute wording was written.
+#
+# SUPERVISOR RULING (correcting the owner's literal wording on evidence the owner did not have,
+# NOT an owner approval): the package class may be constructed ONLY in
+# app/infrastructure/live_engine_c/adapter.py -- the SAME X-1/T4-b shape already ruled for the
+# domain mirror, not the absolute "never anywhere under app/" the earlier wording stated.
+# _to_pkg_policy_observable_evidence is a pure field-by-field domain -> package translation, the
+# same X-3 boundary shape as _to_pkg_mastery_payload (an already-uncontested translation in the
+# same file) -- adapter.py is the one file this whole register already trusts to touch both type
+# systems (X-1's own dispensation), so both directions of this one class pair belong to the same
+# rule, not two different ones.
+#
+# BOTH classes, BOTH now adapter-only, BOTH proven with a synthetic violation and a clean control:
+#   - package CPolicyObservableEvidence  -> app/infrastructure/live_engine_c/adapter.py ONLY
+#   - domain  PolicyObservableEvidence   -> app/infrastructure/live_engine_c/adapter.py ONLY (T4-b)
+#
+# T4-d, restated for both halves: 6b's own criterion-1 positive controls REQUIRE test-side
+# construction of either class, and NEITHER guard below may ever be read as forbidding that --
+# owner's words: "Test-constructed evidence is a stimulus. It is never persisted, no child's data
+# flows from it, and it is the one test shape that would have caught B-1. A builder refusing them
+# by over-applying my Phase 5 ruling has made the opposite error." Neither guard scans tests/ (see
+# the dedicated proof below).
+#
+# THE RESIDUAL (recorded, not solved): inside adapter.py itself, nothing structurally prevents
+# building a domain (or now package) evidence object FROM NOTHING and translating/passing it on
+# -- the guard's boundary is the FILE, not the call's own provenance. This is the identical,
+# already-accepted trust model _to_pkg_mastery_payload lives under: one audited file, not a proof
+# that every construction inside it is itself fed from build_policy_evidence's real output. Not a
+# new gap this batch introduces; a pre-existing property of the X-1/X-3 boundary this guard
+# inherits rather than closes.
+# =====================================================================================
+
+
+def _evidence_construction_violations(tree: ast.AST, *, class_name: str) -> list[str]:
+    """Shared scan logic for BOTH evidence-class guards (package and domain) -- flags any
+    construction of ``class_name`` found in the given tree. The caller is responsible for
+    skipping app/infrastructure/live_engine_c/adapter.py, the one file both rulings permit to
+    construct either class."""
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            callee = node.func
+            name = callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", None)
+            if name == class_name:
+                violations.append(ast.dump(node)[:200])
+    return violations
+
+
+def _domain_policy_observable_evidence_violations(tree: ast.AST) -> list[str]:
+    """T4-b: flags any construction of the DOMAIN PolicyObservableEvidence
+    (app/domain/live_engine_c/types.py:284)."""
+    return _evidence_construction_violations(tree, class_name="PolicyObservableEvidence")
+
+
+def _package_policy_observable_evidence_violations(tree: ast.AST) -> list[str]:
+    """T4-a (supervisor ruling, this batch): flags any construction of the PACKAGE
+    CPolicyObservableEvidence (component_c_generator.models.adaptation), found via its import
+    ALIAS as used in adapter.py (``_PkgCPolicyObservableEvidence``) -- a plain-name match, same
+    mechanism as every other guard in this file; this does not resolve arbitrary aliasing
+    elsewhere under app/, only the one alias the adapter's own X-3 translation actually uses."""
+    violations = _evidence_construction_violations(tree, class_name="CPolicyObservableEvidence")
+    violations += _evidence_construction_violations(tree, class_name="_PkgCPolicyObservableEvidence")
+    return violations
+
+
+def _evidence_guard_result(
+    violation_fn, *, real_source_name: str
+) -> tuple[list[tuple[Path, str]], bool]:
+    """Runs one evidence-construction guard across app/, skipping (and separately recording
+    whether) app/infrastructure/live_engine_c/adapter.py itself constructs the class -- shared by
+    both the package and domain real-scan tests below so the two guards stay mechanically
+    identical, not just similarly worded."""
+    adapter_constructs_it = False
+    violations: list[tuple[Path, str]] = []
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        found = violation_fn(tree)
+        if path == _ALLOWED_C_ADAPTER_PATH:
+            adapter_constructs_it = bool(found)
+            continue
+        violations.extend((path, v) for v in found)
+    return violations, adapter_constructs_it
+
+
+def test_domain_policy_observable_evidence_constructed_only_in_the_c_adapter() -> None:
+    """SIGNAL (T4-b): the domain PolicyObservableEvidence dataclass is constructed ONLY in
+    app/infrastructure/live_engine_c/adapter.py, and IS constructed there (a positive-presence
+    check, same shape as the validators-import guard's own "adapter DOES import it" assertion --
+    a guard whose real exception vanished would otherwise pass vacuously). Would FAIL if any other
+    file under app/ constructed PolicyObservableEvidence directly, or if the adapter's own
+    construction were ever removed without this guard noticing."""
+    violations, adapter_constructs_it = _evidence_guard_result(
+        _domain_policy_observable_evidence_violations, real_source_name="domain"
+    )
+    assert not violations, violations
+    assert adapter_constructs_it, "expected the adapter to construct PolicyObservableEvidence at least once"
+
+
+def test_package_policy_observable_evidence_constructed_only_in_the_c_adapter() -> None:
+    """SIGNAL (T4-a, supervisor ruling): the PACKAGE CPolicyObservableEvidence is constructed
+    ONLY in app/infrastructure/live_engine_c/adapter.py (via its
+    _PkgCPolicyObservableEvidence import alias, adapter.py:478's _to_pkg_policy_observable_evidence
+    -- the X-3 domain -> package translation for the AdaptationPort call), and IS constructed
+    there. Would FAIL if any other file under app/ constructed the package class directly, or if
+    the adapter's own construction were ever removed without this guard noticing."""
+    violations, adapter_constructs_it = _evidence_guard_result(
+        _package_policy_observable_evidence_violations, real_source_name="package"
+    )
+    assert not violations, violations
+    assert adapter_constructs_it, "expected the adapter to construct CPolicyObservableEvidence at least once"
+
+
+def test_domain_evidence_guard_fires_on_synthetic_violations() -> None:
+    """POSITIVE CONTROL (T4-b/T4-c): proves _domain_policy_observable_evidence_violations actually
+    detects a bare construction, and passes clean on source that never constructs it -- this guard
+    "will pass trivially today" outside the adapter (T4-c's own words), so this control is what
+    stops that from being worthless."""
+    violating_tree = ast.parse(
+        "PolicyObservableEvidence(session_mode='c_only')\n", filename="<synthetic-violation>"
+    )
+    assert _domain_policy_observable_evidence_violations(violating_tree)
+
+    clean_tree = ast.parse(
+        "build_policy_evidence(session_mode='c_only')\n", filename="<synthetic-clean>"
+    )
+    assert not _domain_policy_observable_evidence_violations(clean_tree)
+
+
+def test_package_evidence_guard_fires_on_synthetic_violations() -> None:
+    """POSITIVE CONTROL (T4-a): proves _package_policy_observable_evidence_violations actually
+    detects a bare construction under either the real class name or the adapter's own import
+    alias, and passes clean on source that never constructs it."""
+    violating_tree_real_name = ast.parse(
+        "CPolicyObservableEvidence(session_mode='c_only')\n", filename="<synthetic-violation>"
+    )
+    assert _package_policy_observable_evidence_violations(violating_tree_real_name)
+
+    violating_tree_alias = ast.parse(
+        "_PkgCPolicyObservableEvidence(session_mode='c_only')\n", filename="<synthetic-violation>"
+    )
+    assert _package_policy_observable_evidence_violations(violating_tree_alias)
+
+    clean_tree = ast.parse(
+        "build_policy_evidence(session_mode='c_only')\n", filename="<synthetic-clean>"
+    )
+    assert not _package_policy_observable_evidence_violations(clean_tree)
+
+
+def test_evidence_construction_guards_do_not_scan_tests_directory() -> None:
+    """T4-d, both halves (owner's words: "Test-constructed evidence is a stimulus. It is never
+    persisted, no child's data flows from it, and it is the one test shape that would have caught
+    B-1. A builder refusing them by over-applying my Phase 5 ruling has made the opposite error."):
+    proves, by actually running BOTH guards against tests/-shaped trees, that construction there
+    is never flagged -- not merely documented as permitted. Would FAIL if either guard were ever
+    broadened to scan tests/ (e.g. by changing its caller's glob root), silently forbidding the
+    exact positive-control shape 6b's criterion-1 needs."""
+    domain_test_side_tree = ast.parse(
+        "def test_something():\n"
+        "    evidence = PolicyObservableEvidence(session_mode='c_only', current_difficulty_level=3)\n"
+        "    assert evidence.session_mode == 'c_only'\n",
+        filename="tests/test_synthetic_positive_control.py",
+    )
+    package_test_side_tree = ast.parse(
+        "def test_something():\n"
+        "    evidence = CPolicyObservableEvidence(session_mode='c_only', current_difficulty_level=3)\n"
+        "    assert evidence.session_mode == 'c_only'\n",
+        filename="tests/test_synthetic_positive_control.py",
+    )
+    # Both guards WOULD flag these trees if handed them -- what protects tests/ is that no caller
+    # in this file ever hands either guard a tests/ tree (both real-scan tests above glob
+    # Path("app").rglob("*.py") only). Demonstrated here by calling both guards directly against
+    # tests/-shaped trees and confirming the CALLER discipline, not the function, is the boundary.
+    assert _domain_policy_observable_evidence_violations(domain_test_side_tree)
+    assert _package_policy_observable_evidence_violations(package_test_side_tree)
+    for path in Path("app").rglob("*.py"):
+        assert "tests" not in path.parts

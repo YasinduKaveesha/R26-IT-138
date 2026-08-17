@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.persistence_models import (
     AppUser, AppUserLearnerLink, AttemptRecord, AuditEvent, Base, CGameplayEventRecord, Classroom,
     ClassroomInvite, ClassroomMembership, CLearnerLocalStateRecord, CRuntimeBundleRecord,
-    CSessionRecord, CTaskInstanceRecord, CTaskOpportunityRecord, HintEventRecord, IdempotencyRecord,
+    CSessionRecord, CTaskInstanceRecord, CTaskOpportunityRecord, CTaskOpportunitySummaryRecord,
+    HintEventRecord, IdempotencyRecord,
     ItemOpportunityRecord, Learner, LearnerSkillStateRecord, PresentationTokenRecord,
     RuntimeBundleRecord, SessionAggregateResultRecord, SessionEvent, SessionRecord,
     SkillCertificationResultRecord, SkillStateTransitionRecord, TaskInstanceRecord, TeacherProfile,
@@ -184,6 +185,15 @@ class CTaskInstanceRecordRepository(SqlAlchemyNeutralRepository[CTaskInstanceRec
 class CGameplayEventRecordRepository(SqlAlchemyNeutralRepository[CGameplayEventRecord]):
     model_type = CGameplayEventRecord
 
+    # Phase 6a: hand-copied from component_c_generator.models.gameplay.TERMINAL_EVENT_TYPES, the
+    # same convention persistence_models.py's own ck_c_gameplay_events_terminal_reason /
+    # uq_c_gameplay_events_at_most_one_terminal_per_instance already use -- this file is not
+    # app/infrastructure/live_engine_c/adapter.py, the one file X-1 permits a
+    # component_c_generator import root, so the package's own tuple cannot be read here at
+    # runtime. tests/test_c6a_summary_derivation.py verifies this tuple against the package's
+    # live value (the R-I pattern).
+    _TERMINAL_EVENT_TYPES = ("game_task_completed", "game_task_skipped", "game_task_quit")
+
     async def max_index_and_timestamp_for_instance(self, game_task_instance_id: UUID) -> tuple[int, int]:
         """Phase 3b's own triggers require ``event_index`` to be consecutive from 1 and
         ``event_timestamp_relative_ms`` to be non-decreasing within a task -- both queried live
@@ -199,6 +209,58 @@ class CGameplayEventRecordRepository(SqlAlchemyNeutralRepository[CGameplayEventR
         ).one()
         max_index, max_timestamp = row
         return (max_index or 0), (max_timestamp or 0)
+
+    async def has_started_for_instance(self, game_task_instance_id: UUID) -> bool:
+        """Phase 6a: LATENT DEFECT SINCE PHASE 5, found by this batch's own derivation wiring --
+        no code path anywhere in this codebase ever wrote a "game_task_started" event
+        (next_task writes only "game_task_offered"; submit_action wrote none at all before this
+        batch), so derive_task_opportunity_summary's own invariant ("a never-started task cannot
+        be completed") could never have been satisfied by any real submission. submit_action now
+        writes one "game_task_started" event, guarded by this check so a second submit_action
+        call against the same instance (a wrong-answer retry, still permitted -- only a
+        TERMINAL instance is blocked, T1-4) does not write it twice."""
+        count = await self.session.scalar(
+            select(func.count()).select_from(CGameplayEventRecord).where(
+                CGameplayEventRecord.game_task_instance_id == game_task_instance_id,
+                CGameplayEventRecord.event_type == "game_task_started",
+            )
+        )
+        return bool(count)
+
+    async def has_terminal_for_instance(self, game_task_instance_id: UUID) -> bool:
+        """Phase 6a, T1-3/T1-4: the service-level half of the exactly-one-terminal triple -- the
+        DB-enforced half is the existing partial unique index
+        (uq_c_gameplay_events_at_most_one_terminal_per_instance, persistence_models.py:923)."""
+        count = await self.session.scalar(
+            select(func.count()).select_from(CGameplayEventRecord).where(
+                CGameplayEventRecord.game_task_instance_id == game_task_instance_id,
+                CGameplayEventRecord.event_type.in_(self._TERMINAL_EVENT_TYPES),
+            )
+        )
+        return bool(count)
+
+    async def list_ordered_for_instance(self, game_task_instance_id: UUID) -> Sequence[CGameplayEventRecord]:
+        """Phase 6a: the full, ``event_index``-ordered event stream for one task instance --
+        summary derivation's own input shape (SummaryPort). Never filtered, never truncated:
+        derive_task_opportunity_summary raises on an incoherent stream itself (e.g. not exactly
+        one terminal event) rather than this query silently hiding one."""
+        result = await self.session.execute(
+            select(CGameplayEventRecord)
+            .where(CGameplayEventRecord.game_task_instance_id == game_task_instance_id)
+            .order_by(CGameplayEventRecord.event_index)
+        )
+        return result.scalars().all()
+
+
+class CTaskOpportunitySummaryRecordRepository(SqlAlchemyNeutralRepository[CTaskOpportunitySummaryRecord]):
+    model_type = CTaskOpportunitySummaryRecord
+
+    async def find_by_instance(self, game_task_instance_id: UUID) -> CTaskOpportunitySummaryRecord | None:
+        return await self.session.scalar(
+            select(CTaskOpportunitySummaryRecord).where(
+                CTaskOpportunitySummaryRecord.game_task_instance_id == game_task_instance_id
+            )
+        )
 
 
 class SessionEventRepository(SqlAlchemyNeutralRepository[SessionEvent]):
