@@ -5798,3 +5798,367 @@ F-2 (now BLOCKED, not open-with-a-migration -- closing condition rewritten above
 test-reachable-only adaptation path (OPEN, same shape as F-2, closes alongside it); R2-5's upstream
 generator fix (BLOCKED pending a gate not yet given, owner is Yass/the generator, not this
 codebase).
+
+## 2026-08-19 — Component C Phase 8: server-side telemetry validation
+
+v3.0 §11 Phase 8, quoted: "Treat the client's event stream as untrusted input." Marked "no B
+precedent"; both of this batch's own planning turns established there is no PACKAGE precedent
+either -- H1-a, stated explicitly: C-4 ("never reimplement the package's logic") does not bite
+here, because there is no package logic to reimplement. Every check this batch writes is new
+application logic, a genuine first for this codebase, not a call-through.
+
+**R0, WIDENED (owner ruling, recorded as a standing procedural rule, not an observation about this
+batch alone):** "the R0 rule was written for unreachability claims and you applied it to a
+catching claim, which found eight gaps where v3.0 named one. That generalisation is worth
+recording as part of the rule rather than as an observation about this batch -- ANY CLAIM THAT A
+MECHANISM DOES SOMETHING NEEDS THE SAME FULL TRACE AS A CLAIM THAT IT DOESN'T." Applied to this
+batch's own claims below (the inactivity-plausibility structural check, see K2-h) and to the
+guarded accessor's own scan (K2-a).
+
+**K1 -- THE RULE, both halves together, in one sentence (owner ruling: "ingest" means accept into
+the SCORED, DERIVED record, never "write bytes"):**
+
+> Phase 8 ingests every structurally well-formed submission into the append-only event store
+> unconditionally -- persisted always -- and refuses to let a distrusted stream ever reach a
+> scored, derived record -- scored never.
+
+Owner's reason, which travels with the rule: "A malformed wrapper does not make the actions inside
+it fictional, and a persisted bad stream is recoverable by a later fix while a refused one is not.
+That asymmetry decides it." Concretely: `telemetry_validation.py` never writes, deletes, or
+mutates a `c_gameplay_events` row -- every check is read-only. It only decides whether
+`derive_task_opportunity_summary` (the SCORING step) may run.
+
+**K2-a -- the guarded accessor (J1-2), built as designed.**
+`telemetry_validation.get_derivable_history_for_session` is the only code under `app/` permitted
+to call `CTaskOpportunitySummaryRecordRepository.list_ordered_for_session` -- enforced by an AST
+guard in `test_be2_architecture_guards.py` mirroring the T4 evidence-construction guards exactly:
+scans all of `app/`, one allow-listed file, a POSITIVE-PRESENCE assertion (so a vanished real call
+cannot pass vacuously), `tests/` not scanned, a synthetic violation proving it fires, and a clean
+control that must not. `adaptation_service.py:146` -- the one raw read, supervisor-verified in the
+second planning turn -- now calls the accessor instead; its own `CTaskOpportunitySummaryRecordRepository`
+import was removed (no longer used directly in that file). Forward-behaviour finding, recorded as
+planned: the scan covers `app/` by construction, so Phase 9's aggregation and C->3 consumers trip
+it on their first run if they ever call `list_ordered_for_session` directly; extending the
+allow-list is a visible diff, never a silent pass.
+
+**K2-b -- the verdict is row-absence (J1-3), no stored verdict field, no eleventh table.** All ten
+existing tables were checked before concluding, not merely the conclusion recorded:
+`c_task_opportunity_summaries` -- wrong semantics (a verdict must exist independently of whether
+derivation ran; conflating the two means synthesizing summary fields for an untrusted stream, the
+exact thing this batch prevents) and its own `UniqueConstraint("game_task_instance_id")`
+(`persistence_models.py:969`) forbids a second row without loosening it; `c_gameplay_events` --
+wrong semantics (a verdict about the stream is not part of the stream being judged) and its
+`event_type` CHECK constraint has no slot for one; `c_learner_local_state` -- wrong grain (one row
+per learner, `:1107`); `c_policy_decisions`/`c_safety_events`/`c_scaffold_events` -- each a decision
+log for a different domain concept, columns specific to it; `c_sessions`/`c_task_opportunities`/
+`c_task_instances`/`c_session_aggregate_results` -- identity/lifecycle/Phase-9 tables, none shaped
+for repeatable judgment records. The design that needs none of them: a distrusted stream simply
+produces no `c_task_opportunity_summaries` row (Phase 8's validator, wired at the derivation
+trigger, never lets one be written); if the validator is later corrected (C-9's own premise), a
+later attempt performs the SAME INSERT it always would have -- no UPDATE, no conflict, nothing to
+supersede, because nothing wrong was ever stored.
+
+**K2-c -- gaps are visible, not absent (J1-4), built as designed.** The accessor computes OFFERED
+(every `c_task_opportunities` row, via a new `CTaskOpportunityRecordRepository.list_ordered_for_session`
+method), DERIVABLE (every `c_task_opportunity_summaries` row), and, for every offered task NOT
+derivable, whether it reached a terminal gameplay event (`CGameplayEventRecordRepository.
+has_terminal_for_instance`, an EXISTING method, resting on the Phase 3b partial-unique index --
+Q2/K2-d: self-sufficient, never dependent on `c_task_opportunities.terminal_reason`; see K5 below).
+A non-empty gap set raises `DistrustedHistoryGapError` rather than returning a truncated list --
+never 1, 2, 4 for a distrusted task 3. What stops, precisely: `build_evidence_for_session` (and
+therefore `decide_and_persist_adaptation`) refuses for that session from the next evidence-assembly
+call onward -- the adaptation/policy decision, not the check, refuses (H3's inversion). Task-serving
+and scaffold-serving are UNAFFECTED by this specific gap, because `decide_and_persist_scaffold_level`
+reads only the current task's own event stream, never session history (verified this register,
+prior batches). Disclosed honestly: `decide_and_persist_adaptation` has no live caller under `app/`
+(register-reconciliation batch, this same register) -- this refusal is exercisable only from tests
+today (`test_gap_in_derivable_history_raises_rather_than_truncates`), the same shape already on
+record for every other pre-live gap in this project.
+
+**K2-e -- no sixth parameter family.** Every candidate field is blocked, so a sixth family would
+gate nothing the other five do not already gate. UNBUILT, each with its own blocker:
+- retry cap (I4) -- BLOCKED since Phase 3b on the unsigned Parameters document; the Parameters
+  doc's own "cap 10" (`R26-IT-138_Component_C_Empirical_Statistical_Parameters_v1.0.md:676`,
+  `ENGINEERING_ASSUMPTION`/`CALIBRATION_PENDING`) is a GENERATION-side sampling truncation for the
+  offline synthetic-learner simulator, disqualified by provenance, not availability -- the same
+  laundering I4 already rejected.
+- latency magnitude -- BLOCKED, same shape: `[0.3, 90.0]s` appears in both
+  `Phase_C3_..._Telemetry_Spec_v1.0.md:213` and the Parameters doc (`:670,942,954`), both tagged
+  `ENGINEERING_ASSUMPTION`/`CALIBRATION_PENDING`, both generation-side sampling clamps, not a
+  stated validation threshold.
+- inactivity magnitude -- BLOCKED, no document anywhere states an "is one idle period plausible in
+  isolation" cutoff; the Parameters doc's Gamma sampling parameters (§8.4) are, again, generation-
+  side, disqualified the same way.
+- clock-drift tolerance -- BLOCKED, no governed numeric tolerance exists for "is the client's
+  claimed elapsed time plausible against real wall-clock elapsed time."
+`tests/test_c8_telemetry_validation.py::test_no_unbuilt_numeric_threshold_check_has_been_added`
+asserts none of these four exists as a callable in `telemetry_validation.py` -- a SIGNAL that fires
+the moment one is added without this register being updated first.
+
+**K2-f -- the validator is its own module** (`app/application/live_engine_c/telemetry_validation.py`),
+called from `summary_service.derive_and_persist_summary` -- THE DERIVATION TRIGGER -- immediately
+before `adapter.derive_task_opportunity_summary` is called, never from `task_service.py`.
+
+**K2-g -- retry bounds split, as planned.** The structural half (attempt_number's own scope --
+present only on `ATTEMPT_SCOPED_EVENT_TYPES`) was already built and enforced at the DB layer in
+Phase 3b (`ck_c_gameplay_events_attempt_number_scope`, `persistence_models.py:917-919`) -- Phase 8
+adds nothing new here, confirmed rather than assumed by reading that constraint again this batch.
+The numeric cap stays tracked as BLOCKED on I4, per K2-e above -- one item, one place, not
+re-litigated.
+
+**K2-h -- the six buildable checks, built, each with its own acceptance test in
+`tests/test_c8_telemetry_validation.py`:**
+- **Terminal uniqueness** -- exactly one, not merely at most one (the DB's own partial unique
+  index already gives "at most one"; this is the "at least one" half). Tests: zero-terminal and
+  two-terminal rejections, both passing.
+- **Index continuity** -- `event_index` consecutive from 1. Test: a gap (`[1,2,4]`) rejected.
+- **Monotonicity** -- `event_timestamp_relative_ms` non-decreasing in claimed order. Test: a
+  timestamp regression rejected.
+- **Pause pairing including overlap** -- single-pass, at-most-one-open-pause algorithm (never the
+  derivation's own positional `zip`) -- catches overlap, unpaired starts, unpaired ends, and an end
+  preceding its own start. Tests for all four shapes, including the C-9 fixture itself (K2-i, below).
+- **Inactivity plausibility, structural half** -- built as planned, but R0 (widened) applies to
+  its own claim: traced honestly in the module's own comment rather than left implied, given
+  monotonicity and pause-pairing/no-overlap both already run first, every pause interval is
+  already proven bounded within `[first_ts, last_ts]` and pairwise disjoint, so the sum of
+  disjoint sub-intervals of a bounded range cannot exceed that range's length -- THIS CHECK CANNOT
+  INDEPENDENTLY FIRE TODAY given the current shape of pause-pairing, and no synthetic violation
+  for it exists in the test file (that absence is the trace, not an oversight). Kept as
+  defense-in-depth: if pause-pairing's own no-overlap rule is ever loosened (C3 §10's own
+  qualifier, "no overlap unless explicitly supported"), this line becomes load-bearing again: a
+  reader who removed it now, seeing it never fire, would silently lose that future protection.
+- **Clock discipline, ordinal half** -- server-observed receipt order (`ProvenanceMixin.
+  created_at_utc`, H6's own finding: already the receipt time, no migration) must not contradict
+  claimed order. A separate function, `validate_clock_discipline`, operating on the raw persisted
+  row (the domain `GameplayEvent` carries no receipt timestamp). Tests: a clean non-decreasing
+  case and a contradicted-order rejection.
+
+**K2-i -- H4-a, the C-9 fixture reused verbatim, refusal proven before derivation.**
+`test_pause_pairing_rejects_overlapping_pauses_the_c9_characterization_case` reuses Phase 6a's own
+`test_t5_c9_overlapping_pauses_are_double_counted_not_unioned` fixture (start1=0, start2=1000,
+end1=2000, end2=3000, both non-technical) against the pure validator function. A second,
+DB-backed test, `test_c9_fixture_refused_before_derivation_and_action_payload_never_nulled`,
+persists the same shape as real rows via a real instance and calls `derive_and_persist_summary`
+directly, proving THE WIRING: `TelemetryStreamRejectedError` (check="pause_pairing") is raised,
+no `CTaskOpportunitySummaryRecord` is ever persisted for the instance, and the raw events remain
+exactly as written. H4-b honored throughout: `behaviour/summary.py` is untouched, still pinned,
+still miscounts this exact stream if ever called directly (proven by Phase 6a's own test, not
+re-proven here) -- the validator is a prior, separate layer, never a fix.
+
+**K2-j -- H5, three provocations plus the never-nulled positive test, all passing.**
+`test_h5b_technical_event_never_becomes_an_error` -- a mid-stream `technical_issue` event does not
+increment `consecutive_error_max_within_task` (0, not 1). `test_h5b_technical_terminal_never_becomes_a_quit`
+-- a terminal event with `terminal_reason="technical_issue"`, `technical_flag=True` yields
+`quit_after_error is False` and `technical_issue is True`. `test_h5b_technical_pause_never_feeds_inactivity_burden`
+-- a technical-flagged pause contributes zero to `inactivity_periods`/`inactive_time_sec` (C3 §10,
+quoted in the module: "technical/app/network pauses are marked technical and must not increase
+learner inactivity burden"). All three use the REAL, pinned derivation (H4-b: not reimplemented)
+and additionally confirm Phase 8's own validator does not itself reject a well-formed technical
+stream, never conflating "technical" with "malformed." The positive test,
+`test_c9_fixture_refused_before_derivation_and_action_payload_never_nulled` (K2-i, above), doubles
+as H5-a: the child's real submitted `action_payload` (`{"submitted_total": 3}`) is read back
+byte-identical from the DB after the stream was rejected -- a test that would FAIL if
+`action_payload` were ever nulled on a distrusted stream, the exact regression class C-5/B's own F2
+names.
+
+**K2-k -- acceptance criteria, PROPOSED BY THIS BATCH. v3.0 states none for Phase 8, as it did not
+for Phase 7 (the same precedent).**
+1. Every buildable check runs before derivation ever sees the stream, on every submission.
+2. The C-9 characterization fixture is provably rejected by this layer, reusing Phase 6a's own
+   fixture, before `derive_task_opportunity_summary` is reachable.
+3. No check lacking a governed bound is approximated; each (retry cap, latency magnitude,
+   inactivity magnitude, clock-drift magnitude) is named UNBUILT with its blocker, guarded by a
+   SIGNAL test against a future unsourced addition.
+4. A distrusted-but-well-formed event's `action_payload` is never nulled -- proven, not asserted.
+5. A technical-flagged event is proven, by three provocations, never to become an error, a quit,
+   or a contributor to inactivity burden.
+6. The guarded accessor refuses rather than truncates a gapped history -- proven, with the honest
+   disclosure that this is test-exercisable only today.
+7. No frontend, no derivation fix, no threshold resolved, no gate lifted, no eleventh table.
+
+**K3 -- THE STATED TRADE-OFF, in the owner's own terms, not "no persisted why."**
+Owner ruling, quoted: "An excluded task opportunity is a HOLE IN A RESEARCH DATASET. This data
+feeds Component 3's clustering, labels and risk models. Missing data with an unrecorded reason is
+the standard threat to validity, because you cannot distinguish missing-at-random from
+missing-systematically. If malformed streams correlate with anything real -- slower devices,
+children who quit more, a particular grade -- then the exclusions are systematically biased and
+the analysis is corrupted in a way nobody can detect after the fact. That is discovered at analysis
+time, which is when it is unfixable." And why re-running the validator later is not the answer:
+"'Would this stream be excluded now' is answerable from the immutable stream and is not the
+question. 'Why was it excluded then, such that it never entered the derived record' is the
+question, and a corrected validator cannot answer it -- worse, it answers confidently and wrongly.
+If the new validator passes a stream the old one rejected, the reviewer concludes the exclusion was
+a bug, when it may have been correct under a check that no longer exists."
+
+**K3-a -- Phase 8 SHIPS AS DESIGNED, this batch, no durable exclusion record built.** Owner:
+"Nothing is live, there are no real exclusions, and no gap is currently unexplained." True today:
+no session can be created in production (X2-3, unchanged), `decide_and_persist_adaptation` has no
+live caller, and every distrusted-stream test in this batch is a direct, test-side construction --
+there is no real exclusion anywhere for this durable record to explain yet.
+
+**K3-b -- register entry, with a STRICTER deadline than every other pre-gate-lift item.** Owner:
+"Those coincide today, but a pilot run would separate them, and this is the one item where being
+late by one session is already too late -- the first unexplained exclusion cannot be
+retroactively explained." Recorded as its own condition, distinct from "before the gate lifts":
+**THE DURABLE EXCLUSION RECORD MUST EXIST BEFORE FIRST REAL DATA, not merely before the gate on
+session creation lifts.** If a pilot or calibration run ever separates those two moments (real data
+flowing before every parameter family reaches `{APPROVED}`), this item closes BEFORE that
+separated first-data moment, not merely before the gate.
+
+**K4 -- CONSOLIDATED FINDING (owner ruling: "it wants designing once rather than twice"): THE
+DERIVED RECORD HAS NO SUPERSESSION MECHANISM, IN EITHER DIRECTION.**
+- Wrongly EXCLUDED (K3, above) -- the reason is unrecordable today, and reconstruction degrades
+  the moment the validator changes (C-9 guarantees this: it is proof some verdicts will be wrong).
+- Wrongly PASSED -- the summary row exists, is wrong, is IN the scored record, and
+  `UniqueConstraint("game_task_instance_id")` (`persistence_models.py:969`) structurally prevents
+  correcting it without deletion.
+
+**K4-b, severity:** the wrongly-PASSED half is HIGHER SEVERITY. Owner: "bad data counted as good is
+worse than good data missing, and it is the half C-9 makes concrete rather than hypothetical." C-9
+IS a wrongly-passed case today: the shipped derivation, called directly (not through Phase 8), still
+miscounts the exact fixture this batch's own tests exercise (4.0s instead of 3.0s) -- Phase 8
+prevents this specific shape from reaching the summaries table only by refusing it BEFORE
+derivation runs; it does not and cannot fix a row already wrong from some OTHER cause the
+structural checks in this batch do not catch (e.g. a defect in the pinned derivation's own
+arithmetic that this batch's six checks have no visibility into).
+
+**K4-c, predates this batch:** stated so this reads as a design limitation found late, not one
+introduced now. `UniqueConstraint("game_task_instance_id", name="uq_c_task_opportunity_summaries_instance")`
+has existed since Phase 3a (`persistence_models.py:969`); the absence of any supersession path for
+a wrong summary row is a property of that schema, unchanged by anything in Phase 6a, 7, or this
+batch.
+
+**K4-d, both faces are v3.0 amendments, their own batch, per the Phase 7 precedent (do not fold
+into Phase 8 at the point it becomes convenient).** NOT DESIGNED, NOT BUILT this batch. Recorded
+as a single, consolidated, future register item: **the derived record needs a supersession
+mechanism for BOTH a wrongly-excluded stream (K3's durable reason) AND a wrongly-passed summary
+row (a correction path that does not require deleting an append-only-intended row)** -- one design
+question, not two, because a design for one likely bears on the other (both are, at root, "how
+does this schema represent 'a later, better-informed judgment about an already-recorded task
+opportunity' without mutating or deleting the original record").
+
+**K5 -- REGISTER ENTRY: THE UNWRITTEN COLUMN, R0 (widened) applied -- traced, not merely
+asserted.** `c_task_opportunities.terminal_reason` (`persistence_models.py:814`, nullable,
+CHECK-constrained to the same nine-value enum `c_gameplay_events.terminal_reason` uses) is never
+populated by any code path under `app/`. Traced: grep for `terminal_reason\s*=` across `app/`
+finds writes only inside `terminal_event.py` (`:179`, `terminal_reason="completed_correct"`) and
+`task_service.py` (three sites, `:409/511/536/562`) -- every one of them constructs a
+`CGameplayEventRecord`, never a `CTaskOpportunityRecord`. No code path anywhere under `app/`
+constructs a `CTaskOpportunityRecord` with `terminal_reason` set to anything but its default (the
+column has no `server_default`, so every real row leaves it implicitly NULL via ORM default
+handling). Owner: "a column that exists and is never populated is a mechanism that does not do
+something, and it belongs in the register on the same footing as one that cannot." Status: OPEN,
+UNBUILT -- not scheduled by this or any prior work order. Phase 8's own guarded accessor (K2-c)
+was designed to be, and is, self-sufficient without this column (Q2/K2-d), so this gap does not
+block anything built this batch -- it is recorded because it exists, independent of whether
+anything currently depends on it.
+
+**Verified — full suite, clean.**
+```
+550 passed, 74 skipped, 0 failed, 624 collected
+```
+Reconciles exactly against 530/74/604: `530 + 20 = 550` passed, `604 + 20 = 624` collected, skips
+unchanged. The +20 is exactly: 17 new tests in `tests/test_c8_telemetry_validation.py`, 3 new
+tests in `tests/test_be2_architecture_guards.py` (the guarded-accessor AST guard's own
+positive-presence test, synthetic-violation control, and tests/-exemption proof). **UPDATE, not
+SIGNAL** (existing assertions changed to match a real, correct behaviour change, not weakened):
+`test_t6c_sf040_analogue_an_instance_with_no_terminal_event_produces_no_summary`
+(`test_c6a_summary_derivation.py`) -- now expects `TelemetryStreamRejectedError`, the MORE
+SPECIFIC exception Phase 8's own validator raises one layer earlier than the derivation's own
+generic `ValueError`, which still exists, unfixed, unreached from this call site now;
+`test_t6d_summary_record_fields_are_a_pure_passthrough_of_the_derivation_output`
+(`test_c6a_summary_derivation.py`) -- its own setup now persists one real terminal event before
+calling `derive_and_persist_summary`, so Phase 8's validator (which now runs before ANY adapter,
+stub or real) passes and the stub adapter's own passthrough behaviour -- this test's actual
+subject -- is still reached and still proven; its assertions are byte-for-byte unchanged.
+
+**Files created:**
+`backend/app/application/live_engine_c/telemetry_validation.py`,
+`backend/tests/test_c8_telemetry_validation.py`.
+
+**Files modified:**
+`backend/app/domain/live_engine_c/errors.py` (`TelemetryStreamRejectedError`,
+`DistrustedHistoryGapError`), `backend/app/infrastructure/repositories.py`
+(`CTaskOpportunityRecordRepository.list_ordered_for_session`,
+`CTaskInstanceRecordRepository.find_by_opportunity`),
+`backend/app/application/live_engine_c/summary_service.py` (validator wired at the derivation
+trigger), `backend/app/application/live_engine_c/adaptation_service.py` (the guarded accessor
+replaces the raw read at what was line 146), `backend/tests/test_be2_architecture_guards.py` (the
+guarded-accessor AST guard), `backend/tests/test_c6a_summary_derivation.py` (two UPDATEs, above),
+`backend/buildLog1.md` (this entry, appended).
+
+No git command beyond read-only verification (`status`, `rev-parse`) was run this batch; nothing
+was staged or committed.
+
+**Out of scope, confirmed.** An eleventh table -- none needed, none added; escalation was
+considered (K2-b) and found unnecessary. The durable exclusion record (K3) and the supersession
+mechanism (K4) -- recorded, never built. Phase 9 aggregation, `prior_session_end_state`, `c_to_3`
+-- untouched except K2-a's forward-behaviour statement. The upstream generator change -- untouched,
+still BLOCKED pending a gate not given. Fixing the derivation -- not touched, `behaviour/summary.py`
+byte-identical throughout. No frontend file. No wheel/pyproject/provenance/requirements/Dockerfile/
+`.dockerignore` change. No Yass commit -- `SPEC.md`/the C3 phase spec/the Parameters doc read-only,
+cited by path, no commit hash (C-6). `b_learner_skill_states`, `opportunity_selection.py`,
+`hint_request.py` -- not read this batch. No gate lifted or weakened. No threshold resolved -- I4
+and its three siblings stay UNBUILT, named, not approximated. No bundle schema change. No migration
+-- confirmed unneeded at both planning turns and again here; none was added.
+
+**Remains open.** Everything named open at the end of the register-reconciliation entry above,
+unchanged, plus: K3-b's durable exclusion record (deadline: before first real data, stricter than
+"before the gate lifts"); K4's consolidated supersession-mechanism finding (its own future v3.0
+amendment, covering both the wrongly-excluded and wrongly-passed halves); K5's unwritten
+`c_task_opportunities.terminal_reason` column (OPEN, UNBUILT, not currently blocking anything);
+the inactivity-plausibility structural check's own disclosed non-independence (K2-h) -- kept as
+defense-in-depth, not removed, but never claimed as independently proven until pause-pairing's own
+rules change.
+
+## 2026-08-19 — Component C Phase 8, FINAL STEP: correction to the inactivity check's retention
+## rationale
+
+TEXT ONLY (one comment block, `telemetry_validation.py:143-159`). No behaviour change, no new
+test, no code path touched. Corrects, not restates, the Phase 8 entry immediately above.
+
+**L-1 -- the trace stays; the reason given for KEEPING the line was wrong, not merely optimistic.**
+The Phase 8 entry above (K2-h) already established the inactivity-plausibility structural check
+cannot independently fire today, given monotonicity and pause-pairing/no-overlap both already
+running first -- that trace is correct and unchanged. What was wrong is the ORIGINAL rationale for
+retaining the dormant line, attributed to the builder: it said a future loosening of
+pause_pairing's own overlap rule "would make this line load-bearing again." SUPERVISOR
+CORRECTION: it would not. The check's own computation pairs pauses via
+`zip(pause_starts, pause_ends)` -- POSITIONALLY -- the exact C-9 defect shape this whole batch
+exists to catch elsewhere. Under a permitted overlap (start1, start2, end1, end2), that same zip
+sums 2000ms + 2000ms = 4000ms against a true union of 3000ms: it would OVER-COUNT and fire
+SPURIOUSLY, rejecting a stream with no sound basis, rather than protecting anything. The comment
+now states this plainly: the line is dormant today, its CURRENT implementation would NOT be a
+valid check if overlap were ever permitted, and it is kept as a MARKER forcing a future revisit --
+not as a protection that would activate correctly. See `telemetry_validation.py:143-159` for the
+corrected text in full.
+
+**L-2 -- R0, WIDENED, a level further than either prior application.** The first application (this
+register's own Phase 8 planning) caught a claim about what a mechanism DOES catch (H4-c's
+derivation trace). The second (K2-h, this same Phase 8 entry) caught a claim about whether a
+mechanism CAN independently fire at all. This third application catches something one level
+further in: not a claim about the CHECK's own behaviour, but a claim about WHY IT IS SAFE TO KEEP
+-- a JUSTIFICATION, not a behavioural claim. R0's own text ("any claim that a mechanism does
+something needs the same full trace as a claim that it doesn't") did not name justifications
+explicitly; this batch extends it there by application, not by rewording the rule itself. The
+original justification is attributed to the builder (this session, the prior Phase 8 batch); the
+correction is attributed to the supervisor, per this turn's own work order (L-1).
+
+**Verified — full suite, clean, unchanged.**
+```
+550 passed, 74 skipped, 0 failed, 624 collected
+```
+Reconciles exactly against 530/74/604 (the baseline this whole Phase 8 arc started from):
+`530 + 20 = 550` passed, `604 + 20 = 624` collected, skips unchanged -- identical to the count
+verified at the end of the prior Phase 8 entry. Zero tests added, zero removed, zero behaviour
+changed this step; only a comment was rewritten.
+
+**Files changed this step (git add list; owner commits):**
+`backend/app/application/live_engine_c/telemetry_validation.py` (one comment block,
+`:143-159`, no code change), `backend/buildLog1.md` (this entry, appended). No git command beyond
+read-only verification (`status`, `rev-parse`) was run this batch; nothing was staged or
+committed.
+
+**Out of scope, confirmed.** No behaviour change. No new test. No code path touched beyond the one
+comment block. Everything named out of scope in the Phase 8 entry above remains untouched, unread,
+unchanged.

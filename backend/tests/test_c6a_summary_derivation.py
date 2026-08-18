@@ -32,6 +32,7 @@ from app.application.live_engine_c.terminal_event import (
     assert_terminal_reason_built,
 )
 from app.core.errors import ConflictError
+from app.domain.live_engine_c.errors import TelemetryStreamRejectedError
 from app.domain.live_engine_c.types import GameplayEvent, SeedLineage, TaskOpportunitySummary
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import (
@@ -310,9 +311,17 @@ def test_t1_2_only_completed_correct_writes_a_terminal_event_behaviorally() -> N
 def test_t6c_sf040_analogue_an_instance_with_no_terminal_event_produces_no_summary() -> None:
     """SF-040 interaction (A5-c/T6-c): the C analogue of "a fully missed slot emits no row" is
     that an instance whose event stream never reaches a terminal event must never produce a
-    summary. This is enforced by derive_task_opportunity_summary itself raising ValueError on a
-    stream with zero terminal events (behaviour/summary.py:32-34) -- proven here directly, not
-    inferred, and confirmed that no summary row exists afterward regardless."""
+    summary.
+
+    UPDATE (Phase 8): this used to be enforced by derive_task_opportunity_summary itself raising
+    ValueError on a stream with zero terminal events (behaviour/summary.py:32-34). Phase 8's own
+    telemetry validator now runs BEFORE that derivation call (H4-a's own requirement -- the stream
+    must be refused before derive_task_opportunity_summary is reachable) and catches this same
+    zero-terminal-events condition first, raising the more specific TelemetryStreamRejectedError
+    instead -- the derivation's own ValueError is still there, still pinned, still fires if ever
+    reached directly (untouched, H4-b), but this call site never reaches it anymore. The
+    underlying guarantee this test proves -- no summary row for an instance that never reached a
+    terminal event -- is unchanged and, if anything, now enforced one layer earlier."""
     alembic("upgrade", "head")
 
     async def exercise() -> None:
@@ -322,7 +331,7 @@ def test_t6c_sf040_analogue_an_instance_with_no_terminal_event_produces_no_summa
             # Only the game_task_offered event exists at this point -- next_task's own write,
             # never a terminal one.
             adapter = LiveEngineCAdapter()
-            with pytest.raises(ValueError):
+            with pytest.raises(TelemetryStreamRejectedError):
                 await derive_and_persist_summary(
                     session,
                     adapter=adapter,
@@ -360,12 +369,47 @@ _SENTINEL_CONSECUTIVE_ERROR_MAX = 424242
 
 
 def test_t6d_summary_record_fields_are_a_pure_passthrough_of_the_derivation_output() -> None:
+    """UPDATE (Phase 8): this test isolates the PERSISTENCE layer's passthrough behaviour with a
+    stub adapter, deliberately never exercising the real derivation logic. Phase 8's own telemetry
+    validator now also runs before ANY adapter (stub or real) is called, on the REAL persisted
+    event stream -- so this test's own setup must now persist a well-formed stream (reaching one
+    terminal event) for the validator to pass, where previously only next_task's own
+    game_task_offered write was needed (the stub adapter made what happened after that
+    irrelevant). The test's own ASSERTIONS -- that every persisted field is the stub's sentinel
+    value, verbatim -- are unchanged."""
     alembic("upgrade", "head")
 
     async def exercise() -> None:
         database_engine, factory = isolated_database()
         async with factory() as session:
             _, c_session_id, instance_id, _subject = await _create_real_instance_via_smoke_mode(session)
+            # Phase 8's validator requires a well-formed stream (one terminal event, consecutive
+            # index, non-decreasing timestamp) before any adapter -- stub or real -- is reached.
+            terminal_id = uuid4()
+            session.add(
+                CGameplayEventRecord(
+                    c_gameplay_event_id=terminal_id,
+                    c_session_id=c_session_id,
+                    game_task_instance_id=instance_id,
+                    task_index=1,
+                    event_type="game_task_completed",
+                    event_index=2,
+                    attempt_number=None,
+                    event_timestamp_relative_ms=0,
+                    action_payload=None,
+                    evaluation_payload=None,
+                    scaffold_code=None,
+                    technical_flag=False,
+                    terminal_reason="completed_correct",
+                    seed_lineage_global_seed=1,
+                    seed_lineage_path=[],
+                    seed_lineage_seed=1,
+                    generator_version="test-gen-1",
+                    config_checksum="fixture-checksum",
+                    **provenance("c_gameplay_event", terminal_id),
+                )
+            )
+            await session.flush()
             sentinel_summary = TaskOpportunitySummary(
                 student_id=FIXTURE_MASTERY_SOURCE_STUDENT_ID,
                 intervention_session_id=FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID,

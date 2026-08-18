@@ -124,6 +124,42 @@ class ConfigurationFamilyNotUsableError(LiveEngineCError):
         )
 
 
+class TelemetryStreamRejectedError(LiveEngineCError):
+    """Phase 8 (v3.0 §11 Phase 8, "Treat the client's event stream as untrusted input"): raised by
+    ``telemetry_validation`` when a task opportunity's event stream fails a STRUCTURAL check
+    (monotonicity, index continuity, terminal uniqueness, pause pairing/overlap, the structural
+    half of inactivity plausibility, or the ordinal half of clock discipline) -- never for a
+    plausibility judgment, since no threshold for any of those is governed (I4 and its three
+    siblings stay BLOCKED, unbuilt). K1: raising this means derivation and scoring are refused for
+    this stream -- the already-persisted ``c_gameplay_events`` rows themselves are untouched,
+    never deleted, never nulled. Carries the specific structural check name, never a threshold
+    value (none exists to carry)."""
+
+    def __init__(self, check: str, detail: str) -> None:
+        self.check = check
+        self.detail = detail
+        super().__init__(f"telemetry stream rejected ({check}): {detail}")
+
+
+class DistrustedHistoryGapError(LiveEngineCError):
+    """Phase 8, J1-4: raised by ``telemetry_validation.get_derivable_history_for_session`` when a
+    session's history contains a GAP -- a task opportunity that was offered and reached a terminal
+    gameplay event but has no ``c_task_opportunity_summary_id`` row (i.e. Phase 8's own validator
+    refused it). Never returns a truncated history silently: a gap makes the WHOLE session history
+    request refuse, by the same inversion principle already governing this register (fail-closed
+    means refuse the protected activity -- here, the adaptation decision that would otherwise be
+    computed over an unusable window -- never refuse the check itself by returning a shorter list
+    unremarked)."""
+
+    def __init__(self, c_session_id: object, gap_task_indices: tuple[int, ...]) -> None:
+        self.c_session_id = c_session_id
+        self.gap_task_indices = gap_task_indices
+        super().__init__(
+            f"session {c_session_id} history has a gap at task_index(es) {gap_task_indices} -- "
+            "refusing rather than returning a truncated history"
+        )
+
+
 class SF043OrderingError(LiveEngineCError):
     """Phase 4: the SF-043 ordering gate at session creation -- "B runs -> B completes ->
     B emits seven mastery values -> C validates the same-session payload -> C begins." Raised

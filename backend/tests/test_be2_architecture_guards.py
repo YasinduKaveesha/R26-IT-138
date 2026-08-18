@@ -1185,6 +1185,96 @@ def test_evidence_construction_guards_do_not_scan_tests_directory() -> None:
 
 
 # =====================================================================================
+# Phase 8, J1-2 -- THE GUARDED ACCESSOR GUARD, mirroring the T4 evidence-construction guards
+# exactly (same AST-attribute-name-match mechanism, same one-allow-listed-file shape, same
+# positive-presence assertion so a vanished real call cannot pass vacuously, same tests/
+# exemption). Flags the METHOD NAME, not the repository class construction -- unlike T4's guards,
+# which flag construction of a whole class, this one must let
+# CTaskOpportunitySummaryRecordRepository be constructed and written to (summary_service.py's own
+# ``.add(record)`` call) everywhere; only its ``list_ordered_for_session`` READ method is
+# restricted to telemetry_validation.get_derivable_history_for_session, the one guarded accessor
+# J1-2 designed. Verified unique (grep, planning turn): repositories.py defines
+# ``list_ordered_for_session`` exactly once, on CTaskOpportunitySummaryRecordRepository -- the same
+# "plain-name match, does not resolve arbitrary aliasing" limitation T4's own guard already
+# discloses as a residual, not solved here either.
+# =====================================================================================
+
+_ALLOWED_DERIVABLE_HISTORY_ACCESSOR_PATH = Path("app/application/live_engine_c/telemetry_validation.py")
+
+
+def _derivable_history_raw_read_violations(tree: ast.AST) -> list[str]:
+    """Flags any call to a method named ``list_ordered_for_session`` -- the guarded accessor's own
+    raw read, J1-2's own text: "the only code under app/ permitted to call
+    CTaskOpportunitySummaryRecordRepository.list_ordered_for_session." The caller is responsible
+    for skipping telemetry_validation.py, the one file this guard permits."""
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == "list_ordered_for_session":
+                violations.append(ast.dump(node)[:200])
+    return violations
+
+
+def test_derivable_history_raw_read_permitted_only_in_telemetry_validation() -> None:
+    """SIGNAL (J1-2): CTaskOpportunitySummaryRecordRepository.list_ordered_for_session is called
+    ONLY in app/application/live_engine_c/telemetry_validation.py (get_derivable_history_for_session),
+    and IS called there -- a positive-presence check, same shape as T4's own
+    ``adapter_constructs_it`` assertion, so this guard cannot pass vacuously if the real call is
+    ever removed. Would FAIL if any other file under app/ called this method directly (the raw read
+    J1-2 exists to close -- adaptation_service.py's own build_evidence_for_session used to be that
+    file, verified fixed by this same batch) OR if the accessor's own call disappeared."""
+    accessor_calls_it = False
+    violations: list[tuple[Path, str]] = []
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        found = _derivable_history_raw_read_violations(tree)
+        if path == _ALLOWED_DERIVABLE_HISTORY_ACCESSOR_PATH:
+            accessor_calls_it = bool(found)
+            continue
+        violations.extend((path, v) for v in found)
+    assert not violations, violations
+    assert accessor_calls_it, "expected telemetry_validation.py to call list_ordered_for_session at least once"
+
+
+def test_derivable_history_guard_fires_on_synthetic_violation() -> None:
+    """POSITIVE CONTROL: proves _derivable_history_raw_read_violations actually detects a raw call
+    to list_ordered_for_session, and passes clean on source that never calls it -- this guard
+    "will pass trivially today" outside the accessor file, so this control is what stops that from
+    being worthless (same reasoning T4-c's own control states)."""
+    violating_tree = ast.parse(
+        "async def f(session, c_session_id):\n"
+        "    return await CTaskOpportunitySummaryRecordRepository(session)."
+        "list_ordered_for_session(c_session_id)\n",
+        filename="<synthetic-violation>",
+    )
+    assert _derivable_history_raw_read_violations(violating_tree)
+
+    clean_tree = ast.parse(
+        "async def f(session, c_session_id):\n"
+        "    return await get_derivable_history_for_session(session, c_session_id=c_session_id)\n",
+        filename="<synthetic-clean>",
+    )
+    assert not _derivable_history_raw_read_violations(clean_tree)
+
+
+def test_derivable_history_guard_does_not_scan_tests_directory() -> None:
+    """Same discipline as T4-d: test-side direct repository construction stays legitimate for
+    building fixtures. Demonstrated by calling the guard directly against a tests/-shaped tree
+    (which WOULD flag it) and confirming the caller discipline (Path("app").rglob only) is what
+    actually protects tests/, not the function itself."""
+    test_side_tree = ast.parse(
+        "async def test_something(session, c_session_id):\n"
+        "    rows = await CTaskOpportunitySummaryRecordRepository(session)."
+        "list_ordered_for_session(c_session_id)\n"
+        "    assert rows == []\n",
+        filename="tests/test_synthetic_positive_control.py",
+    )
+    assert _derivable_history_raw_read_violations(test_side_tree)
+    for path in Path("app").rglob("*.py"):
+        assert "tests" not in path.parts
+
+
+# =====================================================================================
 # Phase 6b, final step -- X2-1: a NAMED ALLOW-LIST WITH A STALENESS ASSERTION (supervisor ruling,
 # correcting the earlier "only tests/ may pass require_approved=False" wording -- that wording
 # collided with four pre-existing, already-shipped app/ call sites the owner did not have in

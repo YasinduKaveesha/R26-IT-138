@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.live_engine_c.mastery_fixture import FIXTURE_MASTERY_SOURCE_STUDENT_ID
 from app.application.live_engine_c.session_lifecycle import _provenance
+from app.application.live_engine_c.telemetry_validation import get_derivable_history_for_session
 from app.domain.live_engine_c.types import (
     EvidenceWindowConfig,
     LearnerState,
@@ -55,7 +56,6 @@ from app.infrastructure.persistence_models import (
 from app.infrastructure.repositories import (
     CPolicyDecisionRecordRepository,
     CSafetyEventRecordRepository,
-    CTaskOpportunitySummaryRecordRepository,
 )
 
 # X7-a: the safety-reason tokens are STABLE, PINNED literals -- verified by direct read of
@@ -140,10 +140,21 @@ async def build_evidence_for_session(
     THROUGH ``generation.build_task_instance`` (``recovery.py:153-163``), which the generation
     smoke gate refuses outside ``smoke_mode=True``, so no recovery task -- and therefore no
     non-``None`` ``recovery_parent_instance_id`` -- can ever exist via a real production call.
-    C-17 Item A closes PARTIALLY: the mechanism, not the guarantee."""
+    C-17 Item A closes PARTIALLY: the mechanism, not the guarantee.
+
+    PHASE 8, J1-2 (supervisor-verified raw read, now closed): this function used to call
+    ``CTaskOpportunitySummaryRecordRepository(session).list_ordered_for_session(c_session_id)``
+    directly -- the one raw read the guarded accessor exists to close. It now calls
+    ``telemetry_validation.get_derivable_history_for_session`` instead, the only code under app/
+    the AST guard in ``test_be2_architecture_guards.py`` permits to make that call. J1-4: if the
+    session's history has a gap (an offered, terminal-reached task opportunity with no summary --
+    Phase 8's own validator refused it), the accessor raises ``DistrustedHistoryGapError`` here,
+    which propagates to THIS function's own caller -- the adaptation decision for this session
+    refuses rather than computing evidence over a window it cannot trust (H3's inversion: the
+    protected activity, not the check, is what refuses)."""
     instance_record = await session.get(CTaskInstanceRecord, c_task_instance_id)
     is_recovery_context = instance_record is not None and instance_record.recovery_parent_instance_id is not None
-    summaries = await CTaskOpportunitySummaryRecordRepository(session).list_ordered_for_session(c_session_id)
+    summaries = await get_derivable_history_for_session(session, c_session_id=c_session_id)
     history = [
         _to_domain_summary(
             record, student_id=student_id, intervention_session_id=intervention_session_id,

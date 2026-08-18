@@ -165,6 +165,18 @@ class CTaskOpportunityRecordRepository(SqlAlchemyNeutralRepository[CTaskOpportun
             )
         ) or 0
 
+    async def list_ordered_for_session(self, c_session_id: UUID) -> Sequence[CTaskOpportunityRecord]:
+        """Phase 8, J1-4: every OFFERED task opportunity for a session, ordered by ``task_index``
+        -- the guarded accessor's OFFERED set (``telemetry_validation.
+        get_derivable_history_for_session``'s own only caller). Never filtered, never truncated
+        here -- gap detection is the accessor's own job, not this query's."""
+        result = await self.session.execute(
+            select(CTaskOpportunityRecord)
+            .where(CTaskOpportunityRecord.c_session_id == c_session_id)
+            .order_by(CTaskOpportunityRecord.task_index)
+        )
+        return result.scalars().all()
+
 
 class CTaskInstanceRecordRepository(SqlAlchemyNeutralRepository[CTaskInstanceRecord]):
     model_type = CTaskInstanceRecord
@@ -179,6 +191,18 @@ class CTaskInstanceRecordRepository(SqlAlchemyNeutralRepository[CTaskInstanceRec
             .where(
                 CTaskInstanceRecord.c_task_instance_id == c_task_instance_id,
                 CTaskOpportunityRecord.c_session_id == c_session_id,
+            )
+        )
+
+    async def find_by_opportunity(self, c_task_opportunity_id: UUID) -> CTaskInstanceRecord | None:
+        """Phase 8, J1-4: the 1:1 opportunity -> instance lookup (``uq_c_task_instances_opportunity``,
+        persistence_models.py:827) the guarded accessor needs to reach
+        ``CGameplayEventRecordRepository.has_terminal_for_instance`` from an OFFERED opportunity
+        row -- an opportunity with no instance yet (task never started) is not a gap, it is simply
+        absent from this lookup, and the accessor's own caller treats a ``None`` result that way."""
+        return await self.session.scalar(
+            select(CTaskInstanceRecord).where(
+                CTaskInstanceRecord.c_task_opportunity_id == c_task_opportunity_id
             )
         )
 

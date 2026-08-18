@@ -44,6 +44,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.live_engine_c.mastery_fixture import FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID
 from app.application.live_engine_c.session_lifecycle import _provenance
+from app.application.live_engine_c.telemetry_validation import (
+    validate_clock_discipline,
+    validate_event_stream_structurally,
+)
 from app.domain.live_engine_c.types import GameplayEvent, SeedLineage, TaskOpportunitySummary
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import CGameplayEventRecord, CTaskOpportunitySummaryRecord
@@ -139,9 +143,19 @@ async def derive_and_persist_summary(
 ) -> CTaskOpportunitySummaryRecord:
     """T6-a/T6-c: called ONLY after a terminal event write has succeeded (the caller's
     responsibility, not checked here) -- reads the full ordered event stream for the instance,
-    translates it, derives THROUGH THE ADAPTER, and persists the result verbatim (T6-d)."""
+    translates it, derives THROUGH THE ADAPTER, and persists the result verbatim (T6-d).
+
+    PHASE 8 (K1/K2-f/H4-a): the telemetry validator runs HERE, THE DERIVATION TRIGGER -- its own
+    module, never task_service.py -- immediately before ``adapter.derive_task_opportunity_summary``
+    is called, never after. A structural rejection propagates ``TelemetryStreamRejectedError`` to
+    THIS function's own caller (``task_service.submit_action``'s terminal-event branch) and no
+    ``CTaskOpportunitySummaryRecord`` is ever constructed or persisted for the offending stream --
+    K1's "scored never" half. The raw ``c_gameplay_events`` rows already written by the caller
+    BEFORE this function was ever invoked are untouched either way -- K1's "persisted always" half,
+    already satisfied by the time this function runs, never undone by it."""
     event_repo = CGameplayEventRecordRepository(session)
     records = await event_repo.list_ordered_for_instance(c_task_instance_id)
+    validate_clock_discipline(records)
     domain_events = [
         _to_domain_gameplay_event(
             record,
@@ -151,6 +165,7 @@ async def derive_and_persist_summary(
         )
         for record in records
     ]
+    validate_event_stream_structurally(domain_events)
     summary = adapter.derive_task_opportunity_summary(domain_events)
     record = _summary_record(
         summary,
