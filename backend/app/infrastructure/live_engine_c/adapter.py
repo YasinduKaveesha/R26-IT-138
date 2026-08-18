@@ -40,6 +40,31 @@ weight, window, or cap is ever chosen or defaulted here — Component C is PROPO
 (v3.0 §2), and a hardcoded value in this file would be recording an unapproved parameter (G1).
 Unlike ``app.infrastructure.live_engine.adapter``, which legitimately hardcodes B's FROZEN,
 already-approved sequencing weights, nothing here is approved, so nothing here is hardcoded.
+
+WORKAROUND -- ``decide_adaptation_with_safety_flags`` (remediation batch 1). ``adaptation.py``'s
+``decide_adaptation`` computes a ``safety.controller.SafetyDecision`` internally and drops two of
+its fields -- ``activate_recovery_flag``, ``request_safe_termination`` -- when composing the
+``AdaptationDecision`` it returns; that type is ``frozen=True``/``extra="forbid"``, so neither can
+be recovered after the fact. ``propose_action`` (policy/rule_based.py) and ``apply_safety``
+(safety/controller.py) are both pure and RNG-free, and ``decide_adaptation`` composes them
+internally in exactly that order on exactly those arguments (verified by direct read of
+adaptation.py, and structurally by
+``tests/test_c6b_policy_and_safety.py::test_s8c_decide_adaptation_always_applies_safety_structurally``).
+This method calls that same two-function sequence a second time, on a package-side evidence
+object translated from the domain type EXACTLY ONCE and reused BY IDENTITY across all three
+pinned calls, to recover the two dropped fields alongside the real, package-composed decision.
+
+This relies on an UNPUBLISHED IMPLEMENTATION DETAIL of a pinned function, never a published
+contract: if a future re-pin changes how ``decide_adaptation`` composes ``propose_action`` and
+``apply_safety``, this reconstruction silently stops matching, and
+``tests/test_adaptation_safety_flags_reconstruction.py`` is what catches it.
+
+REMOVAL TRIGGER: delete this method (and its port declaration, its domain return type
+``AdaptationDecisionWithSafetyFlags``, its parity test, and the manifest's forward-looking
+verification requirement), together, the moment the wheel is re-pinned to a Yass commit carrying
+the owner-authorized ``AdaptationDecision`` interface change (``task_index``,
+``activate_recovery_flag``, ``request_safe_termination`` as real fields on the package's own
+``AdaptationDecision``).
 """
 
 from __future__ import annotations
@@ -86,10 +111,12 @@ from component_c_generator.pipeline.evidence import (
 from component_c_generator.policy.rule_based import (
     QLearningDisabledError as _PkgQLearningDisabledError,
     UnknownPolicyModeError as _PkgUnknownPolicyModeError,
+    propose_action as _pkg_propose_action,
 )
 from component_c_generator.rewards import (
     decide_child_facing_reward as _pkg_decide_child_facing_reward,
 )
+from component_c_generator.safety.controller import apply_safety as _pkg_apply_safety
 from component_c_generator.scaffolds.ladder import (
     decide_scaffold_level as _pkg_decide_scaffold_level,
 )
@@ -137,6 +164,7 @@ from app.domain.live_engine_c.errors import (
 from app.domain.live_engine_c.types import (
     ActivationDecision,
     AdaptationDecision,
+    AdaptationDecisionWithSafetyFlags,
     AggregationConfig,
     AttendanceStatus,
     Catalogue,
@@ -1117,6 +1145,66 @@ class LiveEngineCAdapter:
         except _PkgUnknownPolicyModeError as exc:
             raise UnknownPolicyModeError(str(exc)) from exc
         return _map_adaptation_decision(decision)
+
+    def decide_adaptation_with_safety_flags(
+        self,
+        *,
+        policy_mode: PolicyMode,
+        evidence: PolicyObservableEvidence,
+        current_difficulty_level: int,
+        seed_lineage: SeedLineage,
+        policy_config: PolicyConfig,
+        safety_config: SafetyConfig,
+        selection_config: SelectionConfig,
+    ) -> AdaptationDecisionWithSafetyFlags:
+        """WORKAROUND -- see this module's own docstring for the full explanation and removal
+        trigger. Translates ``evidence`` to the package type EXACTLY ONCE and reuses that SAME
+        object across all three pinned calls below (``propose_action``, ``apply_safety``,
+        ``decide_adaptation``) -- never a second, independently-translated evidence object. This
+        is deliberately ONE method, not two (a ``propose_action`` adapter method plus an
+        ``apply_safety`` adapter method would each translate internally and produce two
+        package-side evidence objects, destroying the identity guarantee by construction)."""
+        pkg_evidence = _to_pkg_policy_observable_evidence(evidence)  # ONCE
+        pkg_policy_config = _to_pkg_policy_config(policy_config)
+        pkg_safety_config = _to_pkg_safety_config(safety_config)
+        pkg_selection_config = _to_pkg_selection_config(selection_config)
+        pkg_seed_lineage = _to_pkg_seed_lineage(seed_lineage)
+
+        try:
+            pkg_selected_action = _pkg_propose_action(policy_mode, pkg_evidence, pkg_policy_config)
+        except _PkgQLearningDisabledError as exc:
+            raise QLearningDisabledError(str(exc)) from exc
+        except _PkgUnknownPolicyModeError as exc:
+            raise UnknownPolicyModeError(str(exc)) from exc
+
+        pkg_safety_decision = _pkg_apply_safety(
+            selected_action=pkg_selected_action,
+            evidence=pkg_evidence,  # SAME object
+            current_difficulty_level=current_difficulty_level,
+            selection_config=pkg_selection_config,
+            safety_config=pkg_safety_config,
+        )
+
+        try:
+            pkg_decision = _pkg_decide_adaptation(
+                policy_mode=policy_mode,
+                evidence=pkg_evidence,  # SAME object
+                current_difficulty_level=current_difficulty_level,
+                seed_lineage=pkg_seed_lineage,
+                policy_config=pkg_policy_config,
+                safety_config=pkg_safety_config,
+                selection_config=pkg_selection_config,
+            )
+        except _PkgQLearningDisabledError as exc:
+            raise QLearningDisabledError(str(exc)) from exc
+        except _PkgUnknownPolicyModeError as exc:
+            raise UnknownPolicyModeError(str(exc)) from exc
+
+        return AdaptationDecisionWithSafetyFlags(
+            decision=_map_adaptation_decision(pkg_decision),
+            activate_recovery_flag=pkg_safety_decision.activate_recovery_flag,
+            request_safe_termination=pkg_safety_decision.request_safe_termination,
+        )
 
     # ---- ScaffoldPort ---------------------------------------------------------------
 

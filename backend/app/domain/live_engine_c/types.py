@@ -316,6 +316,36 @@ class AdaptationDecision:
     seed_lineage: SeedLineage
 
 
+@dataclass(frozen=True)
+class AdaptationDecisionWithSafetyFlags:
+    """WORKAROUND -- see the module docstring of ``app.infrastructure.live_engine_c.adapter``
+    and that module's ``decide_adaptation_with_safety_flags`` for the full explanation.
+
+    ``component_c_generator.adaptation.decide_adaptation`` computes a
+    ``safety.controller.SafetyDecision`` internally and drops two of its fields
+    (``activate_recovery_flag``, ``request_safe_termination``) when composing the
+    ``AdaptationDecision`` it returns -- ``AdaptationDecision`` is ``frozen=True`` and
+    ``extra="forbid"``, so neither field can be attached after the fact. This type carries the
+    real, package-composed ``AdaptationDecision`` (mapped, never re-derived) PLUS the two
+    otherwise-unreachable flags, reconstructed by calling the same pure, deterministic
+    ``propose_action`` + ``apply_safety`` sequence a second time on an identical evidence object.
+
+    NAMED FIELDS, NOT POSITIONAL BOOLEANS: ``activate_recovery_flag`` and
+    ``request_safe_termination`` are two adjacent booleans in the source ``SafetyDecision`` --
+    returning them positionally would be a transposition hazard, so both are named fields here.
+
+    REMOVAL TRIGGER: delete this type, the adapter method that produces it, its port
+    declaration, the parity test that proves it, and the manifest's forward-looking verification
+    requirement, together, the moment the wheel is re-pinned to a Yass commit carrying the
+    owner-authorized ``AdaptationDecision`` interface change (task_index,
+    activate_recovery_flag, request_safe_termination as real fields on the package's own
+    ``AdaptationDecision``)."""
+
+    decision: AdaptationDecision
+    activate_recovery_flag: bool
+    request_safe_termination: bool
+
+
 # --------------------------------------------------------------------------------------
 # Scaffolds and rewards
 # --------------------------------------------------------------------------------------

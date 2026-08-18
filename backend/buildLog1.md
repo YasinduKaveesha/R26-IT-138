@@ -6401,3 +6401,199 @@ blocks 9b and 9c, not only 9a, until C6/C7 exist upstream, which have no owner i
 plan); C-17 Item B, closed on NEITHER half (withdrawn from the prior turn's partial-closure
 finding); `min_completed_tasks_for_difficulty_trend` (UNSOURCED, P5-b); N3's wiring (BLOCKED on
 P3's three inputs).
+
+---
+
+## 2026-08-18 — Component C backend remediation, batch 1: reconstructing `decide_adaptation`'s two dropped safety fields
+
+**What was built and why.** `adaptation.py`'s pinned `decide_adaptation` computes a
+`safety.controller.SafetyDecision` internally and drops two of its fields --
+`activate_recovery_flag` and `request_safe_termination` -- when composing the
+`AdaptationDecision` it returns (`AdaptationDecision` is `frozen=True`/`extra="forbid"`, so
+neither field can be passed in at construction or attached afterward). `propose_action`
+(`policy/rule_based.py`) and `apply_safety` (`safety/controller.py`) are both pure, deterministic,
+and RNG-free -- `decide_adaptation` composes exactly this pair, in exactly this order, on exactly
+these arguments (verified by direct read of `adaptation.py`; structurally re-confirmed by the
+already-standing `test_s8c_decide_adaptation_always_applies_safety_structurally`). Because both
+composed functions are pure, calling that same two-function sequence a second time on an
+identically-translated evidence object recovers the two dropped fields without touching, copying,
+or reimplementing any formula. This batch adds exactly ONE new adapter method,
+`LiveEngineCAdapter.decide_adaptation_with_safety_flags`
+(`app/infrastructure/live_engine_c/adapter.py`), that translates the domain
+`PolicyObservableEvidence` to the package type EXACTLY ONCE and reuses that single object, by
+identity, across all three pinned calls (`propose_action`, `apply_safety`, `decide_adaptation`) --
+never a `propose_action` adapter method plus a separate `apply_safety` adapter method, which would
+each translate internally and produce two package-side evidence objects, destroying the identity
+guarantee by construction. The method returns a new named domain type,
+`AdaptationDecisionWithSafetyFlags` (`app/domain/live_engine_c/types.py`), carrying the mapped
+`AdaptationDecision` plus the two recovered flags as NAMED fields -- never two adjacent positional
+booleans, a transposition hazard the two flags' shared type (`bool`, `bool`) invites if returned
+positionally. `AdaptationPort.decide_adaptation_with_safety_flags`
+(`app/domain/live_engine_c/ports.py`) is the matching port declaration; `decide_adaptation` itself
+is untouched and stays on the port unchanged.
+
+**THE CORRECTION (premise).** The prior rejection of this exact approach rested on a false
+premise: that `seed_lineage` was an input to the safety computation, and therefore that calling
+`propose_action`/`apply_safety` a second time would require a seed this backend cannot legitimately
+derive (SEED DERIVATION IS OUT OF SCOPE, per the adapter's own module docstring). Direct read of
+`safety/controller.py`'s `apply_safety` signature -- `(selected_action, evidence,
+current_difficulty_level, selection_config, safety_config)` -- and of `policy/rule_based.py`'s
+`propose_action` signature -- `(policy_mode, evidence, config)` -- shows neither takes
+`seed_lineage` at all. `seed_lineage` reaches only `decide_adaptation` itself, and only for one
+purpose: `_decision_id(seed_lineage)`, a deterministic string derivation
+(`f"AD-{seed_lineage.seed:016x}"`), never a random draw. Both composed functions are pure
+dataclass logic with no RNG anywhere in this module. BOTH the owner and the supervisor share
+responsibility for this false premise reaching the point of blocking a build: the owner introduced
+it, and the supervisor accepted it without checking the two functions' own signatures against it.
+Recording it this way, rather than attributing the error to one side only, because that is what
+actually happened.
+
+**THE CORRECTION (scope).** Obtaining `activate_recovery_flag` through this reconstruction does
+NOT unblock `safety_override_count`. These are two different fields with two different, currently
+irreconcilable definitions, and a prior claim that fixing one closes both was wrong. C Parameters
+§15 defines `safety_override_count`'s trigger as "`consecutive_error_max >= 5` AT THE DIFFICULTY
+FLOOR, or `difficulty_floor_hits >= 3` within the session" -- and `aggregation/derive.py:21-35`
+states this is "intentionally distinct" from `safety.controller.apply_safety`'s own
+`activate_recovery_flag` (`recent_consecutive_error_max >= consecutive_error_trigger` regardless of
+floor, or `rolling_strain_score >= strain_trigger`) -- a different condition serving a different
+purpose (an immediate per-decision policy override, not the exported session-level count).
+`pipeline/session.py:344-345` (the pinned, never-shipped C6.0 driver, read via the Yass source
+tree, not vendored in this backend's package) shows the ONE place in the pinned generator that
+actually accumulates a `safety_override_count`-shaped value, and it accumulates from
+`activate_recovery_flag`, not from the Parameters §15 floor-conditioned trigger. No committed
+artefact anywhere resolves which of these two is authoritative for this backend's own
+`safety_override_count` field. `task_service.py`'s own register comment (around line 615,
+untouched by this batch) already named this as break (1) of a three-break chain blocking a real
+`safety_forces_recovery` value from ever reaching `decide_and_persist_scaffold_level`; this batch
+closes break (1) in the narrow sense that `activate_recovery_flag` is now reconstructible at all,
+through a real call path this backend owns -- but this batch wires NO caller, so nothing about
+what reaches `task_service.py:638`'s literal `False` changes. Breaks (2) (no caller for
+`decide_and_persist_adaptation`) and (3) (the literal itself) are exactly as they were.
+
+**THE GENERATOR OWNER'S DECISION**, quoted verbatim:
+
+> Treat task_index, activate_recovery_flag, and request_safe_termination as one
+> AdaptationDecision interface change. Then resolve safety_override_count as a separate semantic
+> ruling, and treat time_in_target_band_sec as the remaining genuine capability gap. Do not invent
+> any threshold or definition to unblock C. Proceed with the revised plan, and keep the backend
+> B1->B4 lane separate from the generator work.
+
+WHAT IT AUTHORIZES: the `AdaptationDecision` interface change as one unit, comprising
+`task_index`, `activate_recovery_flag`, and `request_safe_termination`.
+
+WHAT REMAINS OPEN: the `safety_override_count` ruling itself (the separate framing is agreed; the
+ruling is not given); the target-band definition (`time_in_target_band_sec`); and any timeline for
+the interface change reaching a Yass commit this backend can re-pin to. The interface change is
+not described as implemented, landed, or available anywhere in this batch's own code or docstrings
+-- it is authorized only. This batch's reconstruction is the WORKAROUND that stands in for that
+authorized-but-not-yet-landed interface change, and is named as such everywhere it appears (module
+docstring, method docstring, domain type docstring, port docstring, the parity test module's own
+docstring, and the manifest's new verification key) -- with the same removal trigger recorded in
+every one of those places: delete the workaround, the parity test, and the manifest verification
+entry together, the moment the wheel is re-pinned to a Yass commit carrying that authorized
+change.
+
+**THE IDENTITY GUARANTEE -- how it was proven.**
+`tests/test_adaptation_safety_flags_reconstruction.py::test_evidence_translated_once_and_reaches_both_pinned_call_sites_by_identity`
+carries BOTH required assertions in one test, since neither alone suffices: (a) monkeypatches
+`app.infrastructure.live_engine_c.adapter._to_pkg_policy_observable_evidence` with a counting
+wrapper and asserts `call_count == 1` for one invocation of the new method -- this alone would
+survive a future refactor that added a `.model_copy()` before one of the two pinned calls, since
+the call count would stay 1 while identity silently broke; (b) spies on the `evidence=` keyword as
+it reaches the adapter's own direct `apply_safety` call and its own direct `decide_adaptation`
+call (both real package calls run through the spy, not bypassed) and asserts the two captured
+objects are the SAME OBJECT by identity (`is`), never merely equal values -- this alone would not
+prove only one translation occurred, since two separately-translated-but-equal objects would also
+pass an equality check. Both assertions pass in the same test run.
+
+**THE PARITY TEST -- four branches.** All four in
+`test_reconstructed_safety_fields_match_the_composed_adaptation_decision`, parametrized, comparing
+the reconstruction's six sourced fields (`applied_action`, `action_overridden`, `safety_reason`,
+`difficulty_after`, `rolling_strain_bucket`, and `increase_block_remaining` <-
+`increase_block_remaining_after`, the one rename) plus the two recovered flags against an
+independently-computed oracle `SafetyDecision` (test-side `propose_action` + `apply_safety`
+calls, never routed through the reconstruction itself):
+1. `no_override_hold` -- baseline evidence (recent_correctness_rate=0.6, well between the
+   policy's decrease/increase thresholds; recent_consecutive_error_max=0; rolling_strain_score=0.1)
+   proposes `hold`, safety applies it unchanged, `activate_recovery_flag` False.
+2. `increase_veto` -- evidence set exactly at `policy_config`'s own increase thresholds
+   (`increase_correctness_threshold`, `increase_max_avg_attempts`, `increase_max_strain`) proposes
+   `increase_difficulty`; `safety_increase_block_remaining=1` (an active carried-over block) vetoes
+   it to `hold`; `action_overridden` True.
+3. `severe_trigger_error_arm` -- `recent_consecutive_error_max` set to `safety_config`'s own
+   `consecutive_error_trigger` (read from the fixture, not hardcoded), `rolling_strain_score=0.1`
+   (low) -- fires the ERROR arm of `activate_recovery_flag` alone; asserted absence of the strain
+   reason token proves the STRAIN arm did not also fire.
+4. `recovery_flag_strain_arm` -- `recent_consecutive_error_max=0`, `rolling_strain_score` set to
+   `safety_config`'s own `strain_trigger` (read from the fixture) -- fires the STRAIN arm alone,
+   the other disjunct of the same condition branch 3 exercised; asserted absence of the error
+   reason token proves the ERROR arm did not also fire.
+
+All four branches pass; each also carries a branch-specific assertion (selected/applied action,
+override flag, or the specific reason token) proving it exercises the disjunct it claims to, not
+merely that parity holds trivially regardless of which branch fired.
+
+**The table, as required:**
+```
+Parity reconstruction          ACHIEVED
+Real adaptation persistence    NOT ACHIEVED
+F-2 read-back                  NOT ACHIEVED
+Production adaptation path     NOT ACHIEVED
+```
+Nothing new is reachable from a real HTTP request after this batch. `decide_and_persist_adaptation`
+has no live caller before this batch and has none after it; this batch adds a second adapter
+method beside `decide_adaptation`, not a route, not a service caller, not a persistence path.
+
+**Verified -- full suite, clean, single run against a freshly reset database** (two earlier
+concurrent full-suite runs against the same shared `db` container had raced each other's `alembic
+upgrade head` and produced spurious `UniqueViolationError`/`pg_type_typname_nsp_index` failures on
+shared B tables (`b_hint_events`, `b_attempts`) unrelated to any file this batch touched; the `db`
+container and its volume were recreated (`docker compose down -v && up -d db`) and the suite was
+re-run exactly once, alone, before any number below was recorded):
+```
+562 passed, 74 skipped, 0 failed, 636 collected
+```
+Reconciles exactly against baseline 557/74/0/631: `557 + 5 = 562` passed, `631 + 5 = 636`
+collected, skips unchanged at 74, 0 failed both before and after. The +5 is exactly the five new
+tests in `tests/test_adaptation_safety_flags_reconstruction.py` (the one identity-guarantee test
+plus the four parametrized parity branches) -- no other test file was added, removed, or had a
+test added or removed.
+
+**Files created:**
+`backend/tests/test_adaptation_safety_flags_reconstruction.py`.
+
+**Files modified:**
+`backend/app/domain/live_engine_c/types.py` (`AdaptationDecisionWithSafetyFlags`),
+`backend/app/domain/live_engine_c/ports.py` (`AdaptationPort.decide_adaptation_with_safety_flags`
+declaration), `backend/app/infrastructure/live_engine_c/adapter.py`
+(`LiveEngineCAdapter.decide_adaptation_with_safety_flags`, two new top-level imports --
+`propose_action` as `_pkg_propose_action`, `apply_safety` as `_pkg_apply_safety` -- and a new
+module-docstring section naming the workaround and its removal trigger),
+`backend/provenance/component-c-live-engine-manifest.json` (one new key under `verification`,
+`adaptation_safety_flags_parity_rerun_requirement`, worded as a forward-looking REQUIREMENT that
+any future re-pin re-run this batch's parity test before the pin is accepted -- not a retrospective
+PASSED; no re-pin has occurred under this rule yet), `backend/buildLog1.md` (this entry, appended).
+
+No git command beyond read-only verification (`status`, `rev-parse`, `log`) was run this batch;
+nothing was staged or committed.
+
+**Out of scope, confirmed.** No live caller for `decide_and_persist_adaptation` (batch 2) --
+`adaptation_service.py` is untouched. `task_service.py:615`/`:638` untouched -- the literal
+`safety_forces_recovery=False` and its three-break register comment stand exactly as they were. No
+F-2 column, no read-back (batch 3). No supersession work (batch 4). No generator or Yass change --
+the pinned `adaptation.py`, `policy/rule_based.py`, and `safety/controller.py` are read-only, read
+directly, never edited. No wheel, pyproject, requirements.*, Dockerfile, or `.dockerignore` change.
+No manifest change beyond the single new verification key. No migration. No new table. No frontend
+file. No gate lifted or weakened. No threshold resolved, and `safety_override_count`'s definition
+is not resolved -- named open above, not approximated. `b_learner_skill_states`,
+`opportunity_selection.py`, `hint_request.py` -- not read.
+
+**Remains open.** Everything named open at the end of the Phase 9a entry above, unchanged, plus:
+`safety_override_count`'s authoritative definition (Parameters §15's floor-conditioned trigger vs.
+`activate_recovery_flag` -- unresolved, no committed artefact decides between them);
+`time_in_target_band_sec` (the owner's own "remaining genuine capability gap," untouched by this
+batch); the timeline for the owner-authorized `AdaptationDecision` interface change reaching a
+Yass commit this backend can re-pin to (once it does, this batch's entire workaround -- the
+adapter method, the port declaration, the domain type, the parity test, and the manifest
+verification key -- is removed, not merely superseded); batch 2 (a live caller for
+`decide_and_persist_adaptation`); batch 3 (F-2 column and read-back); batch 4 (supersession).

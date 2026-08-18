@@ -15,6 +15,7 @@ from typing import Mapping, Optional, Protocol, Sequence
 from .types import (
     ActivationDecision,
     AdaptationDecision,
+    AdaptationDecisionWithSafetyFlags,
     AggregationConfig,
     AttendanceStatus,
     Catalogue,
@@ -244,6 +245,30 @@ class AdaptationPort(Protocol):
         safety_config: SafetyConfig,
         selection_config: SelectionConfig,
     ) -> AdaptationDecision: ...
+
+    def decide_adaptation_with_safety_flags(
+        self,
+        *,
+        policy_mode: PolicyMode,
+        evidence: PolicyObservableEvidence,
+        current_difficulty_level: int,
+        seed_lineage: SeedLineage,
+        policy_config: PolicyConfig,
+        safety_config: SafetyConfig,
+        selection_config: SelectionConfig,
+    ) -> AdaptationDecisionWithSafetyFlags:
+        """WORKAROUND (remediation batch 1). Same inputs as ``decide_adaptation`` above; returns
+        the same composed ``AdaptationDecision`` PLUS the two fields
+        ``decide_adaptation`` computes internally (via ``safety.controller.apply_safety``) but
+        drops when assembling its own return value: ``activate_recovery_flag`` and
+        ``request_safe_termination``. See
+        ``app.infrastructure.live_engine_c.adapter.decide_adaptation_with_safety_flags`` and
+        ``app.domain.live_engine_c.types.AdaptationDecisionWithSafetyFlags`` for the full
+        explanation, the identity guarantee it depends on, and its removal trigger. This method
+        is NOT a substitute for ``decide_adaptation`` -- both stay on this port; this one exists
+        only because two real fields are otherwise unreachable through the published composed
+        type."""
+        ...
 
 
 class ScaffoldPort(Protocol):
