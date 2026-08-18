@@ -230,17 +230,44 @@ def test_c17_3_initial_difficulty_path_does_not_consume_prior_session_end_state(
     check now would read a field that is always absent, never fire, and pass its own tests: "An
     open recorded gap gets closed. A no-op that reports success does not."). The unblocking
     condition (C17-2) is: prior_session_end_state must be computed and persisted first. This test
-    proves neither the adapter's select_task signature nor TaskService's own source consumes it
-    today -- when someone wires it, this assertion breaks and points back here."""
+    proves neither the adapter's select_task signature nor TaskService's own INITIAL-DIFFICULTY
+    path (``next_task``, which calls ``select_task``) consumes it today -- when someone wires it
+    INTO THAT PATH, this assertion breaks and points back here.
+
+    BATCH 2 UPDATE -- THE TRIPWIRE FIRED, AS DESIGNED, AND THIS IS THE CONSCIOUS RESPONSE: the
+    whole-module string search this test used through Batch 1 (`"prior_session_end_state" not in
+    source`, `source = inspect.getsource(task_service_module)`) broke the moment Batch 2 wired
+    ``submit_action``'s own adaptation call to read ``prior_session_end_state`` (via the SAME real
+    ``_learner_session_state`` mechanism ``next_task`` already uses for
+    ``sessions_since_last_practice``, never hardcoded -- Z6-a's own "derive from real data, not a
+    literal" precedent, applied here). That is a DIFFERENT C-17 item than this test's own subject:
+    C-17 Item A is the INITIAL-DIFFICULTY path (``select_task``, called from ``next_task``) --
+    unchanged, still narrowed, still proven absent below, scoped now to ``next_task`` itself rather
+    than the whole module. C-17 Item B is the ADAPTATION/SAFETY-EVIDENCE path
+    (``decide_and_persist_adaptation``, via ``build_evidence_for_session``) -- WIRED by Batch 2 (not
+    REACHABLE: ``prior_session_end_state``'s own VALUE is still always ``None`` for every session,
+    because session aggregation, its only producer, refuses unconditionally
+    (``aggregation_service._AGGREGATION_INPUTS_AVAILABLE = False``, untouched by this batch) -- see
+    Batch 2's own ``buildLog1.md`` entry for the full trace). Narrowing this test's scope to
+    ``next_task`` is the disclosed, deliberate response the docstring above asked for -- not a
+    silent widening of what "consumes" is allowed to mean."""
     select_task_params = set(inspect.signature(LiveEngineCAdapter.select_task).parameters)
     assert "prior_session_end_state" not in select_task_params
 
     import app.application.live_engine_c.task_service as task_service_module
 
-    source = inspect.getsource(task_service_module)
-    assert "prior_session_end_state" not in source
-    assert "apply_safety" not in source
-    assert "CPolicyObservableEvidence" not in source
+    next_task_source = inspect.getsource(task_service_module.TaskService.next_task)
+    assert "prior_session_end_state" not in next_task_source
+    assert "apply_safety" not in next_task_source
+    assert "CPolicyObservableEvidence" not in next_task_source
+
+    # Whole-module companions, unaffected by Batch 2: neither symbol appears anywhere in
+    # task_service.py at all -- apply_safety runs INSIDE decide_adaptation (the package's own
+    # pinned composition), never called directly from this module; CPolicyObservableEvidence is
+    # constructed only in the adapter (T4-b/T4-a's own guard), never here.
+    module_source = inspect.getsource(task_service_module)
+    assert "apply_safety" not in module_source
+    assert "CPolicyObservableEvidence" not in module_source
 
 
 # =====================================================================================

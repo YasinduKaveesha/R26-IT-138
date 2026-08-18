@@ -19,10 +19,21 @@ are all REQUIRED, no-default parameters (W1-shape, S8-a's guard extension covers
 ``safety_config``/``default_safety_config`` specifically).
 
 DISCLOSED (X2-3, carried from ``session_lifecycle.py``): the session-start gate (S2/X4) means no
-session can exist in production for this module's own per-task call to ever run against. This
-module is exercised end-to-end only via direct calls with ``smoke_mode``-shaped test fixtures,
-mirroring Phase 5's own "COMPLETE, TESTED, DELIBERATELY NOT LIVE" serving path precedent.
-"""
+session can exist in production for this module's own per-task call to ever run against. Through
+Batch 1, this module was exercised end-to-end only via direct calls with ``smoke_mode``-shaped
+test fixtures, mirroring Phase 5's own "COMPLETE, TESTED, DELIBERATELY NOT LIVE" serving path
+precedent.
+
+BATCH 2 -- CORRECTED, NO LONGER "DIRECT CALLS ONLY": ``decide_and_persist_adaptation`` now has a
+real caller under ``app/`` -- ``task_service.submit_action``'s ``is_correct`` branch, called
+immediately after ``derive_and_persist_summary`` (ordering load-bearing, see that call site's own
+comment and this module's ``build_evidence_for_session`` docstring below). WIRED, NOT REACHABLE:
+the X2-3 refusal above is unchanged -- no session can be created by a real HTTP request today, so
+this new call site is exercised the same way every other Component C path documented "not live" is
+-- via a session created with ``smoke_mode=True`` (test-only) or a direct call. What changed is
+that a session which DOES exist (today, only that way) now produces a real, persisted
+``CPolicyDecisionRecord`` on its correct-answer path, rather than never calling this function at
+all."""
 
 from __future__ import annotations
 

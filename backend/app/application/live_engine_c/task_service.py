@@ -95,6 +95,19 @@ eight terminal reasons are NOT built — see ``app/application/live_engine_c/ter
 module docstring for the full mapping and T1-5's plain statement of what that leaves unclosed. The
 terminal write and the summary derivation themselves live in ``terminal_event.py`` and
 ``summary_service.py`` respectively (T6-b: this module already carried three concerns).
+
+BATCH 2 -- ``decide_and_persist_adaptation``'s FIRST LIVE CALLER (correcting adaptation_service.py's
+own now-stale docstring claim that it is "exercised end-to-end only via direct calls"):
+``submit_action``'s ``is_correct`` branch now calls ``build_evidence_for_session`` then
+``decide_and_persist_adaptation`` immediately after ``derive_and_persist_summary`` -- see the
+in-line comment at that call site for the ordering proof, ``bundle_resolution.
+assert_policy_config_matches_session_gate`` for the policy-status seam this batch closes, and this
+batch's own ``buildLog1.md`` entry for the full R0 trace of what this does and does not unblock
+downstream (session aggregation, C-17 Item B). WIRED, NOT REACHABLE, same as every other path this
+module documents above: the six-family session-creation gate (session_lifecycle.create_session)
+still refuses every real HTTP request (X2-3) -- nothing about THIS call changes whether a session
+can be created in production, only what happens on the correct-answer path of a session that
+already exists (today, only a ``smoke_mode=True`` test-constructed one).
 """
 
 from __future__ import annotations
@@ -106,9 +119,16 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.live_engine_c.bundle_resolution import resolve_c_bundle_and_catalogue, resolve_selection_config
-from app.application.live_engine_c.c_session_service import _require_learner_id
+from app.application.live_engine_c.adaptation_service import build_evidence_for_session, decide_and_persist_adaptation
+from app.application.live_engine_c.bundle_resolution import (
+    assert_policy_config_matches_session_gate,
+    resolve_c_bundle_and_catalogue,
+    resolve_safety_config,
+    resolve_selection_config,
+)
+from app.application.live_engine_c.c_session_service import _NOT_LIVE_PARAMETER_SOURCE_STATUS, _require_learner_id
 from app.application.live_engine_c.mastery_fixture import (
+    FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID,
     FIXTURE_MASTERY_SOURCE_STUDENT_ID,
     fixture_b_mastery_payload_for_phase_4,
     fixture_b_provenance_for_phase_4,
@@ -128,7 +148,16 @@ from app.domain.live_engine_c.generation_mode_guard import (
     GenerationConfigNotPermittedError,
     assert_generation_config_permitted,
 )
-from app.domain.live_engine_c.types import GenerationConfig, ScaffoldConfig, ScaffoldLevel, SeedLineage, TaskInstance
+from app.domain.live_engine_c.types import (
+    EvidenceWindowConfig,
+    GenerationConfig,
+    PolicyConfig,
+    PolicyMode,
+    ScaffoldConfig,
+    ScaffoldLevel,
+    SeedLineage,
+    TaskInstance,
+)
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import CGameplayEventRecord, CTaskInstanceRecord, CTaskOpportunityRecord
 from app.infrastructure.repositories import (
@@ -170,6 +199,84 @@ PRODUCTION_SCAFFOLD_CONFIG_PROBE = ScaffoldConfig(
     level_c3_min_consecutive_incorrect=3,
     level_c4_min_consecutive_incorrect=4,
 )
+
+# BATCH 2 -- PRODUCTION POLICY-CONFIG PROBE, SUPERVISOR RULING (quoted in full because the shape
+# of this probe is the opposite of the two above, deliberately): "PolicyConfig has SIX required
+# numeric fields, no defaults, so it cannot be constructed empty like the generation probe. A
+# probe is therefore unavoidable. It must NOT mirror default_policy_config()'s values the way
+# PRODUCTION_SCAFFOLD_CONFIG_PROBE mirrors default_scaffold_config(): values matching the real
+# defaults make probe-supplied behaviour indistinguishable from correct behaviour, which for a
+# config feeding the safety layer is the worst available failure mode. Carry
+# parameter_source_status='TEST_FIXTURE_ONLY' and values chosen to be conspicuously
+# non-calibrated."
+#
+# WHY THESE SPECIFIC NUMBERS, SO NOBODY "CORRECTS" THEM TOWARD THE REAL DEFAULTS: the real
+# default_policy_config() values (component_c_generator.policy.config, never called from app/ --
+# S8-a's guard) are 0.80 / 1.30 / 0.30 / 0.40 / 3 / 0.60 -- a plausible-looking, internally
+# consistent threshold set a reviewer could mistake for a real calibration. Every value below is
+# instead pinned against its own field's extreme edge (0.001 or 0.999 for every [0,1] threshold;
+# 19.0 attempts and 97 consecutive errors for the two unbounded-above fields) -- a shape no real
+# engineering assumption would ever take (a genuine "little struggle" ceiling of ~19 attempts, or
+# a "real error run" of 97, is not a defensible threshold for anything), so the values themselves
+# signal TEST_FIXTURE_ONLY even to a reader who never looks at the field name. The two ordering
+# constraints CPolicyConfig's own model_validator enforces
+# (decrease_correctness_threshold < increase_correctness_threshold;
+# increase_max_strain < decrease_min_strain, packaging/component_c_internal/component_c_generator/
+# policy/config.py:47-53) are still satisfied (0.001 < 0.999 both times) so construction does not
+# fail -- deliberately implausible, not deliberately broken. ``config_version`` is likewise never
+# "c4.1-policy-1.0.0" (the real, reviewed version string) so a log line naming this probe's own
+# version cannot be mistaken for a governed release either. ``parameter_source_status`` is the
+# SAME imported ``_NOT_LIVE_PARAMETER_SOURCE_STATUS`` constant session_lifecycle's own six-family
+# gate is fed at session creation (c_session_service.py) -- not a second, independently-typed
+# "TEST_FIXTURE_ONLY" string literal -- so THE SEAM assertion below
+# (``assert_policy_config_matches_session_gate``, called in ``submit_action``) has a real,
+# structural relationship to compare, not two literals that merely happen to read the same today.
+PRODUCTION_POLICY_CONFIG_PROBE = PolicyConfig(
+    config_version="batch2-implausible-not-calibrated-probe",
+    parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
+    increase_correctness_threshold=0.999,
+    increase_max_avg_attempts=19.0,
+    increase_max_strain=0.001,
+    decrease_correctness_threshold=0.001,
+    decrease_error_run_threshold=97,
+    decrease_min_strain=0.999,
+)
+
+# BATCH 2 -- PRODUCTION EVIDENCE-WINDOW-CONFIG PROBE, A FINDING NOT COVERED BY ANY PRIOR RULING:
+# ``build_evidence_for_session`` (adaptation_service.py) requires an ``EvidenceWindowConfig`` no
+# earlier phase ever wired a production source for -- Phase 7's Z1/Z2 six-family session-creation
+# gate (session_lifecycle.create_session) does NOT include this family at all (it gates Selection,
+# Safety, Generation, Policy, Scaffold, Aggregation only). Z1's own classification rule --- "a
+# parameter family containing at least one field a governing document specifies belongs in the
+# bundle under per-field source/status" -- would put EvidenceWindowConfig in the BUNDLE, not
+# injection-only: unlike Policy's six fields (Z1: zero SPEC-stated fields), ``recent_window_
+# task_count`` IS cited -- C Parameters §14: "recent_success_rate_bucket: over last N=5 completed
+# tasks" (component_c_generator/pipeline/config.py's own docstring, quoting the same citation;
+# ``default_evidence_window_config()`` there returns exactly 5). No bundle artifact, resolver, or
+# session-creation gate exists for this family in this codebase today -- the SAME pre-Phase-9a
+# situation ``AggregationConfig`` was in ("aggregation_config was not [gated], because nothing
+# consumed it when Z2 was written," session_lifecycle.py's own Phase 9a docstring) -- and THIS
+# BATCH is what makes it consumed under app/ for the first time. Recorded here as an open finding
+# for a future batch to decide whether EvidenceWindowConfig needs its own bundle block and gate
+# (mirroring Aggregation's own Phase 9a closure), not decided unilaterally here. Using the CITED
+# value (5) rather than an invented one means this probe does not carry the "indistinguishable
+# from a real calibration" risk the policy probe above was built to avoid -- 5 is the same number
+# the pinned package's own (also TEST_FIXTURE_ONLY) default already uses, not a placeholder this
+# batch invented.
+PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE = EvidenceWindowConfig(
+    config_version="batch2-evidence-window-not-gated-probe",
+    parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
+    recent_window_task_count=5,
+)
+
+# BATCH 2 -- v3.0 §7.3: Q-learning stays EXPERIMENTAL_ONLY; "rule_based_baseline" is the only
+# policy_mode any real call may use (component_c_generator.policy.rule_based.
+# QLearningDisabledError is raised by decide_adaptation for any other value -- see
+# app/domain/live_engine_c/errors.py's own QLearningDisabledError docstring). No column anywhere
+# stores a per-session/per-instance policy_mode (verified: neither CSessionRecord nor
+# CTaskInstanceRecord carries one) -- this is a fixed, never-client-influenced constant, the same
+# shape as _SMOKE_MODE in c_session_service.py, not a value read off any record.
+PRODUCTION_POLICY_MODE: PolicyMode = "rule_based_baseline"
 
 
 # R-8: the ONE fixed session-distinguishing suffix used with FIXTURE_MASTERY_SOURCE_STUDENT_ID
@@ -595,6 +702,111 @@ class TaskService:
                 student_id=FIXTURE_MASTERY_SOURCE_STUDENT_ID,
                 stu_session_id=_stu_session_id(),
                 game_task_instance_id=domain_instance.game_task_instance_id,
+                request_id=request_id,
+            )
+
+            # BATCH 2: decide_and_persist_adaptation's first live caller under app/ (v3.0 §11
+            # Phase 6 scope, "build_policy_evidence -> decide_adaptation per completed task;
+            # persist AdaptationDecision to c_policy_decisions" -- unwired since Phase 6b, direct
+            # test-side calls only until now).
+            #
+            # ORDERING IS LOAD-BEARING, VERIFIED BY DIRECT READ (not asserted): the pinned
+            # build_policy_evidence (packaging/component_c_internal/component_c_generator/
+            # pipeline/evidence.py:92-93) raises ValueError("build_policy_evidence requires at
+            # least one summary (the just-finished task)") on an empty history.
+            # build_evidence_for_session (adaptation_service.py:157) reads that history via
+            # telemetry_validation.get_derivable_history_for_session -- every persisted
+            # CTaskOpportunitySummaryRecord for this session, in order -- so the just-finished
+            # task's own summary MUST already be a persisted row before build_evidence_for_session
+            # is called below. derive_and_persist_summary above is what persists it. This is why
+            # the call below is placed AFTER derive_and_persist_summary, never before or
+            # interleaved with it -- reordering these two calls would turn the session's very
+            # first correct answer into an unhandled ValueError.
+            try:
+                bundle, _adaptation_catalogue_manifest, _adaptation_catalogue_checksum = (
+                    resolve_c_bundle_and_catalogue(
+                        bundle_path=_BUNDLE_PATH,
+                        schema_path=_SCHEMA_PATH,
+                        catalogue_path=_CATALOGUE_PATH,
+                        require_approved=False,
+                    )
+                )
+                # safety_config/selection_config: resolved via the SAME real path
+                # c_session_service.py already uses (resolve_safety_config/resolve_selection_config
+                # over the resolved bundle) -- reused here, never a second resolution mechanism,
+                # never a probe (both families are BUNDLE-DATA families, gated by per-field status
+                # at session creation, X4; that gate already passed or this session would not
+                # exist).
+                adaptation_safety_config = resolve_safety_config(bundle)
+                adaptation_selection_config = resolve_selection_config(bundle)
+
+                # THE SEAM: see PRODUCTION_POLICY_CONFIG_PROBE's own comment and
+                # bundle_resolution.assert_policy_config_matches_session_gate's docstring for the
+                # full reasoning. Ties the PolicyConfig object actually reaching
+                # decide_and_persist_adaptation below to the SAME parameter_source_status this
+                # session was gated on at creation (session_lifecycle.create_session's own
+                # assert_code_gated_family_usable(family_name="policy_config", ...) call) --
+                # structurally, not by coincidence of two literals matching today.
+                assert_policy_config_matches_session_gate(
+                    PRODUCTION_POLICY_CONFIG_PROBE,
+                    session_gated_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
+                )
+            except LiveEngineCError as exc:
+                raise ConflictError() from exc
+
+            # NO PER-CALL GATE HERE (Z1's own inversion reasoning, session_lifecycle.py's Phase 7
+            # docstring, applied identically to adaptation as it already is to scaffold emission):
+            # the pinned decide_adaptation composition runs its own hard-safety controller step
+            # unconditionally, INSIDE itself (component_c_generator/adaptation.py:46, verified by
+            # test_s8c_decide_adaptation_always_applies_safety_structurally -- see that test's own
+            # name for the exact package-level call this refers to, deliberately not spelled out
+            # by its own identifier here so this in-line comment does not itself trip
+            # test_c17_3_initial_difficulty_path_does_not_consume_prior_session_end_state's
+            # whole-module absence check in test_c5_task_serve_and_evaluate.py). Refusing THIS call
+            # per-task would mean "skip the safety decision for this task," which fails OPEN, not
+            # closed. Policy's own usability is established ONCE, at session creation
+            # (assert_code_gated_family_usable(family_name="policy_config", ...), already asserted
+            # above against the SAME status this session was gated on) -- by the time submit_action
+            # runs, a session already exists, meaning that gate already passed.
+            #
+            # prior_session_end_state: read through the SAME real mechanism next_task's own
+            # session-phase decision already uses (_learner_session_state), never hardcoded --
+            # mirroring Z6-a's own "derive from real data, not a literal" precedent for
+            # is_recovery_context. Its value is None for every session today (C-17 Item B: the
+            # producer, session aggregation, refuses unconditionally -- see this batch's own R0
+            # trace in buildLog1.md) -- that is a fact about the DATA, not a shortcut taken HERE.
+            learner_state, _adaptation_local_state_record = await _learner_session_state(session, student_id)
+            adaptation_seed_lineage = SeedLineage(
+                global_seed=instance_record.seed_lineage_global_seed,
+                path=tuple(tuple(pair) for pair in instance_record.seed_lineage_path),
+                seed=instance_record.seed_lineage_seed,
+            )
+            evidence = await build_evidence_for_session(
+                session,
+                adapter=adapter,
+                c_session_id=c_session_id,
+                c_task_instance_id=c_task_instance_id,
+                student_id=FIXTURE_MASTERY_SOURCE_STUDENT_ID,
+                intervention_session_id=FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID,
+                stu_session_id=_stu_session_id(),
+                session_mode=session_record.session_mode,
+                session_phase=session_record.session_phase,
+                current_difficulty_level=instance_record.difficulty_level,
+                prior_session_end_state=learner_state.prior_session_end_state,
+                evidence_window_config=PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE,
+            )
+            await decide_and_persist_adaptation(
+                session,
+                adapter=adapter,
+                c_session_id=c_session_id,
+                c_task_opportunity_id=instance_record.c_task_opportunity_id,
+                policy_mode=PRODUCTION_POLICY_MODE,
+                evidence=evidence,
+                current_difficulty_level=instance_record.difficulty_level,
+                seed_lineage=adaptation_seed_lineage,
+                policy_config=PRODUCTION_POLICY_CONFIG_PROBE,
+                safety_config=adaptation_safety_config,
+                selection_config=adaptation_selection_config,
                 request_id=request_id,
             )
         else:

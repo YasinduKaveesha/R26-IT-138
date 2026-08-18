@@ -337,11 +337,21 @@ class CPolicyDecisionRecordRepository(SqlAlchemyNeutralRepository[CPolicyDecisio
         ``derive_session_aggregate``'s own ``adaptation_decisions`` input (its own
         ``_decide_difficulty_trend`` reads ``decisions[0]``/``decisions[-1]`` under the assumption
         the list is in real decision order). Ordered by ``created_at_utc``, the same provenance
-        column ``most_recent_for_session`` already orders by. Nothing under ``app/`` writes this
-        table live (register-reconciliation batch, this same register) -- this will return an
-        empty list for every real session today; the pinned ``derive_session_aggregate`` tolerates
-        that (``difficulty_trend`` falls back to ``"stable"``, ``current_difficulty_level`` to 1)
-        rather than raising, an honest reflection of "no decisions occurred," not a fabrication."""
+        column ``most_recent_for_session`` already orders by.
+
+        UPDATED (Batch 2, correcting the register-reconciliation batch's own claim above, which
+        this note replaces rather than deletes): ``task_service.submit_action`` now calls
+        ``adaptation_service.decide_and_persist_adaptation`` on its correct-answer path, so this
+        table is no longer written by nothing under ``app/`` -- for any session that exists (still
+        only a ``smoke_mode=True``/direct-call session; production session creation still refuses
+        unconditionally, X2-3), this will return a non-empty, real list once at least one task has
+        been answered correctly. ``derive_and_persist_session_aggregate`` itself remains
+        unreachable regardless (``_AGGREGATION_INPUTS_AVAILABLE = False``, aggregation_service.py,
+        untouched by this batch) -- the pinned ``derive_session_aggregate``'s own tolerance for an
+        empty decision list (``difficulty_trend`` falls back to ``"stable"``,
+        ``current_difficulty_level`` to 1, an honest "no decisions occurred," not a fabrication)
+        is therefore no longer the ONLY case this list can be seen in, but is still the only case
+        aggregation itself can currently reach."""
         result = await self.session.execute(
             select(CPolicyDecisionRecord)
             .where(CPolicyDecisionRecord.c_session_id == c_session_id)

@@ -6597,3 +6597,372 @@ Yass commit this backend can re-pin to (once it does, this batch's entire workar
 adapter method, the port declaration, the domain type, the parity test, and the manifest
 verification key -- is removed, not merely superseded); batch 2 (a live caller for
 `decide_and_persist_adaptation`); batch 3 (F-2 column and read-back); batch 4 (supersession).
+
+## 2026-08-19 — Component C backend remediation, batch 2: `decide_and_persist_adaptation`'s first live caller
+
+**What was built.** `task_service.submit_action`'s `is_correct` branch now calls
+`adaptation_service.build_evidence_for_session` then `adaptation_service.decide_and_persist_adaptation`
+immediately after `derive_and_persist_summary` — `decide_and_persist_adaptation`
+(`adaptation_service.py:181`) had zero callers under `app/` before this batch (batch 1's own
+"Out of scope, confirmed" section named this as batch 2's own job); it now has exactly one, real
+one. `decide_adaptation_with_safety_flags` (batch 1's own reconstruction) is NOT what is called
+here — `decide_and_persist_adaptation` keeps calling `adapter.decide_adaptation`, unchanged, per
+this batch's own instruction; batch 3 owns switching the call site.
+
+**ORDERING, VERIFIED BY DIRECT READ, NOT ASSUMED.** `build_policy_evidence`
+(`packaging/component_c_internal/component_c_generator/pipeline/evidence.py:92-93`) raises
+`ValueError("build_policy_evidence requires at least one summary (the just-finished task)")` on an
+empty history. `build_evidence_for_session` (`adaptation_service.py:157`) reads that history via
+`telemetry_validation.get_derivable_history_for_session` — every persisted
+`CTaskOpportunitySummaryRecord` for the session — so the just-finished task's own summary must
+already be a persisted row before `build_evidence_for_session` runs. The new call is placed AFTER
+`derive_and_persist_summary` in `submit_action`, never before or interleaved with it; the very
+first correct answer of a session (empty history before that call) is exactly the case that would
+crash with an unhandled `ValueError` if this were reversed — `test_adaptation_call_happens_after_
+summary_is_persisted` and `test_correct_answer_writes_exactly_one_policy_decision_row` both
+exercise precisely that case (a single-task session, `_create_real_instance_for_c_cc_03`), so a
+reordering regression would fail loudly, not silently.
+
+**CONFIG-THREADING PATH (the batch's main unknown, resolved per the supervisor's own findings,
+verified against the actual code before use):**
+- `safety_config` -> `resolve_safety_config(bundle)`, `selection_config` -> `resolve_selection_config(bundle)`
+  — the SAME real path `c_session_service.py` already uses, called fresh inside `submit_action`
+  over a bundle resolved via the same `resolve_c_bundle_and_catalogue(bundle_path=_BUNDLE_PATH,
+  schema_path=_SCHEMA_PATH, catalogue_path=_CATALOGUE_PATH, require_approved=False)` `next_task`
+  already calls. No second resolution mechanism, no probe for either family — both are
+  BUNDLE-DATA families, already gated by per-field status at session creation (X4); that gate has
+  already passed by the time `submit_action` can run at all, since a session exists.
+- `policy_config` -> `PRODUCTION_POLICY_CONFIG_PROBE` (new, `task_service.py`) — see the probe
+  ruling below.
+- `policy_mode` -> `PRODUCTION_POLICY_MODE = "rule_based_baseline"` (new module constant,
+  `task_service.py`), never read off any record — verified no column anywhere stores a
+  per-session/per-instance `policy_mode` (`CSessionRecord`, `CTaskInstanceRecord` both checked
+  directly against `persistence_models.py`); v3.0 §7.3 fixes Q-learning as `EXPERIMENTAL_ONLY`,
+  and `decide_adaptation` raises `QLearningDisabledError` for any other mode
+  (`app/domain/live_engine_c/errors.py`'s own `QLearningDisabledError` docstring) — this is the
+  same shape as `_SMOKE_MODE`, a fixed, never-client-influenced constant, not a shortcut around a
+  real source that exists somewhere.
+- `current_difficulty_level` / `seed_lineage` -> `instance_record.difficulty_level` /
+  `SeedLineage(global_seed=instance_record.seed_lineage_global_seed, path=..., seed=instance_
+  record.seed_lineage_seed)`, mirroring `_to_domain_task_instance`'s own reconstruction of the
+  same three columns field-for-field.
+- `prior_session_end_state` -> read through `session_lifecycle._learner_session_state` (the SAME
+  real mechanism `next_task` already uses for `sessions_since_last_practice`), never hardcoded —
+  mirroring Z6-a's own "derive from real data, not a literal" precedent (already applied to
+  `is_recovery_context` in `build_evidence_for_session`). Its VALUE is `None` for every session
+  today, because its only producer (session aggregation) refuses unconditionally — see R0-3 below;
+  this batch reads it through the real mechanism anyway, rather than writing a literal `None`
+  itself, because the mechanism becoming real is exactly what R0-3's own trace depends on being
+  true, and because a future batch that DOES populate this state must not also have to remember to
+  swap out a hardcoded literal here.
+- `evidence_window_config` -> `PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE` (new, `task_service.py`) —
+  see the finding below; this was NOT named in the supervisor's own config-threading list and
+  needed its own judgment call.
+
+**THE POLICY-PROBE RULING, QUOTED IN FULL (binding, followed exactly):** "PolicyConfig has SIX
+required numeric fields, no defaults, so it cannot be constructed empty like the generation probe.
+A probe is therefore unavoidable. It must NOT mirror `default_policy_config()`'s values the way
+`PRODUCTION_SCAFFOLD_CONFIG_PROBE` mirrors `default_scaffold_config()`: values matching the real
+defaults make probe-supplied behaviour indistinguishable from correct behaviour, which for a
+config feeding the safety layer is the worst available failure mode. Carry `parameter_source_
+status='TEST_FIXTURE_ONLY'` and values chosen to be conspicuously non-calibrated."
+
+`PRODUCTION_POLICY_CONFIG_PROBE` (`task_service.py`) carries `0.999 / 19.0 / 0.001 / 0.001 / 97 /
+0.999` against the real `default_policy_config()`'s `0.80 / 1.30 / 0.30 / 0.40 / 3 / 0.60`
+(`packaging/component_c_internal/component_c_generator/policy/config.py:56-68`, verified by direct
+read) — every `[0,1]`-bounded field pinned to its own extreme edge (0.001 or 0.999), the two
+unbounded-above fields set to a magnitude (19.0 average attempts, 97 consecutive errors) no
+genuine engineering assumption would defend for anything. `CPolicyConfig`'s own two ordering
+constraints (`decrease_correctness_threshold < increase_correctness_threshold`;
+`increase_max_strain < decrease_min_strain`, `policy/config.py:47-53`) are still satisfied
+(0.001 < 0.999 both times), so construction does not fail — deliberately implausible, not
+deliberately broken. `config_version="batch2-implausible-not-calibrated-probe"`, never the real
+`"c4.1-policy-1.0.0"`. Documented at the point of construction with the full rationale, so a
+future reader does not "correct" the values toward the defaults; `test_production_policy_config_
+probe_does_not_mirror_the_real_defaults` (new) asserts every one of the six fields differs from
+`default_policy_config()`'s own value, and would fail the moment someone did exactly that.
+`default_policy_config()` itself is never called from `app/` (S8-a's guard, unaffected — that
+guard covers `default_selection_config`/`default_generation_config`/`default_safety_config`
+mechanically; `default_policy_config` is not AST-guarded, so this rule is followed by discipline,
+verified by direct read of `test_be2_architecture_guards.py`, not by a mechanical check).
+
+**THE SEAM, HOW IT IS CLOSED.** `assert_code_gated_family_usable(family_name="policy_config",
+parameter_source_status=<str>, ...)` (`bundle_resolution.py`, called from `session_lifecycle.
+create_session`) takes the status as a SEPARATE STRING at session creation — verified: no
+`policy_parameter_source_status` (or any per-session code-gated-family status) column exists on
+`CSessionRecord` at all (`persistence_models.py:701-779`, read in full); the value is used ONCE, to
+pass the gate, and then discarded — never persisted anywhere a later call could read it back. So
+the only way to tie the `PolicyConfig` object reaching `decide_and_persist_adaptation` to the
+status the session was gated on is a STRUCTURAL one, not a database read-back (no F-2-shaped
+column exists for this and none is added — out of scope). Two things close it:
+1. `PRODUCTION_POLICY_CONFIG_PROBE.parameter_source_status` is the SAME imported
+   `c_session_service._NOT_LIVE_PARAMETER_SOURCE_STATUS` constant `CSessionService.create` feeds
+   the gate at session creation — not a second, independently-typed `"TEST_FIXTURE_ONLY"` literal
+   that merely happens to read the same today (the way the pre-existing `PRODUCTION_GENERATION_
+   CONFIG_PROBE`/`PRODUCTION_SCAFFOLD_CONFIG_PROBE` each still do, unchanged, out of this batch's
+   scope).
+2. `bundle_resolution.assert_policy_config_matches_session_gate` (new function) is called in
+   `submit_action`, immediately before `decide_and_persist_adaptation`, comparing the probe's own
+   `parameter_source_status` against `_NOT_LIVE_PARAMETER_SOURCE_STATUS` AT RUNTIME, on every call
+   — not merely relying on the shared-constant import to keep the two tied together (an import-time
+   coincidence proves only that the two started equal, not that they stay tied after either call
+   site is edited independently later). Raises the same `ConfigurationFamilyNotUsableError` every
+   other family-usability failure raises, naming `policy_config`/`parameter_source_status`.
+
+Today both values are `"TEST_FIXTURE_ONLY"`, so this is moot in practice — but a FUTURE change
+resolving a governed `PolicyConfig` for the session-start gate while `submit_action` still passed
+the always-refused probe would produce a governed-looking session silently running adaptation on
+invented thresholds, with the gate itself reporting success, because the gate never looked at the
+object doing the work. That is the seam this closes. `test_seam_matching_status_does_not_raise`,
+`test_seam_mismatched_status_raises_and_names_policy_config`, and `test_production_policy_config_
+probe_carries_the_session_gate_status` (new) prove both directions plus the real call site's own
+current pass.
+
+**NO PER-CALL GATE ON ADAPTATION**, exactly as instructed: the pinned `decide_adaptation`
+composition calls its own hard-safety controller step unconditionally, INSIDE itself
+(`component_c_generator/adaptation.py:46`, verified by the pre-existing
+`test_s8c_decide_adaptation_always_applies_safety_structurally`). Refusing the adaptation call
+per-task would mean skipping the safety decision for that task entirely — fails OPEN, not closed,
+the same inversion reasoning `session_lifecycle.py`'s own Phase 7 docstring already uses for why
+scaffold's gate sits at session start rather than per-call. Policy's own usability is established
+ONCE, at session creation (`assert_code_gated_family_usable(family_name="policy_config", ...)`,
+already asserted via the seam above against the same status the session was gated on); by the
+time `submit_action` runs, a session already exists, meaning that gate already passed. No refusal
+was added inside the `is_correct` branch beyond the seam check and the ordinary bundle-resolution
+`LiveEngineCError -> ConflictError` translation `next_task` already uses for the identical shape.
+
+**AN OPEN FINDING NOT COVERED BY ANY PRIOR RULING: `EvidenceWindowConfig` has no gate at all.**
+`build_evidence_for_session` requires an `EvidenceWindowConfig` — Phase 7's own six-family
+session-creation gate (Selection, Safety, Generation, Policy, Scaffold, Aggregation) does not
+include this family. Z1's own classification rule ("a parameter family containing at least one
+field a governing document specifies belongs in the bundle under per-field source/status") would
+put it in the bundle, not injection-only: unlike Policy's six fields (zero SPEC-stated fields),
+`recent_window_task_count` IS cited — C Parameters §14: "recent_success_rate_bucket: over last
+N=5 completed tasks" (`packaging/component_c_internal/component_c_generator/pipeline/config.py`'s
+own docstring, quoting the same citation; its `default_evidence_window_config()` returns exactly
+5). No bundle artifact, resolver, or session-creation gate exists for this family — the same
+pre-Phase-9a situation `AggregationConfig` was in before it was added to the gate ("aggregation_
+config was not [gated], because nothing consumed it when Z2 was written," `session_lifecycle.py`'s
+own Phase 9a docstring), and this batch is what makes it consumed under `app/` for the first time.
+`PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE` (new, `task_service.py`) uses the CITED value (5), the
+same one the pinned package's own default already returns, rather than inventing a placeholder —
+this does not carry the "indistinguishable from a real calibration" risk the policy-probe ruling
+above exists to avoid, because 5 is not this batch's own invention. Recorded here as an open
+finding for a future batch to decide whether `EvidenceWindowConfig` needs its own bundle block and
+gate (mirroring Aggregation's own Phase 9a closure) — not decided unilaterally in this batch.
+
+**R0 — THREE VERDICTS, EACH TRACED SEPARATELY, NEVER ASSERTED FROM ONE MECHANISM.**
+
+*1. Does this make `c_policy_decisions` rows real on the correct-answer path? State the
+conditions.* YES, MECHANICALLY, UNDER THREE CONDITIONS, NONE OF WHICH IS "IN PRODUCTION." (a) A
+`CSessionRecord` must already exist — today this is possible ONLY via `smoke_mode=True`
+session creation (a direct/test-side call) or a future bundle whose six families are all
+`APPROVED`; the real HTTP route (`CSessionService.create`, hardcoded `smoke_mode=False`) still
+refuses unconditionally (X2-3, unchanged by this batch). (b) The submitted action must evaluate
+correct (`evaluation.is_correct`). (c) The just-finished task's own derivable history must be
+gap-free, or `build_evidence_for_session` raises `DistrustedHistoryGapError` before any decision
+is computed (see the Phase 8 finding below). Proven from the database, not inferred: `test_
+correct_answer_writes_exactly_one_policy_decision_row` reads back exactly one row via `CPolicy
+DecisionRecordRepository.list_chronological_for_session`; `test_incorrect_answer_writes_no_policy_
+decision_row` proves condition (b) is load-bearing, not cosmetic.
+
+*2. Does it unblock `adaptation_decisions` as a session-aggregation input? Trace whether
+aggregation_service actually reads those rows, and what else still blocks it.* PARTIALLY, AND THE
+PART IT DOES NOT UNBLOCK IS THE ONE THAT MATTERS FOR REACHABILITY. Traced: `aggregation_service.
+derive_and_persist_session_aggregate` (line 208) already calls `CPolicyDecisionRecordRepository
+(session).list_chronological_for_session(c_session_id)` and converts every row via `_to_domain_
+adaptation_decision` — this READ mechanism was built in Phase 9a, unchanged by this batch. Before
+this batch, that query always returned `[]` for every real session, because nothing under `app/`
+ever wrote a row — "nothing under `app/` writes this table live," `repositories.py`'s own
+pre-existing docstring (now corrected, see Files Modified). This batch closes THAT half: a session
+that exists (still only the `smoke_mode=True`/direct-call kind) and completes at least one correct
+task now has a real, non-empty `adaptation_decisions` list for aggregation to read — an
+improvement in FIDELITY (`difficulty_trend` computed from real decisions rather than falling back
+to `"stable"`) for the one function that can already read this input. But
+`derive_and_persist_session_aggregate` refuses UNCONDITIONALLY first, via `_AGGREGATION_INPUTS_
+AVAILABLE = False` (`aggregation_service.py:126`, a module-level constant this batch does not
+touch, does not import, does not reference) — REGARDLESS of what `adaptation_decisions` contains.
+So: this batch unblocks `adaptation_decisions` specifically (the input can now be real and
+non-empty), but does NOT unblock session aggregation as a whole, which remains refused for
+entirely separate reasons (`time_in_target_band_sec`/`safety_override_count` have no source, P3's
+own trace, untouched). In production, nothing changes either way: session creation itself already
+refused every real request before this batch and still does.
+
+*3. Does it unblock C-17 Item B (the recovery cap receiving a live input)? Expectation is NO —
+trace it; say so if the expectation is wrong.* THE EXPECTATION IS CORRECT — NO, TRACED IN FULL.
+C-17 Item B's cap keys on `prior_session_end_state`, whose only producer is session aggregation
+(`derive_and_persist_session_aggregate` -> `adapter.decide_learner_state` -> written to `CLearner
+LocalStateRecord.prior_session_end_state` by `complete_session`, which is NOT called by this
+batch). Session aggregation refuses unconditionally per R0-2 above — untouched by this batch — so
+`prior_session_end_state` stays hardcoded `None` at `session_lifecycle.py:347` (verified: this
+batch does not touch `aggregation_service.py` or `session_lifecycle.complete_session` at all).
+What DOES change: `submit_action` now reads `prior_session_end_state` through the real
+`_learner_session_state` mechanism (not a literal `None` written by this batch) when building
+evidence for the adaptation call — this is C-17 Item B's CONSUMER gaining a live caller for the
+first time (mirroring Z6-a's own "mechanism real, guarantee still open" shape for
+`is_recovery_context`), which is exactly why `test_c17_3_initial_difficulty_path_does_not_consume_
+prior_session_end_state` (pre-existing tripwire, updated this batch, see Files Modified) now finds
+the SYMBOL `prior_session_end_state` in `task_service.py`'s source — deliberately, in a DIFFERENT
+function (`submit_action`, C-17 Item B) than the one that test actually guards (`next_task`'s own
+initial-difficulty path, C-17 Item A, unchanged, re-scoped and re-proven absent there
+specifically). But the VALUE reaching that consumer is still always `None`, because the PRODUCER
+half is untouched and still refuses. C-17 Item B therefore closes on NEITHER half after this
+batch, same verdict as batch 1's own P4 finding (aggregation_service.py's own module docstring) —
+the consumer gaining a live caller does not change that, because the producer was always the
+harder half and remains exactly as blocked.
+
+**PHASE 8 INTERACTION — a stream the telemetry validator distrusts produces no summary; is the
+resulting GAP handled on this newly-live path?** YES, ALREADY HANDLED, BY A PRE-EXISTING MECHANISM
+THIS BATCH DID NOT HAVE TO BUILD, TRACED HERE RATHER THAN ASSUMED. `build_evidence_for_session`
+(`adaptation_service.py:157`) reads history via `telemetry_validation.get_derivable_history_for_
+session` — THE ONE accessor the Phase 8 AST guard permits under `app/` for this read
+(`test_be2_architecture_guards.py`) — which itself computes the OFFERED-minus-DERIVABLE gap set
+(an opportunity that reached a terminal gameplay event but has no summary row) and raises
+`DistrustedHistoryGapError` on any non-empty gap set, NEVER returning a truncated list
+(`telemetry_validation.py:208-244`, read in full). So a gapped session's adaptation call refuses
+the SAME way a gapped session's own summary-derivation trigger already refuses elsewhere in this
+codebase — the standing ruling ("a gap makes a history unusable, not merely shorter") is upheld
+structurally, not merely by convention, on this specific newly-live path. ONE THING IS NOT HANDLED,
+NAMED HERE RATHER THAN FIXED (out of scope — "report, do not fix unless trivially in scope"):
+`submit_action` does not wrap the new `build_evidence_for_session`/`decide_and_persist_adaptation`
+calls in a `try/except LiveEngineCError -> ConflictError` the way `next_task`'s own bundle
+resolution is wrapped — so a real `DistrustedHistoryGapError` here would propagate as an unhandled
+exception (a 500, not a structured 409) rather than being translated at the HTTP boundary. This
+was a DELIBERATE choice, not an oversight: `derive_and_persist_summary`'s own `TelemetryStream
+RejectedError` is ALREADY left uncaught in this exact function today, for the identical shape of
+error — wrapping only the NEW calls would be inconsistent with `submit_action`'s own existing
+precedent, not a fix to it; wrapping BOTH is a real, coherent improvement but is a different,
+broader change than this batch's own charter authorizes. Left exactly as `submit_action`'s existing
+behaviour already was, named plainly rather than silently changed.
+
+**WIRED, NOT REACHABLE.**
+
+| Path | Before batch 2 | After batch 2 |
+|---|---|---|
+| `decide_and_persist_adaptation` has a live caller under `app/` | NO | YES — WIRED |
+| A real HTTP request can create a `CSessionRecord` in production | NO (X2-3) | NO (X2-3, unchanged) |
+| A real HTTP request can reach `submit_action`'s adaptation call | NO | NO — still refuses upstream at session creation |
+| `c_policy_decisions` can hold a real, non-fixture-only row | NO | YES, for a `smoke_mode=True`/direct-call session only |
+| Session aggregation can run in production | NO | NO — `_AGGREGATION_INPUTS_AVAILABLE = False`, untouched |
+| C-17 Item B's cap can receive a non-`None` `prior_session_end_state` | NO | NO — producer (aggregation) untouched, still `None` always |
+
+Nothing becomes REACHABLE from a real HTTP request by this batch. The word is WIRED, not
+reachable, stated plainly: the six-family session-creation gate refuses every real request exactly
+as it did before this batch; what changed is what happens on the correct-answer path of a session
+that already exists, and today the only way such a session exists is `smoke_mode=True` or a direct
+call.
+
+**TESTS — proving the caller fires, not that it exists** (new file `tests/test_batch2_adaptation_
+live_caller.py`, 8 tests):
+- `test_correct_answer_writes_exactly_one_policy_decision_row` — positive control, read from the
+  database via `CPolicyDecisionRecordRepository.list_chronological_for_session`, against a
+  deterministically-correct C-CC-03 submission (`_create_real_instance_for_c_cc_03`, reused from
+  `test_c6a_summary_derivation.py` — avoids the RNG-template correctness-payload-shape trap this
+  batch hit on its first attempt, see "what contradicted the plan" below).
+- `test_incorrect_answer_writes_no_policy_decision_row` — negative control, same fixture, a
+  deliberately wrong `selected_numeral`.
+- `test_adaptation_call_happens_after_summary_is_persisted` — ORDERING, not mere co-occurrence:
+  monkeypatches `task_service.derive_and_persist_summary`/`decide_and_persist_adaptation` (the
+  names as `task_service.py` itself resolves them) with call-order spies wrapping the real
+  functions, asserts `["summary_persisted", "adaptation_called"]` exactly, against a single-task
+  (empty-history-before-this-call) session — a swap would independently also crash with the
+  pinned `ValueError`, so this test guards the property two ways at once.
+- `test_seam_matching_status_does_not_raise` / `test_seam_mismatched_status_raises_and_names_
+  policy_config` / `test_production_policy_config_probe_carries_the_session_gate_status` — the
+  seam, both directions plus the real call site's own current state.
+- `test_production_policy_config_probe_does_not_mirror_the_real_defaults` — structural proof the
+  probe ruling holds, against the pinned package's own `default_policy_config()`.
+- `test_production_evidence_window_config_probe_uses_the_cited_window_not_an_invented_one` — the
+  EvidenceWindowConfig finding's own probe, proven against the pinned package's own default.
+
+**WHAT CONTRADICTED THE PLAN, CORRECTED DURING THIS BATCH (R0 discipline applied to this batch's
+own first attempt, not only to prior batches' claims).** The first pass built the three DB-backed
+tests against an RNG-template session (`_create_real_instance_via_smoke_mode`, `dict(instance.
+correct_answer_payload)` submitted verbatim) and ran the full suite without first rebuilding the
+Docker image — both were wrong, both were caught by running the suite, neither was silently
+worked around:
+1. The Docker image (`upadya-backend:be1-batch3`) is built, not bind-mounted (`compose.yaml`
+   has no `volumes:` entry for `app`/`tests`) — the first full-suite run against the stale image
+   silently exercised the OLD code and reported the exact pre-batch baseline (562/74/636),
+   which would have been reported as a false "0 failed" had it not been checked against the
+   expected `+N` reconciliation. `docker compose build api` before every run from here on.
+2. `dict(instance.correct_answer_payload)` submitted verbatim is not a valid assumption for every
+   template — C-CC-03's own evaluator compares `action["selected_numeral"]` against
+   `correct["cardinality"]`, two different key names, a correspondence that must be read from the
+   template's own evaluator (exactly the same trap `test_c6a_summary_derivation.py`'s own
+   `_create_real_instance_for_c_cc_03` docstring already names: "a premise that failed for exactly
+   this class of template on the first attempt at this test"). Switched to that same deterministic
+   fixture, avoiding RNG-template dependence entirely for the three DB-backed tests.
+3. The pre-existing tripwire `test_c17_3_initial_difficulty_path_does_not_consume_prior_session_
+   end_state` fired exactly as its own docstring promised it would ("when someone wires it, this
+   assertion breaks and points back here") — its whole-module string search for
+   `"prior_session_end_state"` broke the moment `submit_action` legitimately started reading it
+   (for C-17 Item B, not Item A, its own subject). Re-scoped to `next_task`'s own source
+   specifically (still proven absent there, unchanged in substance) rather than the whole module,
+   with the reasoning above recorded in the test's own docstring — the conscious response the
+   original docstring asked for, not a silent widening of what "consumes" means. A second,
+   incidental collision (this batch's own new in-line comment in `submit_action` named the
+   package's `apply_safety` function by its own identifier, which the SAME test's whole-module
+   check for that string also caught) was fixed by rewording the comment, not by weakening the
+   check.
+
+**Verified — full suite, clean, single run against a freshly reset database and a freshly rebuilt
+image** (`docker compose -f backend/compose.yaml down -v && up -d db`, then `docker compose -f
+backend/compose.yaml build api` before the run that produced these numbers — two earlier runs in
+this same batch were discarded: one against a stale image (see point 1 above), one that surfaced
+the two real test defects above and was fixed rather than reported):
+```
+570 passed, 74 skipped, 0 failed, 644 collected
+```
+Reconciles exactly against baseline 562/74/0/636: `562 + 8 = 570` passed, `636 + 8 = 644`
+collected, skips unchanged at 74, 0 failed both before and after. The +8 is exactly the eight new
+tests in `tests/test_batch2_adaptation_live_caller.py` — no other test file gained or lost a test;
+`test_c17_3_initial_difficulty_path_does_not_consume_prior_session_end_state` was UPDATED (its
+scope narrowed and its docstring extended), not added or removed.
+
+**Files created:** `backend/tests/test_batch2_adaptation_live_caller.py`.
+
+**Files modified:**
+`backend/app/application/live_engine_c/task_service.py` (the live call site in `submit_action`;
+three new module-level constants — `PRODUCTION_POLICY_CONFIG_PROBE`, `PRODUCTION_EVIDENCE_WINDOW_
+CONFIG_PROBE`, `PRODUCTION_POLICY_MODE`; import additions; a module-docstring addendum),
+`backend/app/application/live_engine_c/bundle_resolution.py` (new function `assert_policy_config_
+matches_session_gate`, the seam's runtime half),
+`backend/app/application/live_engine_c/adaptation_service.py` (module-docstring correction: no
+longer "exercised end-to-end only via direct calls" — that claim is now stale and is corrected in
+place, not deleted, per this codebase's own accretive-documentation convention),
+`backend/app/infrastructure/repositories.py` (`CPolicyDecisionRecordRepository.list_chronological_
+for_session`'s own docstring corrected: "nothing under `app/` writes this table live" was true
+before this batch and is false after it — updated rather than left stale),
+`backend/tests/test_c5_task_serve_and_evaluate.py` (the C17-3 tripwire, re-scoped and its
+docstring extended, per the trace above),
+`backend/buildLog1.md` (this entry, appended).
+
+No git command beyond read-only verification (`status`, `diff --stat`) was run this batch; nothing
+was staged or committed.
+
+**Out of scope, confirmed.** No F-2 column, no read-back, `safety_forces_recovery=False` and its
+three-break register comment at `task_service.py` stand exactly as they were (verified: `git diff`
+shows no deletion touching that literal or its comment — the only removed lines in `task_service.py`
+are import statements being expanded to multi-line form). No switch to `decide_adaptation_with_
+safety_flags` — `decide_and_persist_adaptation` still calls `adapter.decide_adaptation`, unchanged
+(batch 3's own job, together with the F-2 column, in one place). No supersession work (batch 4).
+No generator or Yass change. No wheel, pyproject, provenance manifest, requirements.*, Dockerfile,
+or `.dockerignore` change. No migration — none was needed, and none was written. No new table. No
+frontend file. No gate lifted or weakened — the seam ADDS a check, the EvidenceWindowConfig finding
+is named, not resolved, and no bundle/gate is built for it. No threshold resolved; `safety_
+override_count`'s definition is not touched. `b_learner_skill_states`, `opportunity_selection.py`,
+`hint_request.py` — not read.
+
+**Remains open.** `safety_override_count`'s authoritative definition (unresolved, unchanged from
+batch 1). `time_in_target_band_sec` (unchanged). The `AdaptationDecision` interface-change
+timeline (unchanged). Batch 3: switch the adaptation call site to `decide_adaptation_with_safety_
+flags`, add the F-2 `safety_forces_recovery` column on `c_policy_decisions`, and the read-back that
+closes break (3) of the three-break chain — together, per the owner's own instruction. Batch 4:
+supersession. The `EvidenceWindowConfig` gating gap named in this batch (no bundle block, no
+session-creation gate for this family, despite having a SPEC-cited field) — a finding for a future
+batch to rule on, not resolved here. `DistrustedHistoryGapError`'s propagation from `submit_action`
+as an unhandled exception rather than a translated `ConflictError` — named, not fixed, consistent
+with `submit_action`'s own pre-existing behaviour for the same shape of error. C-17 Item B remains
+open on its producer half (session aggregation, blocked on `time_in_target_band_sec`/`safety_
+override_count`), unchanged by this batch despite its consumer half gaining a live caller.

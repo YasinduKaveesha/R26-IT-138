@@ -25,7 +25,7 @@ from app.domain.live_engine_c.errors import (
     SelectionConfigurationMissingError,
 )
 from app.domain.live_engine_c.generation_mode_guard import DISALLOWED_OUTSIDE_SMOKE_MODE
-from app.domain.live_engine_c.types import Catalogue, SafetyConfig, SelectionConfig
+from app.domain.live_engine_c.types import Catalogue, PolicyConfig, SafetyConfig, SelectionConfig
 from app.domain.runtime_bundle.errors import RuntimeBundleError
 from app.domain.runtime_bundle_c.types import CRuntimeBundle
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
@@ -166,3 +166,35 @@ def assert_code_gated_family_usable(*, family_name: str, parameter_source_status
     unusable field (never the value it held)."""
     if not smoke_mode and parameter_source_status in DISALLOWED_OUTSIDE_SMOKE_MODE:
         raise ConfigurationFamilyNotUsableError(family_name, ("parameter_source_status",))
+
+
+def assert_policy_config_matches_session_gate(
+    policy_config: PolicyConfig, *, session_gated_parameter_source_status: str
+) -> None:
+    """THE SEAM (Batch 2, ``adaptation_service.decide_and_persist_adaptation``'s first live
+    caller under ``app/``, ``task_service.submit_action``): ``assert_code_gated_family_usable``
+    above gates ``policy_config`` at SESSION CREATION by a SEPARATE STRING argument
+    (``session_lifecycle.create_session``'s own ``policy_parameter_source_status`` parameter,
+    sourced today from ``c_session_service._NOT_LIVE_PARAMETER_SOURCE_STATUS`` -- the ONLY value
+    any real session in this codebase is ever gated on) -- that string is never read off a
+    ``PolicyConfig`` object, because none exists yet at session-creation time. The ``PolicyConfig``
+    object ``decide_and_persist_adaptation`` actually runs against is built LATER, per task, at
+    ``submit_action``. These are two different values, from two different call sites, that today
+    happen to carry the identical literal ``"TEST_FIXTURE_ONLY"`` -- but nothing before this
+    function made that STRUCTURAL. A future change resolving a governed ``PolicyConfig`` for the
+    session-start gate while ``submit_action`` still passed the always-refused probe would produce
+    a governed-looking session silently running adaptation on invented thresholds, with the gate
+    itself reporting success -- because the gate never looked at the object doing the work.
+
+    This is the RUNTIME half of closing that gap: called at the one point in ``submit_action``
+    where a real ``PolicyConfig`` object exists, immediately before it is handed to
+    ``decide_and_persist_adaptation``, comparing its OWN ``parameter_source_status`` against the
+    value that gated this session's creation. An import-time / object-identity coincidence (both
+    call sites merely referencing the same constant) would prove only that the two started equal,
+    not that they stay tied together after either call site is edited independently -- this
+    assertion re-checks the relationship on every call. Raises the same
+    ``ConfigurationFamilyNotUsableError`` every other family-usability failure raises (X1/Z2's own
+    one-mechanism, one-error-type discipline), naming ``policy_config`` and
+    ``parameter_source_status`` -- never the values themselves."""
+    if policy_config.parameter_source_status != session_gated_parameter_source_status:
+        raise ConfigurationFamilyNotUsableError("policy_config", ("parameter_source_status",))
