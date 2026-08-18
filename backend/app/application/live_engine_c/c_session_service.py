@@ -178,6 +178,7 @@ class CSessionService:
                 generation_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
                 policy_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
                 scaffold_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
+                aggregation_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
                 smoke_mode=_SMOKE_MODE,
                 request_id=request_id,
                 mastery_by_skill=mastery_by_skill,

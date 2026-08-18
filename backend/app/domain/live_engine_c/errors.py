@@ -160,6 +160,17 @@ class DistrustedHistoryGapError(LiveEngineCError):
         )
 
 
+class AggregationInputsUnavailableError(LiveEngineCError):
+    """Phase 9a, P1 (owner ruling): "AGGREGATION MUST REFUSE AT RUNTIME WHEN ITS INPUTS ARE
+    UNAVAILABLE, not merely be documented as unwired... What stops it is code that refuses."
+    Raised unconditionally by ``aggregation_service.derive_and_persist_session_aggregate`` while
+    ``aggregation_service._AGGREGATION_INPUTS_AVAILABLE`` is ``False`` -- REGARDLESS of what a
+    caller passes for ``time_in_target_band_sec``/``safety_override_count``, so a caller supplying
+    a real number cannot quietly satisfy this the way a ``None``-check could be satisfied. Carries
+    no threshold or invented value -- there is none to carry; this error exists precisely because
+    none is sourced yet (see the module docstring's loop-level register entry)."""
+
+
 class SF043OrderingError(LiveEngineCError):
     """Phase 4: the SF-043 ordering gate at session creation -- "B runs -> B completes ->
     B emits seven mastery values -> C validates the same-session payload -> C begins." Raised

@@ -6162,3 +6162,242 @@ committed.
 **Out of scope, confirmed.** No behaviour change. No new test. No code path touched beyond the one
 comment block. Everything named out of scope in the Phase 8 entry above remains untouched, unread,
 unchanged.
+
+## 2026-08-20 — Component C Phase 9a: session aggregation, C-COMP-v1 composites, C-LS-v1 learner
+## state, C-19 — SHIPS UNWIRED, WITH A RUNTIME REFUSAL
+
+v3.0 §11 Phase 9's AGGREGATION half only -- never `emit_c_to_3`, never the outbox, never the wheel
+rebuild (9b/9c, later, separate batches).
+
+**CITATION RULE, NEW AND STANDING (owner ruling, extended from the filename-approval rule):** "an
+approval citation must name WHOSE approval and IN WHAT FORUM." Two instances flagged this batch,
+not edited -- the pinned `aggregation/derive.py` is READ-ONLY: `derive.py:9,15-16` ("RESOLVED --
+`time_in_target_band_sec` is a confirmed caller-supplied input (supervisor, C5.0 revision)... Supervisor
+confirmed") and `derive.py:21,30` (`safety_override_count`, same phrase). Both refer to the
+GENERATOR's own upstream supervisor, in the generator's own development process -- accurate at
+that source, misleading at this destination, where an unqualified "Supervisor confirmed" reads as
+an approval given in THIS repository. Same defect shape as a filename asserting what its body
+denies. Searched (case-insensitive, "supervisor", whole file): no third instance found; not hunted
+beyond that module, per this batch's own scope.
+
+**R0, WIDENED, applied a level further this batch -- to a CONSEQUENCE claim, not only a mechanism
+claim (P3):** the prior planning turn's own C-17 Item B trace stopped at the consumer
+(`decide_and_persist_adaptation` has no live caller) and recorded a partial closure on that basis.
+Tracing the PRODUCER's own inputs (this same rule, applied one step further) found the producer
+cannot run on real data either -- withdrawn below (P4).
+
+**P1 -- SHIP UNWIRED, BUT REFUSE AT RUNTIME (owner ruling, quoted in full, the condition this
+batch was built against):** "AGGREGATION MUST REFUSE AT RUNTIME WHEN ITS INPUTS ARE UNAVAILABLE,
+not merely be documented as unwired... This is the fifth mechanism shipped complete and inert, and
+the register has not stopped any of the previous four from being read as complete. A sixth
+register line will not either. What stops it is code that refuses." Why this is not the
+sixth-parameter-family argument again, owner, quoted: "those five families all gate the same
+event and are all blocked by the same thing -- governance signing -- so a sixth added nothing.
+These three inputs are blocked by something else entirely, and they unblock, if ever, on a
+different event. When the parameter gates lift, aggregation becomes reachable with these inputs
+still missing." Built as `app/application/live_engine_c/aggregation_service.py`'s own module-level
+`_AGGREGATION_INPUTS_AVAILABLE = False` constant (P1-a) -- mirrors `c_session_service.py:80`'s
+`_SMOKE_MODE` shape exactly, NEVER a function parameter (a caller-supplied override would BE the
+quiet-satisfaction path this resists). `derive_and_persist_session_aggregate` refuses
+unconditionally while it is `False`, regardless of what `time_in_target_band_sec`/
+`safety_override_count` a caller supplies -- proven by
+`test_refusal_fires_even_with_real_looking_scalars_supplied` (a real-looking `120.5` passed and
+still refused, no partial write). Proven load-bearing, not dead code, by
+`test_refusal_fires_and_a_flipped_constant_reaches_real_persistence`: monkeypatching ONLY the
+constant to `True` (test-side, P1-c, the same mechanism already established for `_SMOKE_MODE`/
+`_BUNDLE_PATH`) lets a real fixture proceed past the refusal and persist a real
+`CSessionAggregateResultRecord` -- the constant genuinely gates something, proven by flipping it,
+not merely asserted.
+
+**P2 -- NO PROBES (owner, quoted in these words):** "the generation-config probe is safe because
+its own gate refuses it unconditionally before use; these two scalars have no gate, so an invented
+value flows straight into frozen composites. Different in kind, not degree." No probe was built
+for either scalar. `derive_and_persist_session_aggregate`'s own signature requires both as
+REQUIRED, no-default parameters, exactly mirroring the pinned `derive_session_aggregate`'s own
+shape -- it is the module constant, never a default or invented value, that keeps this unreachable.
+
+**P3 -- THE LOOP-LEVEL REGISTER ENTRY, ONE ENTRY, THREE INPUTS, traced under R0 (not "9a's wiring
+is blocked," which owner named as true-but-misleading: "would let someone conclude the remaining
+phases are unaffected"):**
+- `time_in_target_band_sec` -- no C7 phase exists in this backend, no pilot profile, no
+  target-band telemetry anywhere in the schema (verified: neither `c_gameplay_events` nor
+  `c_task_opportunity_summaries` carries any target-band/challenge-fit column).
+- `safety_override_count` -- no C6 accumulation exists anywhere in this backend's plan.
+- `adaptation_decisions` -- required by `derive_session_aggregate`'s own signature, sourced from
+  `c_policy_decisions` (new `CPolicyDecisionRecordRepository.list_chronological_for_session`),
+  which nothing under `app/` writes live -- the register-reconciliation batch's own finding,
+  unchanged. DEGRADES GRACEFULLY, not itself refused: the pinned function tolerates an empty
+  decision list (`difficulty_trend` falls back to `"stable"`, `current_difficulty_level` to 1) --
+  an honest "no decisions occurred," not a fabrication.
+- `inactive_time_available` -- DERIVABLE, not a fourth missing input: a plain boolean the caller
+  sets from whether the session's own history carries real inactive-time telemetry, which Phase
+  6a's own derivation always computes for real. Nothing blocks this one; named so it is not left
+  unmentioned (P3-a's own instruction).
+
+Traced forward, at the loop level, naming 9b and 9c explicitly: aggregation cannot produce real
+composites -> 9b's C→3 payload has an aggregate half that cannot be built from real data -> 9c
+delivers a payload that was never real. Component 3 receives no genuine C payload until C6 and
+C7 -- the GENERATOR's own later phases, with NO OWNER anywhere in this backend's plan -- exist.
+
+**Severity, in the owner's own terms, recorded against the Phase 8 exclusion-reason entry (K3) so
+the two are comparable:** "a missing value is a hole in the dataset; a composite computed from
+invented inputs is a present-but-fictional value delivered to a risk model. The second is worse,
+and it is what happens if anyone ever satisfies these inputs the easy way." P1's own refusal
+exists to make the easy way structurally unavailable, not merely inadvisable.
+
+**P4 -- C-17 ITEM B, WITHDRAWN, BOTH STOPPING POINTS (SUPERVISOR CORRECTION of the prior planning
+turn's own partial-closure finding, attributed there, not to this implementation turn): owner,
+quoted: "My trace covered the consumer and stopped; yours extended to the producer without
+tracing the producer's inputs. Record both stopping points, not just the second."** C-17 Item B
+closes on NEITHER half:
+- Consumer: `decide_and_persist_adaptation` has no live caller (register-reconciliation batch,
+  unchanged).
+- Producer: `aggregation_service.derive_and_persist_session_aggregate` cannot run on real data
+  either -- it refuses, by design, on every real invocation, because
+  `time_in_target_band_sec`/`safety_override_count` have no source (P3, above).
+Recording partial closure on "the mechanism is real" when the mechanism cannot execute on
+anything but a test fixture would overstate this batch's own result. Withdrawn, not merely
+qualified.
+
+**P5-a -- the sixth gate.** `AggregationConfig` joins the session-start gate
+(`session_lifecycle.create_session`, a sixth `assert_code_gated_family_usable` call) -- applying
+Z2's own existing rule ("EVERY parameter family gates SESSION START"), never extending it.
+Supervisor-verified: five families were gated and `aggregation_config` was not, "because nothing
+consumed it when Z2 was written." Distinguished from Phase 8's own telemetry family, which was
+NOT created (K2-e): telemetry's every candidate field was blocked, so a gate for it would have
+gated nothing the other five did not already gate -- ceremony. `AggregationConfig` differs in
+kind: it EXISTS (`domain/live_engine_c/types.py:472-475`), is CONSUMED by pinned code
+(`aggregation.derive._decide_difficulty_trend` reads
+`config.min_completed_tasks_for_difficulty_trend` directly), and THIS BATCH USES IT. Gating five
+and not this one was an inconsistency, not restraint. `test_case0_all_five_families_usable_...`
+extended to six families usable (still succeeds, one created row);
+`test_case6_aggregation_unusable_refuses_and_names_aggregation_config` isolates the sixth
+(smoke_mode=False, the other three code-gated families at the test-only marker, aggregation left
+at `TEST_FIXTURE_ONLY`, asserting `excinfo.value.family_name == "aggregation_config"`) -- same
+shape as Cases 3-5, one family later.
+
+**P5-b -- `min_completed_tasks_for_difficulty_trend` stays UNSOURCED.** Not populated from the
+Parameters document's `min_completed_tasks_before_adaptation: 3` (a different field, a different
+config family -- Policy's own, not Aggregation's; a shared §14 citation is not a shared value,
+the same laundering shape I4 already rejected). The refusal to assume was correct and is recorded
+that way, not resolved by this batch.
+
+**P5-c -- the identities, transcribed not re-derived, asymmetry preserved.** SPEC §18/C→3 §4.3
+(verified against both sources, no disagreement -- C-6, no commit hash): `accuracy_rate =
+correct_task_count / completed_task_count` (null when 0); `avg_attempts_per_task =
+total_attempt_count / completed_task_count` (null when 0); `task_completion_rate =
+completed_task_count / task_opportunity_count` (0.0 when `task_opportunity_count` = 0). Two null
+on a zero denominator, one 0.0 -- not tidied. `test_identities_null_not_zero_on_a_zero_denominator`
+asserts `accuracy_rate is None` and `avg_attempts_per_task is None` (never `== 0.0`) alongside
+`task_completion_rate == 0.0`, all from one empty-summaries call -- an assertion that FAILS the
+instant either null is ever replaced by a fabricated zero, the exact discipline whose absence
+produced Component B's RT-std defect (F1/B-2).
+
+**P5-d -- C-19, a CALL-THROUGH PROOF, not new counting logic (M4-b's own finding, re-verified,
+standing).** `aggregation/derive.py:134-148` ("FIX 2, C5.0 revision") already excludes a
+baseline-cap hold at level 1 from `difficulty_floor_hits` -- only a decision landing at
+`difficulty_after==1` WITH a decrease proposed or applied counts. `test_c19_familiarization_baseline_cap_hold_is_not_a_floor_hit`
+constructs three HOLD decisions at level 1 (zero strain, zero decreases) and asserts
+`difficulty_floor_hits == 0`, with its own docstring stating the CONSEQUENCE v3.0 itself names --
+mislabelling a first-session child overloaded via `difficulty_floor_hits`' 0.15 weight in
+`frustration_index` and C-LS-v1 rule 5 -- not merely the bare assertion.
+
+**P5-e -- N5-a's difference test, with its stated limit.** `test_prior_session_end_state_overloaded_produces_a_different_difficulty_outcome`:
+two evidence fixtures (`session_mode="combined"`, `session_phase="mastery_driven"` -- deliberately
+avoiding the OTHER two ceiling caps so only `prior_state_cap` is isolated), differing only in
+`prior_session_end_state` (`None` vs `"overloaded"`), at `current_difficulty_level=3` with an
+increase proposed: unset -> `difficulty_after=4`; overloaded -> `difficulty_after=2`
+(`safety_config.prior_overloaded_disengaged_cap=2`), `"prior_state_cap"` present in the reason.
+STATED LIMIT, recorded rather than glossed over: this test constructs evidence directly through
+the adapter -- it proves the pinned safety controller's own downstream consequence is genuine, not
+that any write path is wired. It would pass identically whether or not `aggregation_service` ever
+wrote a real value anywhere. The write path has its OWN, separate proof
+(`test_refusal_fires_and_a_flipped_constant_reaches_real_persistence`, P1 above), which confirms
+`CLearnerLocalStateRecord.prior_session_end_state` is upserted from a real, just-derived
+`learner_state` when the refusal is (test-side) lifted.
+
+**P5-f -- the guarded accessor, first real consumer, and the gap resolution.**
+`aggregation_service.derive_and_persist_session_aggregate` calls
+`telemetry_validation.get_derivable_history_for_session` -- never
+`CTaskOpportunitySummaryRecordRepository` directly -- the first REAL (non-synthetic,
+non-test-guard) production-shaped caller of the Phase 8 accessor. What the AST guard would catch
+here: any 9a code that imported `CTaskOpportunitySummaryRecordRepository` and called
+`.list_ordered_for_session(...)` directly instead -- the same shape it already proved fixed once,
+at `adaptation_service.py:146`; two new repository methods
+(`CGameplayEventRecordRepository.list_all_events_for_session`,
+`CPolicyDecisionRecordRepository.list_chronological_for_session`) were deliberately named to avoid
+the guard's own exact-string match, disclosed in their own docstrings. A session with a gap makes
+the accessor raise `DistrustedHistoryGapError`, which `aggregation_service` does not catch --
+`test_gapped_session_does_not_aggregate_at_all` confirms NEITHER a `CSessionAggregateResultRecord`
+NOR a `CLearnerLocalStateRecord` write occurs. Refusing to aggregate a gapped session refuses the
+protected activity (a judgment about an untrustworthy session); Phase 8's own validator already
+ran and is why the gap exists -- refusing here is not refusing the protection.
+
+**P5-g -- no migration.** `c_session_aggregate_results` and `c_learner_local_state` both existed
+since Phase 3a; nothing this batch needed a schema change for. None added.
+
+**N3's wiring** (into `session_lifecycle.complete_session`, replacing the hardcoded
+`prior_session_end_state=None`) stays OUT OF SCOPE, BLOCKED on the same three P3 inputs.
+`prior_session_end_state` at `session_lifecycle.py:347` is untouched, exactly as it was.
+
+**Verified — full suite, clean.**
+```
+557 passed, 74 skipped, 0 failed, 631 collected
+```
+Reconciles exactly against 550/74/624: `550 + 7 = 557` passed, `624 + 7 = 631` collected, skips
+unchanged. The +7 is exactly: six new tests in `tests/test_c9a_aggregation.py` (P1's two refusal
+proofs, the identity test, C-19's fixture, the difference test, the gap-refusal test) and one new
+test in `tests/test_c6b_policy_and_safety.py` (`test_case6_aggregation_unusable_refuses_and_names_aggregation_config`).
+**UPDATE, not SIGNAL** (existing assertions unchanged, only the call shape extended to keep them
+passing under the new sixth gate): `test_case0_all_five_families_usable_session_creation_succeeds`
+(docstring updated to state six families; same success assertion), `test_case3_generation_unusable_...`/
+`test_case4_policy_unusable_...`/`test_case5_scaffold_unusable_...` (each gained an explicit
+`aggregation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET` kwarg so the family being isolated
+stays the ONLY unusable one now that a sixth code-gated family exists -- Z2-d's own "isolate
+exactly one" discipline, preserved, not weakened); every pre-existing `create_session(...)` call
+site across `test_c4_session_lifecycle.py`, `test_c5_task_serve_and_evaluate.py`,
+`test_c7_scaffolds_and_rewards.py` gained the new required `aggregation_parameter_source_status`
+argument (shared-fixture-dict additions in two files, one direct call site in the third) -- own
+assertions untouched, labelled SIGNAL in the narrow sense already established (Phase 6b/7's own
+precedent for "a new required parameter threaded through, nothing about what is tested changed").
+
+**Files created:**
+`backend/app/application/live_engine_c/aggregation_service.py`,
+`backend/tests/test_c9a_aggregation.py`.
+
+**Files modified:**
+`backend/app/domain/live_engine_c/errors.py` (`AggregationInputsUnavailableError`),
+`backend/app/infrastructure/repositories.py` (two new read methods, both deliberately named to
+avoid colliding with the Phase 8 AST guard's exact-string match:
+`CGameplayEventRecordRepository.list_all_events_for_session`,
+`CPolicyDecisionRecordRepository.list_chronological_for_session`),
+`backend/app/application/live_engine_c/session_lifecycle.py` (the sixth gate call,
+`aggregation_parameter_source_status` parameter, docstring),
+`backend/app/application/live_engine_c/c_session_service.py` (threads
+`aggregation_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS`),
+`backend/tests/test_c6b_policy_and_safety.py` (Case 0/3/4/5 updates, new Case 6),
+`backend/tests/test_c4_session_lifecycle.py`, `backend/tests/test_c5_task_serve_and_evaluate.py`,
+`backend/tests/test_c7_scaffolds_and_rewards.py` (new required parameter threaded through),
+`backend/buildLog1.md` (this entry, appended).
+
+No git command beyond read-only verification (`status`, `rev-parse`) was run this batch; nothing
+was staged or committed.
+
+**Out of scope, confirmed.** `emit_c_to_3`/C→3 emission, the wheel rebuild and re-provenance
+(9b) -- untouched. `outbox_events`/`contract_deliveries`/any Component B delivery-path change
+(9c) -- untouched. The supersession amendment -- untouched. N3's live wiring into
+`complete_session` -- BLOCKED, not built, `prior_session_end_state` stays as it was. No probe for
+either scalar (P2). No new table or migration (P5-g). No frontend file. No wheel/pyproject/
+provenance/requirements/Dockerfile/`.dockerignore` change. No Yass commit -- the pinned
+`aggregation/derive.py` is read-only, its two citation-rule instances flagged, never edited.
+`b_learner_skill_states`, `opportunity_selection.py`, `hint_request.py` -- not read. No gate
+lifted or weakened. No threshold resolved -- I4, the four Phase 8 blocked sub-checks, and
+`min_completed_tasks_for_difficulty_trend` all stay open, named, not approximated. The derivation
+-- not touched. No bundle schema change.
+
+**Remains open.** Everything named open at the end of the Phase 8 entry above, unchanged, plus:
+P3's loop-level entry (`time_in_target_band_sec`/`safety_override_count`/`adaptation_decisions` --
+blocks 9b and 9c, not only 9a, until C6/C7 exist upstream, which have no owner in this backend's
+plan); C-17 Item B, closed on NEITHER half (withdrawn from the prior turn's partial-closure
+finding); `min_completed_tasks_for_difficulty_trend` (UNSOURCED, P5-b); N3's wiring (BLOCKED on
+P3's three inputs).

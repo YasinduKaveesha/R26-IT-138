@@ -95,6 +95,7 @@ async def create_session(
     generation_parameter_source_status: str,
     policy_parameter_source_status: str,
     scaffold_parameter_source_status: str,
+    aggregation_parameter_source_status: str,
     smoke_mode: bool,
     request_id: str,
     mastery_by_skill: Optional[Mapping[str, float]] = None,
@@ -163,7 +164,21 @@ async def create_session(
     called unconditionally, immediately after ``propose_action`` -- Policy failing before that
     line means Safety's own call is never reached. NO NEW PRODUCTION RESTRICTION: safety already
     refused session creation unconditionally (X2-3); uniform gating costs nothing today because
-    nothing was reachable in production before this change either."""
+    nothing was reachable in production before this change either.
+
+    PHASE 9a -- SIX FAMILIES, NOT FIVE (owner ruling, applying Z2's own existing rule, never
+    extending it): supervisor-verified, five families were gated here and ``aggregation_config``
+    was not, "because nothing consumed it when Z2 was written." Distinguished, in the record, from
+    Phase 8's own telemetry family, which was NOT created (K2-e): telemetry's every candidate
+    field was blocked, so a gate for it would have gated nothing the other five did not already
+    gate -- ceremony. ``AggregationConfig`` is different in kind: it EXISTS (``domain/live_engine_c/
+    types.py:472-475``), is CONSUMED by pinned code
+    (``aggregation.derive._decide_difficulty_trend`` reads
+    ``config.min_completed_tasks_for_difficulty_trend`` directly), and THIS BATCH USES IT
+    (``aggregation_service.derive_and_persist_session_aggregate``). Gating five families and not
+    this one was an inconsistency, not restraint -- Z2's own rule ("EVERY parameter family gates
+    SESSION START") already covered it; this batch applies that existing rule rather than writing
+    a new one."""
     await session.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
         {"scope": f"c_session.create:{student_id}"},
@@ -173,8 +188,9 @@ async def create_session(
     if existing is not None:
         return existing
 
-    # X4/Z2: one mechanism (two entry points, one error type), called FIVE times, before any
-    # CSessionRecord is constructed -- every family feeds the SAME gate, by its own mechanism.
+    # X4/Z2: one mechanism (two entry points, one error type), called SIX times (Phase 9a adds
+    # aggregation_config, below), before any CSessionRecord is constructed -- every family feeds
+    # the SAME gate, by its own mechanism.
     assert_family_usable(family_name="selection_config", field_statuses=selection_config_field_statuses)
     assert_family_usable(family_name="safety_config", field_statuses=safety_config_field_statuses)
     assert_code_gated_family_usable(
@@ -190,6 +206,11 @@ async def create_session(
     assert_code_gated_family_usable(
         family_name="scaffold_config",
         parameter_source_status=scaffold_parameter_source_status,
+        smoke_mode=smoke_mode,
+    )
+    assert_code_gated_family_usable(
+        family_name="aggregation_config",
+        parameter_source_status=aggregation_parameter_source_status,
         smoke_mode=smoke_mode,
     )
 

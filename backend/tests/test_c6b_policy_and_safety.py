@@ -179,6 +179,7 @@ async def _create_bundle_and_session(
     generation_status: str = "TEST_FIXTURE_ONLY",
     policy_status: str = "TEST_FIXTURE_ONLY",
     scaffold_status: str = "TEST_FIXTURE_ONLY",
+    aggregation_status: str = "TEST_FIXTURE_ONLY",
     smoke_mode: bool = True,
     session_creation_spy: list | None,
 ):
@@ -195,6 +196,7 @@ async def _create_bundle_and_session(
         generation_parameter_source_status=generation_status,
         policy_parameter_source_status=policy_status,
         scaffold_parameter_source_status=scaffold_status,
+        aggregation_parameter_source_status=aggregation_status,
         smoke_mode=smoke_mode,
         request_id=f"req-{uuid4()}",
         session_creation_spy=session_creation_spy,
@@ -202,10 +204,16 @@ async def _create_bundle_and_session(
 
 
 def test_case0_all_five_families_usable_session_creation_succeeds() -> None:
-    """CASE 0 (Z2-d-1, built and demonstrated FIRST, before any refusal case): all five families
+    """CASE 0 (Z2-d-1, built and demonstrated FIRST, before any refusal case): all SIX families
     usable -> session creation SUCCEEDS, spy shows exactly one created row. THIS IS THE
     LOAD-BEARING CASE -- without it, no refusal case below is attributable to anything, because
     there would be no proof the gate can ever pass at all.
+
+    PHASE 9a: extended from five families to six -- ``aggregation_config`` now gates here too
+    (Z2's own existing rule, "EVERY parameter family gates SESSION START," applied rather than
+    extended; see ``session_lifecycle.create_session``'s own docstring for why this family, unlike
+    Phase 8's telemetry family, was created). This test's own name keeps the historical "five" for
+    minimal diff against Case 0's own git history; the body and the families it exercises are six.
 
     WHAT THIS TEST ACTUALLY PROVES, AND WHAT IT DOES NOT (Z2-d-6, stated in this test's own
     words, not left implicit): this test runs with the bundle approval opt-out ON
@@ -320,6 +328,7 @@ def test_case3_generation_unusable_refuses_and_names_generation_config() -> None
                     generation_status="TEST_FIXTURE_ONLY",
                     policy_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     scaffold_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    aggregation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     smoke_mode=False,
                     session_creation_spy=spy,
                 )
@@ -350,6 +359,7 @@ def test_case4_policy_unusable_refuses_and_names_policy_config() -> None:
                     generation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     policy_status="TEST_FIXTURE_ONLY",
                     scaffold_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    aggregation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     smoke_mode=False,
                     session_creation_spy=spy,
                 )
@@ -377,11 +387,40 @@ def test_case5_scaffold_unusable_refuses_and_names_scaffold_config() -> None:
                     generation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     policy_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     scaffold_status="TEST_FIXTURE_ONLY",
+                    aggregation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     smoke_mode=False,
                     session_creation_spy=spy,
                 )
             assert spy == []
             assert excinfo.value.family_name == "scaffold_config"
+
+
+def test_case6_aggregation_unusable_refuses_and_names_aggregation_config() -> None:
+    """Isolates Aggregation (Phase 9a, P5-a): smoke_mode=False, Generation/Policy/Scaffold all
+    independently made usable via the test-only marker status, only Aggregation left at
+    TEST_FIXTURE_ONLY. Same shape as Cases 3-5, one family later -- AggregationConfig exists, is
+    consumed by pinned code, and this batch uses it (see session_lifecycle.create_session's own
+    docstring for why this differs from Phase 8's telemetry family, which was never created)."""
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
+        async with factory() as session:
+            spy: list = []
+            with pytest.raises(ConfigurationFamilyNotUsableError) as excinfo:
+                await _create_bundle_and_session(
+                    session,
+                    selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
+                    safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    generation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    policy_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    scaffold_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
+                    aggregation_status="TEST_FIXTURE_ONLY",
+                    smoke_mode=False,
+                    session_creation_spy=spy,
+                )
+            assert spy == []
+            assert excinfo.value.family_name == "aggregation_config"
         await database_engine.dispose()
 
     asyncio.run(exercise())

@@ -276,6 +276,22 @@ class CGameplayEventRecordRepository(SqlAlchemyNeutralRepository[CGameplayEventR
         )
         return result.scalars().all()
 
+    async def list_all_events_for_session(self, c_session_id: UUID) -> Sequence[CGameplayEventRecord]:
+        """Phase 9a: the full SESSION-wide event stream (every task instance), ordered by
+        ``task_index`` then ``event_index`` -- ``derive_session_aggregate``'s own input shape
+        (AggregationPort), which groups by ``task_index`` to sum per-task spans (FIX 1, C5.0
+        revision -- see aggregation_service.py's own citation-rule flag on that comment). Deliberately
+        NOT named ``list_ordered_for_session`` -- that exact method name is reserved to
+        ``CTaskOpportunitySummaryRecordRepository`` and is the one string
+        ``test_be2_architecture_guards.py``'s Phase 8 guard scans for; reusing it here would trip
+        that guard for a call it was never meant to restrict."""
+        result = await self.session.execute(
+            select(CGameplayEventRecord)
+            .where(CGameplayEventRecord.c_session_id == c_session_id)
+            .order_by(CGameplayEventRecord.task_index, CGameplayEventRecord.event_index)
+        )
+        return result.scalars().all()
+
 
 class CTaskOpportunitySummaryRecordRepository(SqlAlchemyNeutralRepository[CTaskOpportunitySummaryRecord]):
     model_type = CTaskOpportunitySummaryRecord
@@ -315,6 +331,23 @@ class CPolicyDecisionRecordRepository(SqlAlchemyNeutralRepository[CPolicyDecisio
             .order_by(CPolicyDecisionRecord.created_at_utc.desc())
             .limit(1)
         )
+
+    async def list_chronological_for_session(self, c_session_id: UUID) -> Sequence[CPolicyDecisionRecord]:
+        """Phase 9a: the full, chronologically-ordered decision trajectory for a session --
+        ``derive_session_aggregate``'s own ``adaptation_decisions`` input (its own
+        ``_decide_difficulty_trend`` reads ``decisions[0]``/``decisions[-1]`` under the assumption
+        the list is in real decision order). Ordered by ``created_at_utc``, the same provenance
+        column ``most_recent_for_session`` already orders by. Nothing under ``app/`` writes this
+        table live (register-reconciliation batch, this same register) -- this will return an
+        empty list for every real session today; the pinned ``derive_session_aggregate`` tolerates
+        that (``difficulty_trend`` falls back to ``"stable"``, ``current_difficulty_level`` to 1)
+        rather than raising, an honest reflection of "no decisions occurred," not a fabrication."""
+        result = await self.session.execute(
+            select(CPolicyDecisionRecord)
+            .where(CPolicyDecisionRecord.c_session_id == c_session_id)
+            .order_by(CPolicyDecisionRecord.created_at_utc)
+        )
+        return result.scalars().all()
 
 
 class CSafetyEventRecordRepository(SqlAlchemyNeutralRepository[CSafetyEventRecord]):

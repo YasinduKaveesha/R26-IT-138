@@ -227,6 +227,7 @@ async def _seed_session_and_instance(
             generation_parameter_source_status="TEST_FIXTURE_ONLY",
             policy_parameter_source_status="TEST_FIXTURE_ONLY",
             scaffold_parameter_source_status="TEST_FIXTURE_ONLY",
+            aggregation_parameter_source_status="TEST_FIXTURE_ONLY",
             smoke_mode=True,
             request_id=f"req-{uuid4()}",
         )
