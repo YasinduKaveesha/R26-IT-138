@@ -7195,3 +7195,83 @@ aggregation's own unconditional refusal (`_AGGREGATION_INPUTS_AVAILABLE = False`
 `EvidenceWindowConfig`'s own gating gap (named by batch 2, not resolved here — a separate ruled
 batch per this batch's own scope instruction). C-17 Item B (unchanged — its producer half, session
 aggregation, is untouched by this batch, same as batch 2). Batch 4: supersession.
+
+---
+
+## Seventh-family gate — `evidence_window_config` joins the session-start gate
+
+**What this closes.** Batch 2 discovered that `build_evidence_for_session` requires an
+`EvidenceWindowConfig` for which no phase ever wired a production source, and that Phase 7's
+session-start gate covered six families only — Selection, Safety, Generation, Policy, Scaffold,
+Aggregation. It did not cover this one, because nothing consumed it when that gate was written.
+Batch 2 is what made it consumed, and it shipped `PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE` as a
+disclosed open finding rather than closing it unilaterally. This batch closes it.
+
+This is the SECOND occurrence of the same shape. `AggregationConfig` was in the identical position
+before Phase 9a, for the identical reason. The standing rule that came out of it: **any batch
+introducing a new config consumer must check whether that family is in the session-start gate, and
+report if it is not.** The gate enumerates the families known when it was written; new consumers
+keep revealing new families, and that is checkable at review time rather than being a lesson.
+
+**Classification: BUNDLE, not injection-only.** The standing rule is that a parameter family
+containing at least one field a governing document specifies belongs in the bundle under per-field
+source/status. `recent_window_task_count` is specified — C Parameters §14, "recent_success_rate_
+bucket: over last N=5 completed tasks". That distinguishes it from Policy, which has zero SPEC-stated
+fields and stays injection-only. So this family is gated by `assert_family_usable` (per-field bundle
+status), not `assert_code_gated_family_usable`.
+
+**Schema: `evidence_window_configuration` at schema_version 1.3, ADDITIVE.** A 1.2 bundle carrying
+no such block still validates, exactly as `safety_configuration` was additive at 1.2. Per-field
+`{source, status, value}` from the start — not repeating the block-level shape 1.1 used and 1.2 had
+to break to correct.
+
+**The value carries no `const`.** `recent_window_task_count` is SPEC-cited, but the SPEC itself is
+unapproved, so its status is `PROPOSED_UNSIGNED` with `source` citing the clause — the identical
+treatment `prior_overloaded_disengaged_cap` received. The schema bounds the field structurally only.
+A `const` on a `PROPOSED_UNSIGNED` field would be exactly the "value that could be read as a
+resolution" this schema must never contain.
+
+**SCHEMA-OPTIONAL BUT GATE-REQUIRED — two different layers, both true.** A 1.2 bundle lacking the
+block still VALIDATES. But a bundle lacking the block cannot CREATE A SESSION, because an absent
+block means the family's usability is unknown, and unknown is not usable. Stated explicitly here
+because "optional" otherwise reads as "skippable".
+
+**The whitelist holds.** usable = {APPROVED} and nothing else; every other value, including any the
+schema does not yet name, is unusable by construction. And every field must be usable — a single
+unusable field makes the whole block unusable and refuses session creation. Per-field status exists
+for accuracy of the record, never for partial enablement.
+
+**The probe is gone.** `PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE` was removed from `task_service.py`
+entirely and the config now resolves from the bundle on the same path `safety_config` and
+`selection_config` already use. Its guard test,
+`test_production_evidence_window_config_probe_uses_the_cited_window_not_an_invented_one`, was removed
+with it — the test's subject no longer exists. That is the whole of this batch's negative test-count
+movement: one obsolete test out, one new gate case in.
+
+**R0 traces.**
+
+1. *Are all seven families now gated at session start?* Yes, enumerated from source:
+   `assert_family_usable` for selection_config, safety_config, evidence_window_config;
+   `assert_code_gated_family_usable` for generation_config, policy_config, scaffold_config,
+   aggregation_config. Seven calls, seven families.
+2. *Does anything become reachable from a real HTTP request?* No. Session creation still refuses
+   unconditionally — this batch adds a seventh reason to refuse, it does not remove any.
+3. *Is there an EIGHTH family?* **Yes, and it is not a live hole — yet.** `RecoveryConfig`
+   (types.py:519) is consumed in two files under `app/`: a port declaration (ports.py:294) and the
+   adapter's translator plus method parameter (adapter.py:844, :1229). No application service calls
+   the adapter method that takes it, so it is never supplied at any live call site and there is
+   nothing for a gate to check. It is a DECLARED-BUT-UNCALLED family, not an ungated consumed one.
+   It becomes a gate question the moment anything wires that method — which is exactly the standing
+   rule above, now with its first prospective case. Recorded on the pre-gate-lift register.
+
+**Suite: 575 passed, 74 skipped, 0 failed, 649 collected**, from a full teardown (`down -v`), a
+rebuilt image, and a single run with nothing else competing. Reconciles against batch 3's
+575 / 74 / 649: net zero test-count change, one obsolete probe test removed and one gate case added.
+
+Two earlier runs of this batch reported failures and both were infrastructure, not code: two suite
+runs contending on shared table creation (a documented artifact of this project, not a finding), and
+a database teardown performed while another run was live. A stale run container held the environment
+for two hours afterwards. The number above is from a clean environment and is the one of record.
+
+**Remains open.** Everything named open at the end of batch 3, unchanged, plus: `RecoveryConfig`'s
+eventual gate membership if anything ever calls it.

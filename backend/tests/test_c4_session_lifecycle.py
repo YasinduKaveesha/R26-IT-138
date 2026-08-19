@@ -24,7 +24,11 @@ from app.core.config import get_settings
 from app.core.errors import ConflictError, ResourceNotFoundError
 from app.domain.live_engine_c.errors import MasteryPayloadContractValidationError, SF043OrderingError
 from app.domain.live_engine_c.types import SafetyConfig, SelectionConfig
-from app.domain.runtime_bundle_c.types import SafetyConfigurationArtifact, SelectionConfigurationArtifact
+from app.domain.runtime_bundle_c.types import (
+    EvidenceWindowConfigurationArtifact,
+    SafetyConfigurationArtifact,
+    SelectionConfigurationArtifact,
+)
 from app.application.live_engine_c.mastery_fixture import fixture_b_mastery_payload_for_phase_4
 from app.application.live_engine_c.session_lifecycle import (
     abandon_session,
@@ -153,6 +157,9 @@ def _create_session_kwargs(**overrides: object) -> dict[str, object]:
         "selection_config": selection_config_fixture_for_tests(),
         "selection_config_field_statuses": all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
         "safety_config_field_statuses": all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+        "evidence_window_config_field_statuses": all_usable_field_statuses(
+            EvidenceWindowConfigurationArtifact.FIELD_NAMES
+        ),
         "generation_parameter_source_status": "TEST_FIXTURE_ONLY",
         "policy_parameter_source_status": "TEST_FIXTURE_ONLY",
         "scaffold_parameter_source_status": "TEST_FIXTURE_ONLY",

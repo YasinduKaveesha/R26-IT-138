@@ -38,6 +38,7 @@ from app.domain.runtime_bundle.errors import (
 from app.domain.runtime_bundle.types import Checksum, Compatibility, SourceArtifact, VersionedArtifact
 from app.domain.runtime_bundle_c.types import (
     CRuntimeBundle,
+    EvidenceWindowConfigurationArtifact,
     SafetyConfigurationArtifact,
     SelectionConfigurationArtifact,
 )
@@ -145,6 +146,31 @@ def _safety_configuration(raw: Optional[Mapping[str, Any]]) -> Optional[SafetyCo
     )
 
 
+def _evidence_window_configuration(
+    raw: Optional[Mapping[str, Any]],
+) -> Optional[EvidenceWindowConfigurationArtifact]:
+    """SEVENTH-FAMILY GATE batch: symmetric to ``_safety_configuration`` above, per-field from
+    the start (SUPERVISOR RULING 2/4: additive block, per-field {source, status, value}, no
+    const anywhere on a PROPOSED_UNSIGNED/CALIBRATION_PENDING field)."""
+    if raw is None:
+        return None
+    field_statuses = {
+        name: raw[name]["status"] for name in EvidenceWindowConfigurationArtifact.FIELD_NAMES
+    }
+    field_sources = {
+        name: raw[name]["source"] for name in EvidenceWindowConfigurationArtifact.FIELD_NAMES
+    }
+    return EvidenceWindowConfigurationArtifact(
+        version=raw["version"],
+        checksum=_checksum(raw["checksum"]),
+        config_version=raw["config_version"],
+        parameter_source_status=raw["parameter_source_status"],
+        recent_window_task_count=raw["recent_window_task_count"]["value"],
+        field_statuses=field_statuses,
+        field_sources=field_sources,
+    )
+
+
 class CRuntimeBundleLoader:
     """Concrete loader for Component C's minimal runtime bundle."""
 
@@ -217,4 +243,7 @@ class CRuntimeBundleLoader:
             compatibility=compatibility,
             selection_configuration=_selection_configuration(manifest.get("selection_configuration")),
             safety_configuration=_safety_configuration(manifest.get("safety_configuration")),
+            evidence_window_configuration=_evidence_window_configuration(
+                manifest.get("evidence_window_configuration")
+            ),
         )

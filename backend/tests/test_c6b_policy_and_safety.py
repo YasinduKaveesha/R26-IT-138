@@ -53,7 +53,11 @@ from app.domain.live_engine_c.types import (
     PolicyObservableEvidence,
     SeedLineage,
 )
-from app.domain.runtime_bundle_c.types import SafetyConfigurationArtifact, SelectionConfigurationArtifact
+from app.domain.runtime_bundle_c.types import (
+    EvidenceWindowConfigurationArtifact,
+    SafetyConfigurationArtifact,
+    SelectionConfigurationArtifact,
+)
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import CTaskOpportunityRecord, CTaskOpportunitySummaryRecord
 from app.infrastructure.repositories import CPolicyDecisionRecordRepository, CSafetyEventRecordRepository
@@ -176,6 +180,7 @@ async def _create_bundle_and_session(
     *,
     selection_statuses: dict,
     safety_statuses: dict,
+    evidence_window_statuses: dict,
     generation_status: str = "TEST_FIXTURE_ONLY",
     policy_status: str = "TEST_FIXTURE_ONLY",
     scaffold_status: str = "TEST_FIXTURE_ONLY",
@@ -193,6 +198,7 @@ async def _create_bundle_and_session(
         selection_config=selection_config_fixture_for_tests(),
         selection_config_field_statuses=selection_statuses,
         safety_config_field_statuses=safety_statuses,
+        evidence_window_config_field_statuses=evidence_window_statuses,
         generation_parameter_source_status=generation_status,
         policy_parameter_source_status=policy_status,
         scaffold_parameter_source_status=scaffold_status,
@@ -212,8 +218,13 @@ def test_case0_all_five_families_usable_session_creation_succeeds() -> None:
     PHASE 9a: extended from five families to six -- ``aggregation_config`` now gates here too
     (Z2's own existing rule, "EVERY parameter family gates SESSION START," applied rather than
     extended; see ``session_lifecycle.create_session``'s own docstring for why this family, unlike
-    Phase 8's telemetry family, was created). This test's own name keeps the historical "five" for
-    minimal diff against Case 0's own git history; the body and the families it exercises are six.
+    Phase 8's telemetry family, was created).
+
+    SEVENTH-FAMILY GATE batch: extended from six families to seven -- ``evidence_window_config``
+    now gates here too, the SAME existing rule applied a second time (see
+    ``session_lifecycle.create_session``'s own docstring, "SEVENTH-FAMILY GATE BATCH" paragraph).
+    This test's own name keeps the historical "five" for minimal diff against Case 0's own git
+    history; the body and the families it exercises are seven.
 
     WHAT THIS TEST ACTUALLY PROVES, AND WHAT IT DOES NOT (Z2-d-6, stated in this test's own
     words, not left implicit): this test runs with the bundle approval opt-out ON
@@ -239,6 +250,9 @@ def test_case0_all_five_families_usable_session_creation_succeeds() -> None:
                 session,
                 selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
                 safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                evidence_window_statuses=all_usable_field_statuses(
+                    EvidenceWindowConfigurationArtifact.FIELD_NAMES
+                ),
                 generation_status="TEST_FIXTURE_ONLY",
                 policy_status="TEST_FIXTURE_ONLY",
                 scaffold_status="TEST_FIXTURE_ONLY",
@@ -275,6 +289,9 @@ def test_case1_selection_unusable_refuses_and_names_selection_config() -> None:
                         SelectionConfigurationArtifact.FIELD_NAMES
                     ),
                     safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    evidence_window_statuses=all_usable_field_statuses(
+                        EvidenceWindowConfigurationArtifact.FIELD_NAMES
+                    ),
                     smoke_mode=True,
                     session_creation_spy=spy,
                 )
@@ -298,6 +315,9 @@ def test_case2_safety_unusable_refuses_and_names_safety_config() -> None:
                     selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
                     safety_statuses=all_calibration_pending_field_statuses(
                         SafetyConfigurationArtifact.FIELD_NAMES
+                    ),
+                    evidence_window_statuses=all_usable_field_statuses(
+                        EvidenceWindowConfigurationArtifact.FIELD_NAMES
                     ),
                     smoke_mode=True,
                     session_creation_spy=spy,
@@ -325,6 +345,9 @@ def test_case3_generation_unusable_refuses_and_names_generation_config() -> None
                     session,
                     selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
                     safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    evidence_window_statuses=all_usable_field_statuses(
+                        EvidenceWindowConfigurationArtifact.FIELD_NAMES
+                    ),
                     generation_status="TEST_FIXTURE_ONLY",
                     policy_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     scaffold_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
@@ -356,6 +379,9 @@ def test_case4_policy_unusable_refuses_and_names_policy_config() -> None:
                     session,
                     selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
                     safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    evidence_window_statuses=all_usable_field_statuses(
+                        EvidenceWindowConfigurationArtifact.FIELD_NAMES
+                    ),
                     generation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     policy_status="TEST_FIXTURE_ONLY",
                     scaffold_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
@@ -384,6 +410,9 @@ def test_case5_scaffold_unusable_refuses_and_names_scaffold_config() -> None:
                     session,
                     selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
                     safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    evidence_window_statuses=all_usable_field_statuses(
+                        EvidenceWindowConfigurationArtifact.FIELD_NAMES
+                    ),
                     generation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     policy_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     scaffold_status="TEST_FIXTURE_ONLY",
@@ -412,6 +441,9 @@ def test_case6_aggregation_unusable_refuses_and_names_aggregation_config() -> No
                     session,
                     selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
                     safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    evidence_window_statuses=all_usable_field_statuses(
+                        EvidenceWindowConfigurationArtifact.FIELD_NAMES
+                    ),
                     generation_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     policy_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
                     scaffold_status=_TEST_ONLY_STATUS_OUTSIDE_DISALLOWED_SET,
@@ -421,6 +453,41 @@ def test_case6_aggregation_unusable_refuses_and_names_aggregation_config() -> No
                 )
             assert spy == []
             assert excinfo.value.family_name == "aggregation_config"
+        await database_engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_case7_evidence_window_unusable_refuses_and_names_evidence_window_config() -> None:
+    """Isolates EvidenceWindowConfig (SEVENTH-FAMILY GATE batch): a BUNDLE-classified family, so
+    this case has the SAME shape as Cases 1-2 (smoke_mode=True, the three code-gated families
+    left at their only real value, usable only because smoke_mode is on), not Cases 3-6's
+    marker-status shape -- evidence_window_config isolates via its own per-field status map,
+    exactly like selection_config/safety_config. EvidenceWindowConfig exists
+    (``domain/live_engine_c/types.py``), is consumed by ``adaptation_service.
+    build_evidence_for_session``, and this batch wires its real resolver into both
+    ``c_session_service.CSessionService.create`` and ``task_service.TaskService.submit_action``
+    -- the same "exists, is consumed, this batch uses it" shape Case 6's own docstring names for
+    Aggregation, one family later."""
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
+        async with factory() as session:
+            spy: list = []
+            with pytest.raises(ConfigurationFamilyNotUsableError) as excinfo:
+                await _create_bundle_and_session(
+                    session,
+                    selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
+                    safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+                    evidence_window_statuses=all_calibration_pending_field_statuses(
+                        EvidenceWindowConfigurationArtifact.FIELD_NAMES
+                    ),
+                    smoke_mode=True,
+                    session_creation_spy=spy,
+                )
+            assert spy == []
+            assert excinfo.value.family_name == "evidence_window_config"
         await database_engine.dispose()
 
     asyncio.run(exercise())
@@ -668,6 +735,7 @@ async def _seed_session_with_summaries(session, *, summary_overrides: list[dict]
         session,
         selection_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
         safety_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+        evidence_window_statuses=all_usable_field_statuses(EvidenceWindowConfigurationArtifact.FIELD_NAMES),
         session_creation_spy=None,
     )
     c_session_id = record.c_session_id

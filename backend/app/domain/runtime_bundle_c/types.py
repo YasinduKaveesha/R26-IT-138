@@ -94,6 +94,29 @@ class SafetyConfigurationArtifact:
 
 
 @dataclass(frozen=True)
+class EvidenceWindowConfigurationArtifact:
+    """SEVENTH-FAMILY GATE batch. Mirrors ``provenance/c-runtime-bundle.schema.json``'s
+    ``evidenceWindowConfiguration`` $def exactly -- per-field {source, status, value} from the
+    start (same discipline ``SafetyConfigurationArtifact`` used, S3/W2's own reasoning, not
+    reopened here: a single-field family still gets a per-field status map rather than a
+    block-level one, since SUPERVISOR RULING 2/4 require per-field {source, status, value} and
+    treat schema-optional/gate-required as separate layers regardless of field count). Same
+    shape as ``SelectionConfigurationArtifact``/``SafetyConfigurationArtifact``: flat scalar
+    value field(s) plus ``field_statuses``/``field_sources`` maps, one entry per of the single
+    ``FIELD_NAMES`` entry below."""
+
+    FIELD_NAMES = ("recent_window_task_count",)
+
+    version: str
+    checksum: Checksum
+    config_version: str
+    parameter_source_status: str
+    recent_window_task_count: int
+    field_statuses: Mapping[str, str]
+    field_sources: Mapping[str, str]
+
+
+@dataclass(frozen=True)
 class CRuntimeBundle:
     schema_version: str
     bundle_version: str
@@ -107,3 +130,4 @@ class CRuntimeBundle:
     compatibility: Compatibility
     selection_configuration: Optional[SelectionConfigurationArtifact]
     safety_configuration: Optional[SafetyConfigurationArtifact]
+    evidence_window_configuration: Optional[EvidenceWindowConfigurationArtifact]

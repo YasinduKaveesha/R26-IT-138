@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "bundle_version": "c2-test-fixture-1.0",
   "publication_state": "DRAFT",
   "immutable_after_publication": true,
@@ -107,6 +107,20 @@
       "source": "Not named in Component_C_Generator_v1.0/SPEC.md \u00c2\u00a717 (no commit hash -- see C-6) -- no SPEC citation exists",
       "status": "APPROVED",
       "value": 0.85
+    }
+  },
+  "evidence_window_configuration": {
+    "version": "c-evidence-window-1.0.0",
+    "checksum": {
+      "algorithm": "sha256",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_version": "c-evidence-window-1.0.0",
+    "parameter_source_status": "TEST_FIXTURE_ONLY",
+    "recent_window_task_count": {
+      "source": "C Parameters \u00c2\u00a714: 'recent_success_rate_bucket: over last N=5 completed tasks'",
+      "status": "APPROVED",
+      "value": 5
     }
   },
   "activation_date": null,

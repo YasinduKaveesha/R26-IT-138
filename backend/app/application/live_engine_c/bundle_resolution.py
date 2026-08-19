@@ -20,12 +20,19 @@ from typing import Mapping, Optional
 from app.core.errors import ConflictError
 from app.domain.live_engine_c.errors import (
     ConfigurationFamilyNotUsableError,
+    EvidenceWindowConfigurationMissingError,
     LiveEngineCError,
     SafetyConfigurationMissingError,
     SelectionConfigurationMissingError,
 )
 from app.domain.live_engine_c.generation_mode_guard import DISALLOWED_OUTSIDE_SMOKE_MODE
-from app.domain.live_engine_c.types import Catalogue, PolicyConfig, SafetyConfig, SelectionConfig
+from app.domain.live_engine_c.types import (
+    Catalogue,
+    EvidenceWindowConfig,
+    PolicyConfig,
+    SafetyConfig,
+    SelectionConfig,
+)
 from app.domain.runtime_bundle.errors import RuntimeBundleError
 from app.domain.runtime_bundle_c.types import CRuntimeBundle
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
@@ -123,6 +130,28 @@ def resolve_safety_config(bundle: CRuntimeBundle) -> SafetyConfig:
         strain_bucket_low_max=artifact.strain_bucket_low_max,
         strain_bucket_moderate_max=artifact.strain_bucket_moderate_max,
         strain_bucket_high_max=artifact.strain_bucket_high_max,
+    )
+
+
+def resolve_evidence_window_config(bundle: CRuntimeBundle) -> EvidenceWindowConfig:
+    """SEVENTH-FAMILY GATE batch, mirroring ``resolve_safety_config`` exactly, one family later.
+    Raises ``EvidenceWindowConfigurationMissingError`` when
+    ``bundle.evidence_window_configuration`` is ``None`` -- never defaults, never substitutes a
+    placeholder. When present, this is a direct field-by-field carry of the already-resolved
+    scalar value; per-field STATUS is checked separately, by ``assert_family_usable`` below,
+    called from ``create_session`` -- never here, and never skipped by virtue of this function
+    having been reached (this function has no opinion on usability at all, same discipline as
+    ``resolve_safety_config``/``resolve_selection_config``)."""
+    artifact = bundle.evidence_window_configuration
+    if artifact is None:
+        raise EvidenceWindowConfigurationMissingError(
+            f"runtime bundle {bundle.bundle_version!r} carries no evidence_window_configuration "
+            "-- halting rather than proceeding on a default"
+        )
+    return EvidenceWindowConfig(
+        config_version=artifact.config_version,
+        parameter_source_status=artifact.parameter_source_status,
+        recent_window_task_count=artifact.recent_window_task_count,
     )
 
 

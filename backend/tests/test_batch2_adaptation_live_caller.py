@@ -23,7 +23,6 @@ from app.application.live_engine_c import task_service as task_service_module
 from app.application.live_engine_c.bundle_resolution import assert_policy_config_matches_session_gate
 from app.application.live_engine_c.c_session_service import _NOT_LIVE_PARAMETER_SOURCE_STATUS
 from app.application.live_engine_c.task_service import (
-    PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE,
     PRODUCTION_GENERATION_CONFIG_PROBE,
     PRODUCTION_POLICY_CONFIG_PROBE,
     PRODUCTION_POLICY_MODE,
@@ -104,21 +103,6 @@ def test_production_policy_config_probe_carries_the_session_gate_status() -> Non
 # future edit "correcting" the probe toward those values breaks this test rather than silently
 # reintroducing the worst-failure-mode shape the ruling exists to prevent.
 # =====================================================================================
-
-
-def test_production_evidence_window_config_probe_uses_the_cited_window_not_an_invented_one() -> None:
-    """EvidenceWindowConfig's recent_window_task_count is, unlike Policy's six fields, SPEC-cited
-    (C Parameters §14: N=5) -- this probe uses that cited value, the same one the pinned
-    package's own (also TEST_FIXTURE_ONLY) default_evidence_window_config() returns, rather than
-    inventing a placeholder. See PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE's own comment in
-    task_service.py for why this family is not gated at session creation at all today (an open
-    finding, not a decision made here)."""
-    from component_c_generator.pipeline.config import default_evidence_window_config
-
-    assert PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE.recent_window_task_count == (
-        default_evidence_window_config().recent_window_task_count
-    )
-    assert PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE.parameter_source_status == _NOT_LIVE_PARAMETER_SOURCE_STATUS
 
 
 def test_production_policy_config_probe_does_not_mirror_the_real_defaults() -> None:

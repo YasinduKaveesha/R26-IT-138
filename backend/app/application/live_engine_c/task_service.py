@@ -132,6 +132,7 @@ from app.application.live_engine_c.adaptation_service import build_evidence_for_
 from app.application.live_engine_c.bundle_resolution import (
     assert_policy_config_matches_session_gate,
     resolve_c_bundle_and_catalogue,
+    resolve_evidence_window_config,
     resolve_safety_config,
     resolve_selection_config,
 )
@@ -158,7 +159,6 @@ from app.domain.live_engine_c.generation_mode_guard import (
     assert_generation_config_permitted,
 )
 from app.domain.live_engine_c.types import (
-    EvidenceWindowConfig,
     GenerationConfig,
     PolicyConfig,
     PolicyMode,
@@ -252,32 +252,11 @@ PRODUCTION_POLICY_CONFIG_PROBE = PolicyConfig(
     decrease_min_strain=0.999,
 )
 
-# BATCH 2 -- PRODUCTION EVIDENCE-WINDOW-CONFIG PROBE, A FINDING NOT COVERED BY ANY PRIOR RULING:
-# ``build_evidence_for_session`` (adaptation_service.py) requires an ``EvidenceWindowConfig`` no
-# earlier phase ever wired a production source for -- Phase 7's Z1/Z2 six-family session-creation
-# gate (session_lifecycle.create_session) does NOT include this family at all (it gates Selection,
-# Safety, Generation, Policy, Scaffold, Aggregation only). Z1's own classification rule --- "a
-# parameter family containing at least one field a governing document specifies belongs in the
-# bundle under per-field source/status" -- would put EvidenceWindowConfig in the BUNDLE, not
-# injection-only: unlike Policy's six fields (Z1: zero SPEC-stated fields), ``recent_window_
-# task_count`` IS cited -- C Parameters §14: "recent_success_rate_bucket: over last N=5 completed
-# tasks" (component_c_generator/pipeline/config.py's own docstring, quoting the same citation;
-# ``default_evidence_window_config()`` there returns exactly 5). No bundle artifact, resolver, or
-# session-creation gate exists for this family in this codebase today -- the SAME pre-Phase-9a
-# situation ``AggregationConfig`` was in ("aggregation_config was not [gated], because nothing
-# consumed it when Z2 was written," session_lifecycle.py's own Phase 9a docstring) -- and THIS
-# BATCH is what makes it consumed under app/ for the first time. Recorded here as an open finding
-# for a future batch to decide whether EvidenceWindowConfig needs its own bundle block and gate
-# (mirroring Aggregation's own Phase 9a closure), not decided unilaterally here. Using the CITED
-# value (5) rather than an invented one means this probe does not carry the "indistinguishable
-# from a real calibration" risk the policy probe above was built to avoid -- 5 is the same number
-# the pinned package's own (also TEST_FIXTURE_ONLY) default already uses, not a placeholder this
-# batch invented.
-PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE = EvidenceWindowConfig(
-    config_version="batch2-evidence-window-not-gated-probe",
-    parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
-    recent_window_task_count=5,
-)
+# SEVENTH-FAMILY GATE batch: PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE (batch 2's own disclosed
+# open finding, quoted in the module docstring's own prior revision) is REMOVED. EvidenceWindowConfig
+# is now a BUNDLE-classified, gated family (session_lifecycle.create_session's own seventh gate
+# call, bundle_resolution.resolve_evidence_window_config) -- submit_action below resolves it from
+# the SAME already-resolved bundle safety_config/selection_config already use, never a probe.
 
 # BATCH 2 -- v3.0 §7.3: Q-learning stays EXPERIMENTAL_ONLY; "rule_based_baseline" is the only
 # policy_mode any real call may use (component_c_generator.policy.rule_based.
@@ -749,6 +728,13 @@ class TaskService:
                 # exist).
                 adaptation_safety_config = resolve_safety_config(bundle)
                 adaptation_selection_config = resolve_selection_config(bundle)
+                # SEVENTH-FAMILY GATE batch: EvidenceWindowConfig resolved the SAME real path --
+                # never PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE (removed), never a second
+                # resolution mechanism. This family is BUNDLE-DATA too (gated by per-field status
+                # at session creation, session_lifecycle.create_session's own seventh
+                # assert_family_usable call); that gate already passed or this session would not
+                # exist.
+                adaptation_evidence_window_config = resolve_evidence_window_config(bundle)
 
                 # THE SEAM: see PRODUCTION_POLICY_CONFIG_PROBE's own comment and
                 # bundle_resolution.assert_policy_config_matches_session_gate's docstring for the
@@ -803,7 +789,7 @@ class TaskService:
                 session_phase=session_record.session_phase,
                 current_difficulty_level=instance_record.difficulty_level,
                 prior_session_end_state=learner_state.prior_session_end_state,
-                evidence_window_config=PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE,
+                evidence_window_config=adaptation_evidence_window_config,
             )
             await decide_and_persist_adaptation(
                 session,

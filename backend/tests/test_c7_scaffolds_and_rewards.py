@@ -33,7 +33,11 @@ from app.application.live_engine_c.task_service import (
     TaskService,
 )
 from app.domain.live_engine_c.types import RewardOutcomeContext, ScaffoldDecisionContext
-from app.domain.runtime_bundle_c.types import SafetyConfigurationArtifact, SelectionConfigurationArtifact
+from app.domain.runtime_bundle_c.types import (
+    EvidenceWindowConfigurationArtifact,
+    SafetyConfigurationArtifact,
+    SelectionConfigurationArtifact,
+)
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import CScaffoldEventRecord, CTaskInstanceRecord, CTaskOpportunityRecord
 from app.infrastructure.repositories import CScaffoldEventRecordRepository
@@ -224,6 +228,9 @@ async def _seed_session_and_instance(
             selection_config=selection_config_fixture_for_tests(),
             selection_config_field_statuses=all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
             safety_config_field_statuses=all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+            evidence_window_config_field_statuses=all_usable_field_statuses(
+                EvidenceWindowConfigurationArtifact.FIELD_NAMES
+            ),
             generation_parameter_source_status="TEST_FIXTURE_ONLY",
             policy_parameter_source_status="TEST_FIXTURE_ONLY",
             scaffold_parameter_source_status="TEST_FIXTURE_ONLY",

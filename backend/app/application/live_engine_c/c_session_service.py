@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.live_engine_c.bundle_resolution import (
     resolve_c_bundle_and_catalogue,
+    resolve_evidence_window_config,
     resolve_safety_config,
     resolve_selection_config,
 )
@@ -131,6 +132,11 @@ class CSessionService:
             # ever called, and create_session's own gate (X4) checks their per-field statuses
             # again, structurally, not merely because this caller happened to run first.
             safety_config = resolve_safety_config(bundle)
+            # SEVENTH-FAMILY GATE batch: same fail-closed-before-create_session shape, one family
+            # later. Resolved (and its absence raised) here even though, like safety_config, the
+            # returned object is not itself threaded into create_session below -- only its
+            # per-field field_statuses map is (X4's own gate re-checks them structurally).
+            evidence_window_config = resolve_evidence_window_config(bundle)
         except LiveEngineCError as exc:
             raise ConflictError() from exc
 
@@ -175,6 +181,7 @@ class CSessionService:
                 selection_config=selection_config,
                 selection_config_field_statuses=bundle.selection_configuration.field_statuses,
                 safety_config_field_statuses=bundle.safety_configuration.field_statuses,
+                evidence_window_config_field_statuses=bundle.evidence_window_configuration.field_statuses,
                 generation_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
                 policy_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
                 scaffold_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,

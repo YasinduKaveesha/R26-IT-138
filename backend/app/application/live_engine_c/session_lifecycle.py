@@ -92,6 +92,7 @@ async def create_session(
     selection_config: SelectionConfig,
     selection_config_field_statuses: Mapping[str, str],
     safety_config_field_statuses: Mapping[str, str],
+    evidence_window_config_field_statuses: Mapping[str, str],
     generation_parameter_source_status: str,
     policy_parameter_source_status: str,
     scaffold_parameter_source_status: str,
@@ -178,7 +179,33 @@ async def create_session(
     (``aggregation_service.derive_and_persist_session_aggregate``). Gating five families and not
     this one was an inconsistency, not restraint -- Z2's own rule ("EVERY parameter family gates
     SESSION START") already covered it; this batch applies that existing rule rather than writing
-    a new one."""
+    a new one.
+
+    SEVENTH-FAMILY GATE BATCH -- SEVEN FAMILIES, NOT SIX (supervisor ruling, applying Z2's own
+    existing rule a second time, never extending it): a follow-on batch found the SAME shape of
+    gap ``AggregationConfig`` was in before Phase 9a -- ``build_evidence_for_session`` requires an
+    ``EvidenceWindowConfig`` and no phase had ever wired a production source or a session-start
+    gate for it, "because nothing consumed it when [Phase 7's gate] was written," the identical
+    reason this docstring gives above for ``aggregation_config``. Unlike ``AggregationConfig``
+    (zero SPEC-stated fields, code-gated), ``EvidenceWindowConfig`` is BUNDLE-classified
+    (supervisor ruling): ``recent_window_task_count`` IS SPEC-cited (C Parameters §14,
+    "recent_success_rate_bucket: over last N=5 completed tasks"), which is what makes a parameter
+    family bundle-classified under the standing rule ("a parameter family containing at least one
+    field a governing document specifies belongs in the bundle under per-field source/status").
+    So this seventh family gates the SAME way Selection and Safety already do --
+    ``assert_family_usable`` on its own per-field status map, not
+    ``assert_code_gated_family_usable`` -- even though, like Safety's own
+    ``prior_overloaded_disengaged_cap``, the cited value carries no ``const`` and its status stays
+    PROPOSED_UNSIGNED (the SPEC itself is unapproved), never APPROVED, never a resolution recorded
+    here. SCHEMA-OPTIONAL BUT GATE-REQUIRED, STATED EXPLICITLY SO NEITHER READS AS THE OTHER: a
+    1.2 bundle with no ``evidence_window_configuration`` block still VALIDATES under schema_version
+    1.3 (additive, exactly like ``safety_configuration`` was additive at 1.2) -- but a bundle
+    lacking the block cannot CREATE A SESSION, because an absent block means this family's
+    usability is unknown, and unknown is not usable. ``PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE``
+    (``task_service.py``, batch 2's own disclosed placeholder) is REMOVED by this batch, not left
+    beside the real resolver -- ``task_service.submit_action`` now resolves
+    ``EvidenceWindowConfig`` from the bundle on the same path ``safety_config``/``selection_config``
+    already use."""
     await session.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
         {"scope": f"c_session.create:{student_id}"},
@@ -188,11 +215,14 @@ async def create_session(
     if existing is not None:
         return existing
 
-    # X4/Z2: one mechanism (two entry points, one error type), called SIX times (Phase 9a adds
-    # aggregation_config, below), before any CSessionRecord is constructed -- every family feeds
-    # the SAME gate, by its own mechanism.
+    # X4/Z2: one mechanism (two entry points, one error type), called SEVEN times (the
+    # SEVENTH-FAMILY GATE batch adds evidence_window_config, below), before any CSessionRecord is
+    # constructed -- every family feeds the SAME gate, by its own mechanism.
     assert_family_usable(family_name="selection_config", field_statuses=selection_config_field_statuses)
     assert_family_usable(family_name="safety_config", field_statuses=safety_config_field_statuses)
+    assert_family_usable(
+        family_name="evidence_window_config", field_statuses=evidence_window_config_field_statuses
+    )
     assert_code_gated_family_usable(
         family_name="generation_config",
         parameter_source_status=generation_parameter_source_status,

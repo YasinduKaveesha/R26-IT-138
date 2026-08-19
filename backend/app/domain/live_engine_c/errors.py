@@ -106,6 +106,14 @@ class SafetyConfigurationMissingError(LiveEngineCError):
     Mirrors ``SelectionConfigurationMissingError`` exactly, one family later."""
 
 
+class EvidenceWindowConfigurationMissingError(LiveEngineCError):
+    """SEVENTH-FAMILY GATE batch: raised when a code path needs ``EvidenceWindowConfig`` and the
+    resolved ``CRuntimeBundle.evidence_window_configuration`` is ``None`` (a real, expected state
+    for any bundle not yet republished with the block, additive-only) -- never defaults, never
+    substitutes a placeholder. Mirrors ``SafetyConfigurationMissingError`` exactly, one family
+    later."""
+
+
 class ConfigurationFamilyNotUsableError(LiveEngineCError):
     """Phase 6b, X1/X4: raised when ANY field of a parameter family's per-field status is not in
     the USABLE whitelist ({"APPROVED"} only -- X1-a, a whitelist, never a deny-list on specific

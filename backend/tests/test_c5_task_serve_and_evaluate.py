@@ -57,7 +57,11 @@ from app.infrastructure.persistence_models import (
     Learner,
 )
 from app.main import app
-from app.domain.runtime_bundle_c.types import SafetyConfigurationArtifact, SelectionConfigurationArtifact
+from app.domain.runtime_bundle_c.types import (
+    EvidenceWindowConfigurationArtifact,
+    SafetyConfigurationArtifact,
+    SelectionConfigurationArtifact,
+)
 from tests.test_c4_session_lifecycle import (
     all_usable_field_statuses,
     isolated_database,
@@ -134,6 +138,9 @@ async def seed_active_session(
         "selection_config": selection_config_fixture_for_tests(),
         "selection_config_field_statuses": all_usable_field_statuses(SelectionConfigurationArtifact.FIELD_NAMES),
         "safety_config_field_statuses": all_usable_field_statuses(SafetyConfigurationArtifact.FIELD_NAMES),
+        "evidence_window_config_field_statuses": all_usable_field_statuses(
+            EvidenceWindowConfigurationArtifact.FIELD_NAMES
+        ),
         "generation_parameter_source_status": "TEST_FIXTURE_ONLY",
         "policy_parameter_source_status": "TEST_FIXTURE_ONLY",
         "scaffold_parameter_source_status": "TEST_FIXTURE_ONLY",
