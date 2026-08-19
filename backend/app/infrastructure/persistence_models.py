@@ -1185,6 +1185,14 @@ class CPolicyDecisionRecord(ProvenanceMixin, Base):
     seed_lineage_path: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
     seed_lineage_seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
     evidence_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    # Component C backend remediation, batch 3 (F-2): mirrors the existing sibling column on
+    # CScaffoldEventRecord below EXACTLY (Mapped[bool], Boolean, nullable=False) -- no invented
+    # vocabulary. Carries decide_adaptation_with_safety_flags's own activate_recovery_flag
+    # (batch 1's reconstruction of a field the pinned package-composed AdaptationDecision drops),
+    # persisted by adaptation_service.decide_and_persist_adaptation and read back by
+    # task_service.submit_action's incorrect-answer branch -- see that module's own in-line
+    # comment for the read-back's no-prior-row reasoning.
+    safety_forces_recovery: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 class CSafetyEventRecord(ProvenanceMixin, Base):

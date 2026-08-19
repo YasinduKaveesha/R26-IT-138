@@ -513,6 +513,9 @@ def test_c3a_c_policy_decisions_round_trip() -> None:
                 seed_lineage_path=["global", "session", "task"],
                 seed_lineage_seed=4242,
                 evidence_snapshot={"recent_correctness_rate": 1.0},
+                # Batch 3 (F-2): mirrors c_scaffold_events' own sibling column round-trip below
+                # exactly -- Boolean, NOT NULL, no invented vocabulary.
+                safety_forces_recovery=True,
                 **provenance("c_policy_decision", decision_id),
             )
             session.add(row)
@@ -522,6 +525,7 @@ def test_c3a_c_policy_decisions_round_trip() -> None:
             assert fetched is not None
             assert fetched.selected_action == "hold"
             assert fetched.evidence_snapshot == {"recent_correctness_rate": 1.0}
+            assert fetched.safety_forces_recovery is True
         await database_engine.dispose()
 
     asyncio.run(exercise())
@@ -923,6 +927,7 @@ def test_c3a_c_policy_decisions_check_constraints_reject(field: str, invalid_val
                 "seed_lineage_path": ["global", "session", "task"],
                 "seed_lineage_seed": 4242,
                 "evidence_snapshot": {},
+                "safety_forces_recovery": False,
                 **provenance("c_policy_decision", decision_id),
             }
             values[field] = invalid_value

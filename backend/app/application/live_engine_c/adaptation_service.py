@@ -33,7 +33,15 @@ this new call site is exercised the same way every other Component C path docume
 -- via a session created with ``smoke_mode=True`` (test-only) or a direct call. What changed is
 that a session which DOES exist (today, only that way) now produces a real, persisted
 ``CPolicyDecisionRecord`` on its correct-answer path, rather than never calling this function at
-all."""
+all.
+
+BATCH 3 (F-2, the write half): ``decide_and_persist_adaptation`` now calls batch 1's
+``decide_adaptation_with_safety_flags`` instead of ``decide_adaptation``, and persists the
+reconstructed ``activate_recovery_flag`` into ``CPolicyDecisionRecord.safety_forces_recovery`` (new
+column, migration ``20260816_0006``) -- never a literal. ``task_service.submit_action``'s
+incorrect-answer branch reads it back (that module's own in-line comment carries the read-back's
+reasoning, including the no-prior-row case). WIRED, NOT REACHABLE is still unchanged by this batch
+-- see this batch's own R0 trace in ``buildLog1.md`` for what closes and what remains open."""
 
 from __future__ import annotations
 
@@ -209,8 +217,17 @@ async def decide_and_persist_adaptation(
     produces an ``AdaptationDecision``, ``adaptation.py``, pinned) unconditionally calls
     ``apply_safety`` internally -- there is no code path by which this function's own caller
     could ever receive a decision safety was not applied to; this is a structural property of the
-    composed, pinned function, not a check this module performs."""
-    decision = adapter.decide_adaptation(
+    composed, pinned function, not a check this module performs.
+
+    BATCH 3 (F-2, the write half): calls batch 1's ``decide_adaptation_with_safety_flags`` instead
+    of ``decide_adaptation`` -- the SAME composed ``AdaptationDecision``, PLUS the reconstructed
+    ``activate_recovery_flag`` the pinned package drops when composing it (see
+    ``LiveEngineCAdapter.decide_adaptation_with_safety_flags``'s own docstring for the
+    reconstruction mechanism and its removal trigger). ``activate_recovery_flag`` is persisted
+    into ``CPolicyDecisionRecord.safety_forces_recovery`` below -- the real, per-decision value,
+    never a literal. Batch 2 deliberately left this call site alone (its own scope was wiring the
+    FIRST live caller, not the flag pathway) so this switch would land in one place."""
+    result = adapter.decide_adaptation_with_safety_flags(
         policy_mode=policy_mode,
         evidence=evidence,
         current_difficulty_level=current_difficulty_level,
@@ -219,6 +236,7 @@ async def decide_and_persist_adaptation(
         safety_config=safety_config,
         selection_config=selection_config,
     )
+    decision = result.decision
 
     decision_id = uuid4()
     record = CPolicyDecisionRecord(
@@ -256,6 +274,7 @@ async def decide_and_persist_adaptation(
             "technical_issue_current_task": evidence.technical_issue_current_task,
             "safety_increase_block_remaining": evidence.safety_increase_block_remaining,
         },
+        safety_forces_recovery=result.activate_recovery_flag,
         **_provenance("c_policy_decision", decision_id, request_id, "c_task.adaptation_decided"),
     )
     await CPolicyDecisionRecordRepository(session).add(record)

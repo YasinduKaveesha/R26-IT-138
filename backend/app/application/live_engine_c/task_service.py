@@ -108,6 +108,15 @@ module documents above: the six-family session-creation gate (session_lifecycle.
 still refuses every real HTTP request (X2-3) -- nothing about THIS call changes whether a session
 can be created in production, only what happens on the correct-answer path of a session that
 already exists (today, only a ``smoke_mode=True`` test-constructed one).
+
+BATCH 3 (F-2, the read half): ``submit_action``'s incorrect-answer branch no longer passes the
+literal ``safety_forces_recovery=False`` to ``decide_and_persist_scaffold_level`` -- it reads the
+most recent prior ``c_policy_decisions`` row for the session and reads that row's own
+``safety_forces_recovery`` (batch 3's new column, written by adaptation_service.py's own switch to
+``decide_adaptation_with_safety_flags``), falling back to ``False`` explicitly, and for a stated
+reason, only when no such row exists yet. See the in-line comment at that call site for the full
+three-break register (rewritten this batch, not deleted) and the no-prior-row reasoning, and this
+batch's own ``buildLog1.md`` entry for the full R0 trace and verdict on F-2.
 """
 
 from __future__ import annotations
@@ -162,6 +171,7 @@ from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import CGameplayEventRecord, CTaskInstanceRecord, CTaskOpportunityRecord
 from app.infrastructure.repositories import (
     CGameplayEventRecordRepository,
+    CPolicyDecisionRecordRepository,
     CSessionRecordRepository,
     CTaskInstanceRecordRepository,
     CTaskOpportunityRecordRepository,
@@ -813,33 +823,54 @@ class TaskService:
             # Phase 7, Z5: the ORDINARY escalation path -- decided from the real, just-persisted
             # event stream (never a caller-asserted count).
             #
-            # REGISTER RECONCILIATION (this batch, correcting F-1/F-2): the LITERAL `False` below
-            # is only the LAST of three independent breaks, not the whole story -- naming only
-            # this one was itself a defect (see the standing procedural rule in buildLog1.md).
-            # Full producer-to-consumer trace:
-            #   (1) safety.controller's hard-safety step DOES compute activate_recovery_flag on its
-            #       SafetyDecision (controller.py:36/66/134) -- but component_c_generator's own
-            #       pinned adaptation.decide_adaptation (adaptation.py:56-71) never reads it when
-            #       composing AdaptationDecision, whose fifteen fields (models/adaptation.py:70-91)
-            #       have no slot for it, closed from BOTH directions: model_config sets
-            #       extra="forbid" (stops the field being passed in at construction) AND
-            #       frozen=True (stops it being attached afterwards, even by the caller). The flag
-            #       never leaves the pinned function, verified both ways, not merely at the
-            #       constructor.
-            #   (2) Even if it did: adaptation_service.decide_and_persist_adaptation -- the only
-            #       code that would ever persist a c_policy_decisions row from a real decision --
-            #       has NO caller anywhere under app/ (grep-verified; only test-side direct calls
-            #       in test_c6b_policy_and_safety.py). No live request ever writes that row. The
-            #       one existing reader, CPolicyDecisionRecordRepository.most_recent_for_session
-            #       (repositories.py:281-293), has exactly one consumer -- adaptation_service.py's
-            #       own build_evidence_for_session (:154), internal to this same unwired module.
-            #       CPolicyDecisionRecord itself appears in exactly three files under app/
-            #       (adaptation_service.py, persistence_models.py, repositories.py) -- nothing else
-            #       in the application reads that table.
-            #   (3) This literal `False`, which is what a caller supplies in the absence of (1)/(2).
-            # A column and a read-back CANNOT close this alone -- see the F-2 register entry
-            # (buildLog1.md) for why that batch was cancelled, and the R2-5 entry for the real
-            # (upstream, generator-side, BLOCKED-pending-a-gate) fix.
+            # REGISTER RECONCILIATION, BATCH 3 (REWRITES the prior register note above rather than
+            # deleting it -- breaks (1) and (2) are now CLOSED, not merely described; see this
+            # batch's own R0 trace in buildLog1.md for the full verdict):
+            #   (1) CLOSED by batch 1. safety.controller's hard-safety step DOES compute
+            #       activate_recovery_flag on its SafetyDecision (controller.py) -- component_c_
+            #       generator's own pinned adaptation.decide_adaptation drops it when composing
+            #       AdaptationDecision (frozen=True, extra="forbid" -- closed from both directions,
+            #       never just at the constructor). LiveEngineCAdapter.decide_adaptation_with_
+            #       safety_flags (adapter.py) reconstructs it by calling the pinned proposal step
+            #       and the pinned hard-safety step (named deliberately not spelled out by its own
+            #       identifier here -- see this module's own C-17 test, which scans this module's
+            #       whole source text for that exact identifier's absence, elsewhere unchanged by
+            #       this batch) a second time, on an identically-translated evidence object --
+            #       proven by test_adaptation_safety_flags_reconstruction.py's own parity test.
+            #       THIS IS A WORKAROUND, NOT THE REAL FIX: it works only because
+            #       decide_adaptation happens to compose those two calls in that exact order today
+            #       -- an unpublished implementation detail of a pinned function, never a published
+            #       contract. The real fix -- the owner-authorized AdaptationDecision interface
+            #       change adding activate_recovery_flag/request_safe_termination as real fields --
+            #       is still PENDING upstream (a wheel re-pin this codebase cannot itself perform).
+            #       Batch 1's reconstruction is what supplies the flag until that lands.
+            #   (2) CLOSED by batch 2. adaptation_service.decide_and_persist_adaptation now has a
+            #       real caller under app/ -- this module's own is_correct branch, above -- so a
+            #       session that exists (still only smoke_mode=True/direct-call, X2-3 unchanged)
+            #       produces a real, persisted CPolicyDecisionRecord on its correct-answer path.
+            #   (3) CLOSED by batch 3 (this batch). The column exists
+            #       (c_policy_decisions.safety_forces_recovery, migration 20260816_0006, mirrors
+            #       c_scaffold_events' own sibling column exactly); batch 3 switched (1)'s adapter
+            #       call so decide_and_persist_adaptation persists the real, reconstructed
+            #       activate_recovery_flag into it (never a literal); and the read below replaces
+            #       the literal `False` this note used to sit next to with a real read-back of the
+            #       most recent prior c_policy_decisions row for THIS session.
+            # NO-PRIOR-ROW CASE, DECIDED EXPLICITLY, NOT COLLAPSED: on the first incorrect answer
+            # of a session where no task has yet completed correctly, there is no c_policy_decisions
+            # row at all -- a state distinct from "a prior decision computed False," which this
+            # code does not conflate. ScaffoldDecisionContext.safety_forces_recovery is a bare
+            # bool (no third state to represent "unknown"), and no safety computation has run yet
+            # for this session to have forced anything -- so the no-prior-row case reads as False,
+            # the same value as an explicit prior False, but for a different, plainly-stated
+            # reason: absence of a safety intervention, not evidence of one that didn't fire.
+            # F-2 is CLOSED AT THE MECHANISM LEVEL by this batch (a real signal now travels
+            # producer -> persistence -> read-back -> scaffold decision end to end, proven by this
+            # batch's own negative control) but NOT AT THE PRODUCTION LEVEL: X2-3 is unchanged, so
+            # no live session can ever generate that signal today.
+            prior_decision = await CPolicyDecisionRecordRepository(session).most_recent_for_session(c_session_id)
+            safety_forces_recovery = (
+                prior_decision.safety_forces_recovery if prior_decision is not None else False
+            )
             scaffold_level = await decide_and_persist_scaffold_level(
                 session,
                 adapter=adapter,
@@ -847,7 +878,7 @@ class TaskService:
                 c_task_opportunity_id=instance_record.c_task_opportunity_id,
                 c_task_instance_id=c_task_instance_id,
                 scaffold_config=scaffold_config,
-                safety_forces_recovery=False,  # See breaks (1)-(3) above -- literal is only break (3).
+                safety_forces_recovery=safety_forces_recovery,
                 request_id=request_id,
             )
 

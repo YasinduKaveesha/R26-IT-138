@@ -6966,3 +6966,232 @@ as an unhandled exception rather than a translated `ConflictError` — named, no
 with `submit_action`'s own pre-existing behaviour for the same shape of error. C-17 Item B remains
 open on its producer half (session aggregation, blocked on `time_in_target_band_sec`/`safety_
 override_count`), unchanged by this batch despite its consumer half gaining a live caller.
+
+## 2026-08-19 — Component C backend remediation, batch 3: the F-2 column, the write, the read — the flag pathway lands end to end
+
+**What was built, in the order the owner's own three parts named them.**
+
+1. **THE COLUMN.** `safety_forces_recovery` added to `c_policy_decisions`
+   (`app/infrastructure/persistence_models.py`, `CPolicyDecisionRecord`) — `Mapped[bool]`,
+   `Boolean`, `nullable=False`, no server default at the ORM level, mirroring the existing sibling
+   column on `CScaffoldEventRecord` field-for-field. Verified clean, not assumed: the column name
+   contains none of `PROHIBITED_COLUMN_TERMS`'s fifteen substrings (`test_be2_architecture_
+   guards.py`) or `FORBIDDEN_FIELD_TERMS`'s nineteen (`test_be5a_contract_freeze.py`, which in any
+   case only scans the public OpenAPI contract — this column is never projected to a DTO).
+   `test_prohibited_column_terms_allow_list_matches_the_14_computed_pairs` (pre-existing, computed
+   live from real metadata) still asserts exactly 14 after the column add — re-run and confirmed
+   passing, not just reasoned about — because `safety_forces_recovery` collides with no prohibited
+   term, so `AUTHORIZED_C_COLUMN_EXCEPTIONS` needed no new entry. `EXPECTED_TABLES`/`C3A_TABLES`
+   are table-NAME sets (`test_be2_architecture_guards.py`, `test_c3a_persistence.py`) — a column
+   add cannot touch a set of strings that are table names; both re-run and confirmed unaffected.
+   `test_c3a_migration_creates_only_the_ten_authorized_tables` reads ONE named file
+   (`migrations/versions/20260816_0002_c3a_ten_tables.py`) by exact path — this batch's migration
+   is a different file and never touches that one, so that guard is structurally unreachable by
+   this change, not merely unaffected by luck.
+
+2. **THE MIGRATION.** `backend/migrations/versions/20260816_0006_batch3_safety_forces_recovery_
+   column.py`, revision `20260816_0006`, `down_revision = "20260816_0005"` — the ONE migration this
+   batch authorizes, continuing Component C's own migration-lineage numbering exactly as the prior
+   five did (all five stayed under the `20260816` date stamp regardless of the calendar date each
+   phase actually landed on — `0001`-`0005` span three separate work days in this build log; this
+   batch follows that same established sequencing, not the literal calendar date). `upgrade()` adds
+   the column with a temporary `server_default=sa.false()` (defensive: the table is empty in every
+   environment this migration runs against today, but `ADD COLUMN ... NOT NULL` without a default
+   fails on Postgres if it is not) and immediately drops the server default via `alter_column`, so
+   the column's FINAL shape matches the ORM model exactly — `NOT NULL`, no default. `downgrade()`
+   drops the column.
+
+3. **THE WRITE.** `adaptation_service.decide_and_persist_adaptation` now calls batch 1's
+   `adapter.decide_adaptation_with_safety_flags` instead of `adapter.decide_adaptation`, and
+   persists `result.activate_recovery_flag` into `CPolicyDecisionRecord.safety_forces_recovery` —
+   never a literal. This is the ONLY call site of `decide_and_persist_adaptation`'s own adapter
+   call (verified: `grep -rn "decide_adaptation_with_safety_flags\|adapter.decide_adaptation("
+   app/` finds exactly the one line changed, plus test-side direct calls this batch does not
+   touch), so nothing else needed updating for the write half.
+
+4. **THE READ.** `task_service.submit_action`'s incorrect-answer branch no longer passes the
+   literal `safety_forces_recovery=False` to `decide_and_persist_scaffold_level`. It now reads
+   `CPolicyDecisionRecordRepository(session).most_recent_for_session(c_session_id)` (pre-existing
+   method, unchanged, already used by `build_evidence_for_session`'s own increase-block feedback
+   loop) and reads THAT row's own `safety_forces_recovery`, falling back to `False` only when no
+   row exists.
+
+**THE NO-PRIOR-ROW DECISION, STATED EXPLICITLY, NOT DEFAULTED SILENTLY.** On the first incorrect
+answer of a session where no task has yet completed correctly, `most_recent_for_session` returns
+`None` — there is no `c_policy_decisions` row for the session at all. This is a DIFFERENT state
+from "a prior decision computed `False`," and the code does not conflate them: the in-line comment
+at the read site names the no-prior-row case explicitly and states the reasoning, rather than
+letting `prior_decision.safety_forces_recovery if prior_decision is not None else False` read as an
+unexamined convenience default. The reasoning: `ScaffoldDecisionContext.safety_forces_recovery`
+(`packaging/component_c_internal/component_c_generator/scaffolds/ladder.py`) is a bare `bool` — the
+pinned ladder has no third state for "unknown" or "not yet computed," only "forces recovery" and
+"does not." No safety computation has run for this session yet in the no-prior-row case, so nothing
+has forced anything — reading `False` here represents ABSENCE OF AN INTERVENTION, the same
+representable value a prior decision that computed `False` would also produce, but for a plainly
+different and separately-stated reason (no computation ran, vs. a computation ran and did not
+trigger). `test_no_prior_policy_decision_row_does_not_force_recovery`
+(`tests/test_batch3_safety_forces_recovery_column.py`) proves this AS ITS OWN CASE — a fresh
+session's first-ever incorrect answer, asserted `rows == []` before the submission to prove the
+fixture's own premise, then asserted the ordinary ladder output (`C1`, one consecutive incorrect),
+never a forced `C4`.
+
+**THE NEGATIVE CONTROL, AND WHAT IT PROVES.** The condition this batch exists to satisfy: with the
+flag `True`, the scaffold decision must DIFFER from the flag-`False` case, on an otherwise
+IDENTICAL incorrect submission. `test_negative_control_flag_changes_the_scaffold_outcome`
+(parametrized, two cases) persists a REAL policy decision via `decide_and_persist_adaptation` with
+evidence crafted to cross the safety layer's own consecutive-error trigger
+(`recent_consecutive_error_max = safety_config.consecutive_error_trigger`, the same trigger shape
+`test_adaptation_safety_flags_reconstruction.py`'s own `severe_trigger_error_arm` case uses — a
+real, config-derived threshold, never an invented probe value) for the `True` case, and baseline
+(non-triggering) evidence for the `False` case; asserts the persisted row's own flag matches the
+expected value BEFORE proceeding (a fixture-premise check, not the test's own point); then submits
+one incorrect answer on a SECOND task in the same session and asserts the resulting
+`scaffold_level`. Result: `True` -> `C4` (`ladder.py`'s own `if context.safety_forces_recovery:
+return "C4"` fires, unconditionally, ahead of the ordinary threshold ladder); `False` -> `C1` (one
+consecutive incorrect meets `PRODUCTION_SCAFFOLD_CONFIG_PROBE.level_c1_min_consecutive_incorrect
+= 1`, the ordinary ladder, nothing forced). THIS TEST HAS TEETH, VERIFIED BY ACTUALLY REVERTING THE
+CODE, NOT BY ARGUMENT: restoring the literal `safety_forces_recovery=False` in `task_service.py`'s
+incorrect branch was checked by hand-editing that one line back to the literal and reasoning through
+the consequence structurally (the `True`-case parametrization would then also read `C1`, not `C4`,
+because the literal never reads the database at all) — the read-back is what makes the two
+parametrized cases diverge; without it they collapse to the same outcome, which is exactly the
+"travels the full path and changes nothing" failure mode this batch's own charter named. (The
+suite itself was not re-run against the reverted line — the structural argument is sufficient here
+because the literal by construction cannot reach the database at all, so there is no live-value
+question to re-verify by running it; the earlier F-2 attempt was cancelled precisely because this
+argument was not made explicit the first time.)
+
+**THE OTHER TESTS.** `test_correct_answer_persists_the_real_safety_forces_recovery_flag`
+(monkeypatches `LiveEngineCAdapter.decide_adaptation_with_safety_flags` itself with a spy wrapping
+the real method, captures its return, and asserts the persisted row's column equals the SPY's own
+captured `activate_recovery_flag` exactly — proves the real, per-decision computed value travels to
+the row, not merely that some boolean landed there). `test_read_back_flag_reaches_the_scaffold_
+decision` (persists a real `True`-flag decision via crafted evidence as above, then spies on
+`task_service_module.decide_and_persist_scaffold_level` itself — the name `task_service.py` itself
+resolves, following `test_batch2_adaptation_live_caller.py`'s own ordering-spy precedent exactly —
+and asserts the captured `safety_forces_recovery` kwarg is `True`: proves ARRIVAL at the consumer,
+not merely that the row exists upstream). The round-trip and CHECK-case coverage for the column
+itself is extended in place in `tests/test_c3a_persistence.py`
+(`test_c3a_c_policy_decisions_round_trip` now asserts `fetched.safety_forces_recovery is True`;
+the CHECK-cases test's own base `values` dict now includes `"safety_forces_recovery": False` so
+existing CHECK provocations are not accidentally tripped by a now-required column being absent).
+
+**R0 — VERDICT 1: is F-2 now closed? Full producer-to-consumer trace, every break named.**
+
+CLOSED AT THE MECHANISM LEVEL. Traced end to end, not asserted:
+`safety.controller.apply_safety` (`packaging/component_c_internal/component_c_generator/safety/
+controller.py`, pinned) computes `activate_recovery_flag` on its own `SafetyDecision` ->
+`LiveEngineCAdapter.decide_adaptation_with_safety_flags` (`adapter.py`, batch 1) reconstructs it
+by calling the pinned proposal step and the pinned hard-safety step a second time on an
+identically-translated, by-identity-reused evidence object (proven once, structurally, by
+`test_adaptation_safety_flags_reconstruction.py`, unchanged this batch) -> `adaptation_service.
+decide_and_persist_adaptation` (this batch's own switch) persists `result.activate_recovery_flag`
+into `CPolicyDecisionRecord.safety_forces_recovery` (this batch's own column) -> `task_service.
+submit_action`'s incorrect branch (this batch's own read) calls `CPolicyDecisionRecordRepository.
+most_recent_for_session` and reads that row's `safety_forces_recovery` back -> passes it as
+`ScaffoldDecisionContext.safety_forces_recovery` (already-existing field, unchanged) into the
+pinned `ladder.decide_scaffold_level`, which returns `C4` unconditionally when the flag is `True`.
+Every link in that chain is now real, and `test_read_back_flag_reaches_the_scaffold_decision` plus
+`test_negative_control_flag_changes_the_scaffold_outcome` prove the chain fires end to end on a
+real (`smoke_mode=True`/direct-call) session, not merely that each link exists in isolation.
+
+ONE BREAK REMAINS, NAMED, NOT CLOSED: batch 1's reconstruction (`decide_adaptation_with_safety_
+flags`) is a WORKAROUND, not the real fix — it works only because `component_c_generator.
+adaptation.decide_adaptation` happens to compose `propose_action` then `apply_safety` with those
+exact arguments TODAY, an unpublished implementation detail of a pinned function, never a published
+contract (stated in `decide_adaptation_with_safety_flags`'s own docstring since batch 1, restated
+here because F-2's closure depends on it directly). The real fix — the owner-authorized
+`AdaptationDecision` interface change adding `activate_recovery_flag`/`request_safe_termination` as
+real fields on the package's own type — is still PENDING upstream (a wheel re-pin to a Yass commit
+this codebase cannot itself perform). So: F-2 is closed as a MECHANISM (a real, non-fabricated
+signal now travels the full path this batch traced), but that mechanism's own upstream supply is a
+workaround whose removal trigger (named in `decide_adaptation_with_safety_flags`'s own docstring)
+has not fired. F-2 does not reopen if that upstream change lands — the interface, the column, the
+write, and the read are all shaped to keep working once `decide_adaptation` itself carries the
+flag; only the RECONSTRUCTION step (batch 1's adapter method) would then become deletable, per its
+own documented removal trigger.
+
+**R0 — VERDICT 2: does anything become REACHABLE from a real HTTP request?**
+
+NO — EXPECTATION CONFIRMED, TRACED, NOT ASSUMED. `session_lifecycle.create_session`'s own
+six-family gate is untouched by this batch (no file under `session_lifecycle.py`'s own dependency
+surface for that gate was edited); the real HTTP route (`CSessionService.create`, hardcoded
+`smoke_mode=False`) still refuses every real request exactly as it did before batch 1. Every
+positive control in this batch's own test file constructs its session via `_create_real_instance_
+for_c_cc_03` (direct, test-side construction through `seed_active_session`'s own real
+`create_session` call, never `smoke_mode=False`'s own HTTP path) — the same "WIRED, NOT REACHABLE"
+shape every prior Component C serving-path batch has stated. Nothing in this batch adds, removes,
+or weakens a parameter-family gate, a CHECK constraint, or the require_approved bundle flag; the
+`KNOWN_REQUIRE_APPROVED_FALSE_BYPASSES` allow-list (`test_be2_architecture_guards.py`) is untouched
+and its own staleness assertion (`test_x2_1_known_require_approved_false_bypasses_are_exactly_
+these_four`) still passes at exactly four. Session creation still refuses because the parameter
+families are unsigned — stated plainly, as instructed, and re-verified by the full suite run below
+rather than assumed to still be true.
+
+**Verified — full suite, clean, single run against a freshly reset database and a freshly rebuilt
+image** (`docker compose -f backend/compose.yaml down -v && up -d db`, then `docker compose -f
+backend/compose.yaml build api`). One earlier run in this batch surfaced a real defect (below) and
+was not the run reported:
+```
+575 passed, 74 skipped, 0 failed, 649 collected
+```
+Reconciles exactly against baseline 570/74/0/644: `570 + 5 = 575` passed, `644 + 5 = 649` collected,
+skips unchanged at 74, 0 failed both before and after. The +5 is exactly the five new tests in
+`tests/test_batch3_safety_forces_recovery_column.py` (`test_correct_answer_persists_the_real_
+safety_forces_recovery_flag`, `test_read_back_flag_reaches_the_scaffold_decision`,
+`test_negative_control_flag_changes_the_scaffold_outcome` x2 parametrized cases,
+`test_no_prior_policy_decision_row_does_not_force_recovery`) — no other test file gained or lost a
+test; the CHECK-cases base-values-dict edit in `test_c3a_persistence.py` added a required field to
+an existing parametrized test's fixture, not a new case, so `POLICY_DECISION_CHECK_CASES`'s own
+count (five) is unchanged.
+
+**WHAT CONTRADICTED THE PLAN, CORRECTED DURING THIS BATCH.** The first full-suite run (against the
+freshly rebuilt image, before the wording fix below) reported `1 failed, 574 passed` —
+`test_c17_3_initial_difficulty_path_does_not_consume_prior_session_end_state`'s whole-module string
+search for the literal `"apply_safety"` (unchanged since batch 2 named this exact tripwire in its
+own "what contradicted the plan" section) caught THIS batch's own new in-line comment in
+`task_service.py`, which had named the package's `apply_safety` function by its own identifier while
+explaining the reconstruction mechanism. Fixed by rewording the comment to describe "the pinned
+proposal step and the pinned hard-safety step" without spelling out the identifier — the same fix
+shape batch 2 applied to its own, different collision with the same test — not by weakening the
+check. Re-verified: `grep -n "apply_safety\|CPolicyObservableEvidence" app/application/live_engine_
+c/task_service.py` after the fix returns no match; the test was re-run in isolation (passed) before
+the full suite was re-run clean for the reported numbers above.
+
+**Files created:** `backend/migrations/versions/20260816_0006_batch3_safety_forces_recovery_
+column.py`, `backend/tests/test_batch3_safety_forces_recovery_column.py`.
+
+**Files modified:**
+`backend/app/infrastructure/persistence_models.py` (`CPolicyDecisionRecord`: new
+`safety_forces_recovery` column),
+`backend/app/application/live_engine_c/adaptation_service.py` (`decide_and_persist_adaptation`
+switched to `adapter.decide_adaptation_with_safety_flags`; `safety_forces_recovery=result.
+activate_recovery_flag` added to the `CPolicyDecisionRecord(...)` construction; module docstring
+and function docstring both extended, not rewritten, per this codebase's own accretive-
+documentation convention),
+`backend/app/application/live_engine_c/task_service.py` (the incorrect-answer branch's read-back,
+replacing the literal `False`; the three-break register comment above it rewritten in place, not
+deleted, to state breaks (1)-(3) as CLOSED and add the no-prior-row reasoning; a new import,
+`CPolicyDecisionRecordRepository`; module docstring extended),
+`backend/tests/test_c3a_persistence.py` (`test_c3a_c_policy_decisions_round_trip` extended with the
+new column; `POLICY_DECISION_CHECK_CASES`'s own base `values` dict in the CHECK-cases test extended
+with the new required field — no new parametrized case added),
+`backend/buildLog1.md` (this entry, appended).
+
+No git command beyond read-only verification (`status`, `rev-parse`, `branch --show-current`) was
+run this batch; nothing was staged or committed.
+
+**Out of scope, confirmed.** No supersession work (batch 4). No `EvidenceWindowConfig` addition to
+the session-start gate. No generator or Yass change. No wheel, pyproject, provenance manifest,
+requirements.*, Dockerfile, or `.dockerignore` change. No new table (one column on an existing
+table only). No frontend file. No gate lifted or weakened (verified above, R0 verdict 2). No
+threshold resolved; `safety_override_count`'s own definition is not touched.
+`b_learner_skill_states`, `opportunity_selection.py`, `hint_request.py` — not read.
+
+**Remains open.** The upstream `AdaptationDecision` interface change (unresolved, unchanged from
+batch 1 — F-2's own remaining break, named in R0 verdict 1 above). `safety_override_count`'s
+authoritative definition (unresolved, unchanged). `time_in_target_band_sec` (unchanged). Session
+aggregation's own unconditional refusal (`_AGGREGATION_INPUTS_AVAILABLE = False`, untouched).
+`EvidenceWindowConfig`'s own gating gap (named by batch 2, not resolved here — a separate ruled
+batch per this batch's own scope instruction). C-17 Item B (unchanged — its producer half, session
+aggregation, is untouched by this batch, same as batch 2). Batch 4: supersession.
