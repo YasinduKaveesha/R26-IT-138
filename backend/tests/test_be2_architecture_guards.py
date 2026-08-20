@@ -52,6 +52,9 @@ EXPECTED_TABLES = {
     "c_sessions", "c_task_opportunities", "c_task_instances", "c_gameplay_events",
     "c_task_opportunity_summaries", "c_session_aggregate_results", "c_learner_local_state",
     "c_policy_decisions", "c_safety_events", "c_scaffold_events",
+    # Component C backend remediation, batch 4 (Amendment A-1) — the durable exclusion-reason /
+    # supersession-chain table, created by its own migration (20260816_0007), not BE2's 0002.
+    "c_task_opportunity_verdicts",
 }
 BE2_BASE_TABLES = EXPECTED_TABLES - {
     "teacher_profiles", "classrooms", "classroom_invites", "classroom_memberships",
@@ -66,6 +69,9 @@ BE2_BASE_TABLES = EXPECTED_TABLES - {
     "c_sessions", "c_task_opportunities", "c_task_instances", "c_gameplay_events",
     "c_task_opportunity_summaries", "c_session_aggregate_results", "c_learner_local_state",
     "c_policy_decisions", "c_safety_events", "c_scaffold_events",
+    # Component C backend remediation, batch 4 — created by its own migration (20260816_0007),
+    # not BE2's 0002.
+    "c_task_opportunity_verdicts",
 }
 PROHIBITED_COLUMN_TERMS = {
     "mastery", "bkt", "guess_guard", "certif", "sequenc", "hint", "answer",

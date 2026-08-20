@@ -1247,4 +1247,110 @@ class CScaffoldEventRecord(ProvenanceMixin, Base):
     safety_forces_recovery: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
+class CTaskOpportunityVerdictRecord(ProvenanceMixin, Base):
+    """Component C backend remediation, batch 4 (Amendment A-1): the durable exclusion-reason /
+    supersession-chain record Phase 8's own K3/K4 register entries named without building
+    (``buildLog1.md``, "Component C Phase 8" entry). One row per rejected-derivation judgment
+    about a task instance's event stream -- written by
+    ``summary_service.derive_and_persist_summary`` whenever ``telemetry_validation.
+    TelemetryStreamRejectedError`` fires (K3-b: "the durable exclusion record MUST EXIST before
+    first real data, not merely before the gate on session creation lifts"). Covers BOTH of K4's
+    faces in one mechanism, deliberately not two tables: a never-summarized instance (wrongly
+    EXCLUDED, K3) and a previously-summarized instance a later re-validation finds bad (wrongly
+    PASSED, K4-b) produce the IDENTICAL row shape, differing only in whether a
+    ``CTaskOpportunitySummaryRecord`` already existed for the target at write time -- one is
+    ``supersedes_verdict_id IS NULL`` (first judgment), the other chains to the prior live verdict.
+
+    RULING 1 (REFUSE THE WHOLE SESSION, confirmed): this table records a fact ABOUT a stream, never
+    a corrected summary -- there is no replacement value to substitute in its place. Converting
+    "bad data counted as good" into "good data missing" IS the improvement this amendment exists to
+    make; skipping just the corrected task would be C-4 verbatim (computing over a truncated window
+    silently weakens the safety layer). ``telemetry_validation.get_derivable_history_for_session``
+    removes a suppressed summary's ``task_index`` from its own derivable set, letting the EXISTING
+    gap logic (Phase 8, unchanged) raise ``DistrustedHistoryGapError`` for the whole session -- no
+    new exception type, no change to either consumer (``adaptation_service.
+    build_evidence_for_session``, ``aggregation_service.derive_and_persist_session_aggregate``).
+
+    RULING 2 (KEEP THE CHAIN): ``supersedes_verdict_id`` is a nullable self-FK. The amendment's own
+    text says "appended and superseding rather than overwriting," and C-9 guarantees the validator
+    changes more than once, so a summary corrected under one validator version can be corrected
+    again under the next -- each correction is APPENDED, never overwritten, never deleted. A
+    verdict is LIVE iff no OTHER verdict's ``supersedes_verdict_id`` points at it
+    (``telemetry_validation._live_verdict_ids``, the one place liveness is computed, shared by both
+    the read path and the write-time chain lookup) -- only a LIVE verdict suppresses its own
+    target; row presence alone is never sufficient (see this table's own test coverage,
+    ``tests/test_batch4_verdict_supersession.py``, for the cross-target isolation proof an untested
+    chain would otherwise leave as pure decoration).
+
+    CONDITION 1 (``verdict_detail`` records WHY, never the rejected values): populated verbatim
+    from ``TelemetryStreamRejectedError.detail`` -- already structural-only by construction (check
+    name, field paths, indices, counts; see every ``telemetry_validation.py`` raise site), never a
+    copy of exception text that could carry a learner-supplied payload value. Same shape as the
+    pydantic ``input_value=`` leak this project already guards against elsewhere
+    (``MasteryPayloadContractValidationError``, ``app/domain/live_engine_c/errors.py``).
+
+    CONDITION 2 (``validator_check`` draws from one named tuple, no DB-level enum): sourced from
+    ``telemetry_validation.TELEMETRY_VALIDATION_CHECKS``, the single place the current check-name
+    vocabulary is listed -- deliberately NOT a CHECK constraint here (C-9 guarantees this
+    vocabulary will grow as the validator itself changes, and an unsourced enum would risk the same
+    invented-value defect R-G already prohibits for numeric thresholds, applied here to a string
+    vocabulary instead).
+
+    Two CHECK constraints only, per Amendment A-1's own scope: a nonblank guard on
+    ``validator_check`` (the same discipline every other short-code text column in this file
+    already carries, e.g. ``ck_teacher_profiles_name_nonblank``) and a structural guard preventing
+    a verdict from citing itself as its own predecessor -- a genuine correctness property of the
+    new self-referencing chain, not an invented threshold.
+
+    HOW TO TELL AN EXCLUSION FROM A SUPERSESSION -- there is deliberately no ``verdict_kind``
+    column, because the distinction is DERIVED, not stored. Join a live verdict to
+    ``c_task_opportunity_summaries`` on ``game_task_instance_id``:
+
+        live verdict + NO summary for that instance  ->  the stream was EXCLUDED at ingestion
+                                                          (derivation never produced a summary)
+        live verdict + a summary for that instance   ->  that summary is SUPERSEDED
+                                                          (it was accepted, and later found wrong)
+
+    This derivation is stable and cannot drift, because ``uq_c_task_opportunity_summaries_instance``
+    makes summaries insert-once per instance and this store is append-only: an instance that has no
+    summary can never acquire one (derivation runs exactly once, at terminal-event time, and it
+    failed), and an instance that has one can never lose it. A stored discriminator would be
+    redundant with this join AND capable of contradicting it, which is why it is absent.
+
+    Amendment A-1's ratified proposal named a ``verdict_kind`` enum and a ``superseded_summary_id``
+    FK. Neither was built. ``superseded_summary_id`` is redundant against the insert-once
+    constraint above -- one instance has exactly one summary, so ``game_task_instance_id`` already
+    identifies it -- and ``verdict_kind`` is the derived value documented here. The reduction was
+    accepted on review after the fact; it was NOT flagged as a deviation when it was made, and the
+    build-log entry records that separately."""
+
+    __tablename__ = "c_task_opportunity_verdicts"
+    __table_args__ = (
+        CheckConstraint(
+            "validator_check <> ''", name="ck_c_task_opportunity_verdicts_validator_check_nonblank"
+        ),
+        CheckConstraint(
+            "supersedes_verdict_id IS DISTINCT FROM c_task_opportunity_verdict_id",
+            name="ck_c_task_opportunity_verdicts_not_self_superseding",
+        ),
+        *ProvenanceMixin.provenance_constraints("c_task_opportunity_verdicts"),
+    )
+
+    c_task_opportunity_verdict_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    c_session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_sessions.c_session_id", ondelete="RESTRICT"), nullable=False
+    )
+    game_task_instance_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("c_task_instances.c_task_instance_id", ondelete="RESTRICT"), nullable=False
+    )
+    task_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    validator_check: Mapped[str] = mapped_column(String(64), nullable=False)
+    verdict_detail: Mapped[str] = mapped_column(String(500), nullable=False)
+    supersedes_verdict_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("c_task_opportunity_verdicts.c_task_opportunity_verdict_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
+
 AUTHORIZED_TABLES = frozenset(Base.metadata.tables)

@@ -11,6 +11,7 @@ from app.infrastructure.persistence_models import (
     ClassroomInvite, ClassroomMembership, CLearnerLocalStateRecord, CPolicyDecisionRecord,
     CRuntimeBundleRecord, CSafetyEventRecord, CScaffoldEventRecord,
     CSessionRecord, CTaskInstanceRecord, CTaskOpportunityRecord, CTaskOpportunitySummaryRecord,
+    CTaskOpportunityVerdictRecord,
     HintEventRecord, IdempotencyRecord,
     ItemOpportunityRecord, Learner, LearnerSkillStateRecord, PresentationTokenRecord,
     RuntimeBundleRecord, SessionAggregateResultRecord, SessionEvent, SessionRecord,
@@ -311,6 +312,26 @@ class CTaskOpportunitySummaryRecordRepository(SqlAlchemyNeutralRepository[CTaskO
             select(CTaskOpportunitySummaryRecord)
             .where(CTaskOpportunitySummaryRecord.c_session_id == c_session_id)
             .order_by(CTaskOpportunitySummaryRecord.task_index)
+        )
+        return result.scalars().all()
+
+
+class CTaskOpportunityVerdictRecordRepository(SqlAlchemyNeutralRepository[CTaskOpportunityVerdictRecord]):
+    model_type = CTaskOpportunityVerdictRecord
+
+    async def list_for_session(self, c_session_id: UUID) -> Sequence[CTaskOpportunityVerdictRecord]:
+        """Batch 4: every verdict row for a session -- liveness is graph-resolved by
+        ``telemetry_validation._live_verdict_ids``, not order-dependent, so ordering here is only
+        for test/debug legibility (chronological, the same discipline
+        ``CPolicyDecisionRecordRepository.list_chronological_for_session`` already uses).
+        Deliberately NOT named ``list_ordered_for_session`` -- that exact method name is reserved
+        to ``CTaskOpportunitySummaryRecordRepository`` and is the literal string
+        ``test_be2_architecture_guards.py``'s Phase 8 AST guard scans for; reusing it here would
+        trip that guard for a call it was never meant to restrict."""
+        result = await self.session.execute(
+            select(CTaskOpportunityVerdictRecord)
+            .where(CTaskOpportunityVerdictRecord.c_session_id == c_session_id)
+            .order_by(CTaskOpportunityVerdictRecord.created_at_utc)
         )
         return result.scalars().all()
 

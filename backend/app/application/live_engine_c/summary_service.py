@@ -45,15 +45,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.live_engine_c.mastery_fixture import FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID
 from app.application.live_engine_c.session_lifecycle import _provenance
 from app.application.live_engine_c.telemetry_validation import (
+    _live_verdict_ids,
     validate_clock_discipline,
     validate_event_stream_structurally,
 )
+from app.domain.live_engine_c.errors import TelemetryStreamRejectedError
 from app.domain.live_engine_c.types import GameplayEvent, SeedLineage, TaskOpportunitySummary
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
-from app.infrastructure.persistence_models import CGameplayEventRecord, CTaskOpportunitySummaryRecord
+from app.infrastructure.persistence_models import (
+    CGameplayEventRecord,
+    CTaskInstanceRecord,
+    CTaskOpportunitySummaryRecord,
+    CTaskOpportunityVerdictRecord,
+)
 from app.infrastructure.repositories import (
     CGameplayEventRecordRepository,
     CTaskOpportunitySummaryRecordRepository,
+    CTaskOpportunityVerdictRecordRepository,
 )
 
 
@@ -130,6 +138,57 @@ def _summary_record(
     )
 
 
+async def _persist_excluded_verdict(
+    session: AsyncSession,
+    *,
+    c_session_id: UUID,
+    c_task_instance_id: UUID,
+    exc: TelemetryStreamRejectedError,
+    request_id: str,
+) -> None:
+    """Batch 4 (Amendment A-1, K3-b): writes the durable exclusion-reason row BEFORE
+    ``derive_and_persist_summary``'s own caller ever sees ``TelemetryStreamRejectedError`` --
+    K3-b's own deadline ("before first real data," stricter than every other pre-gate-lift item
+    on this register). Covers BOTH of K4's faces with the identical write: a never-summarized
+    instance (``supersedes_verdict_id`` stays ``NULL`` -- this is the first judgment) and a
+    previously-summarized instance a later re-validation now finds bad (RULING 2: chains to
+    whichever verdict is currently LIVE for this exact instance, found via
+    ``telemetry_validation._live_verdict_ids`` -- the SAME liveness computation the read path
+    uses, so the two can never disagree about what 'live' means).
+
+    CONDITION 1: ``verdict_detail`` is ``exc.detail`` verbatim -- already structural-only by
+    construction (every raise site in ``telemetry_validation.py`` states a check name, field path,
+    index, or count, never a learner-supplied payload value). CONDITION 2: ``validator_check`` is
+    ``exc.check`` verbatim, itself always one of ``telemetry_validation.
+    TELEMETRY_VALIDATION_CHECKS``'s own members (every raise site draws from that one named
+    tuple) -- this write site never invents or duplicates a check-name string of its own."""
+    instance = await session.get(CTaskInstanceRecord, c_task_instance_id)
+    prior_verdicts = await CTaskOpportunityVerdictRecordRepository(session).list_for_session(c_session_id)
+    live_ids = _live_verdict_ids(prior_verdicts)
+    prior_live_verdict = next(
+        (
+            v
+            for v in prior_verdicts
+            if v.game_task_instance_id == c_task_instance_id and v.c_task_opportunity_verdict_id in live_ids
+        ),
+        None,
+    )
+    verdict_id = uuid4()
+    verdict = CTaskOpportunityVerdictRecord(
+        c_task_opportunity_verdict_id=verdict_id,
+        c_session_id=c_session_id,
+        game_task_instance_id=c_task_instance_id,
+        task_index=instance.task_index,
+        validator_check=exc.check,
+        verdict_detail=exc.detail,
+        supersedes_verdict_id=(
+            prior_live_verdict.c_task_opportunity_verdict_id if prior_live_verdict is not None else None
+        ),
+        **_provenance("c_task_opportunity_verdict", verdict_id, request_id, "c_task.stream_excluded"),
+    )
+    await CTaskOpportunityVerdictRecordRepository(session).add(verdict)
+
+
 async def derive_and_persist_summary(
     session: AsyncSession,
     *,
@@ -152,20 +211,36 @@ async def derive_and_persist_summary(
     ``CTaskOpportunitySummaryRecord`` is ever constructed or persisted for the offending stream --
     K1's "scored never" half. The raw ``c_gameplay_events`` rows already written by the caller
     BEFORE this function was ever invoked are untouched either way -- K1's "persisted always" half,
-    already satisfied by the time this function runs, never undone by it."""
+    already satisfied by the time this function runs, never undone by it.
+
+    BATCH 4 (Amendment A-1): the SAME ``TelemetryStreamRejectedError`` is now also caught HERE,
+    ONLY to write the durable ``c_task_opportunity_verdicts`` row (``_persist_excluded_verdict``
+    above) before being RE-RAISED completely unchanged -- this function's own caller sees the
+    identical exception it always did (proven by ``tests/test_batch4_verdict_supersession.py``'s
+    own write-path regression: the existing contract is not weakened, only observed)."""
     event_repo = CGameplayEventRecordRepository(session)
     records = await event_repo.list_ordered_for_instance(c_task_instance_id)
-    validate_clock_discipline(records)
-    domain_events = [
-        _to_domain_gameplay_event(
-            record,
-            student_id=student_id,
-            c_session_id=stu_session_id,
-            game_task_instance_id=game_task_instance_id,
+    try:
+        validate_clock_discipline(records)
+        domain_events = [
+            _to_domain_gameplay_event(
+                record,
+                student_id=student_id,
+                c_session_id=stu_session_id,
+                game_task_instance_id=game_task_instance_id,
+            )
+            for record in records
+        ]
+        validate_event_stream_structurally(domain_events)
+    except TelemetryStreamRejectedError as exc:
+        await _persist_excluded_verdict(
+            session,
+            c_session_id=c_session_id,
+            c_task_instance_id=c_task_instance_id,
+            exc=exc,
+            request_id=request_id,
         )
-        for record in records
-    ]
-    validate_event_stream_structurally(domain_events)
+        raise
     summary = adapter.derive_task_opportunity_summary(domain_events)
     record = _summary_record(
         summary,

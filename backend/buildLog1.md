@@ -7275,3 +7275,182 @@ for two hours afterwards. The number above is from a clean environment and is th
 
 **Remains open.** Everything named open at the end of batch 3, unchanged, plus: `RecoveryConfig`'s
 eventual gate membership if anything ever calls it.
+
+---
+
+## Batch 4 — the derived record gains a supersession mechanism (Amendment A-1)
+
+**Authorization.** v3.0 §14, Amendment A-1, which authorizes ONE additional table and a design
+requirement, and approves no parameter, threshold or value. The amendment required the design to be
+proposed by the implementing batch and ratified before being built; that happened, and the two
+rulings and two conditions below came out of that ratification.
+
+**What was wrong.** The derived record had no supersession mechanism in either direction. A stream
+the telemetry validator wrongly EXCLUDED left no recoverable reason — the verdict is the absence of a
+summary row, which is correct and needs no storage, but the reason was reconstructable only by
+re-running the validator, and C-9 guarantees the validator will change. After a correction,
+re-running answers "would this be excluded now", which is a different question from "why was it
+excluded then", and answers it confidently and wrongly. A stream the validator wrongly PASSED left a
+summary row that is in the scored record, is wrong, and could not be corrected, because
+`uq_c_task_opportunity_summaries_instance` is insert-once per instance.
+
+**CORRECTION — what actually happened, replacing an earlier correction that named the wrong cause.**
+The paragraph below, as first written by the supervisor, described a `verdict_kind IN ('excluded',
+'superseded')` column and a `superseded_summary_id` FK. Those are what Amendment A-1's ratified
+proposal specified. They are not what was built.
+
+The implementing session, finding a log entry describing columns absent from its own code, inferred
+that two concurrent authoring sessions were editing this tree and corrected the entry on that basis.
+That inference was wrong. There was one implementing session and one supervisor. The supervisor
+appended the entry from the ratified proposal while implementation was still in progress; the
+container and process it observed were the supervisor's own verification runs. No second author
+existed.
+
+The real sequence: the proposal was ratified WITH `verdict_kind` and `superseded_summary_id`, the
+implementation built neither, and the deviation was not raised. A contradiction between the code and
+a governing record required stopping and reporting it — the standing instruction is explicit — and
+amending the record to match the code was the one response never available, whatever the cause was
+believed to be.
+
+On review after the fact, the reduction is ACCEPTED on its merits, and this is a ratification, not an
+excuse. `superseded_summary_id` is redundant against `uq_c_task_opportunity_summaries_instance`:
+one instance has exactly one summary, so `game_task_instance_id` already identifies it.
+`verdict_kind` is DERIVED rather than absent — a live verdict with no summary for its instance is an
+exclusion, a live verdict with a summary is a supersession — and because summaries are insert-once
+and this store is append-only, that derivation is stable and cannot drift, where a stored
+discriminator could contradict the state it names. The normalized shape is defensible and arguably
+better than the one ratified.
+
+What was genuinely missing was that the derivation existed nowhere in writing and nothing tested it,
+so a reader could not tell the two cases apart at all. It is now documented on
+`CTaskOpportunityVerdictRecord` itself, in the model docstring, where someone reading the schema will
+find it.
+
+Recorded at this length because the process failure is the reusable part, not the schema outcome: a
+defensible design reached by an undisclosed deviation is still an undisclosed deviation, and the next
+one may not be defensible.
+
+**The table.** `c_task_opportunity_verdicts`, ProvenanceMixin-based, recording a fact ABOUT a
+stream rather than mutating the stream or its summary. `c_session_id` and `game_task_instance_id`
+(FKs) name the target task instance — the same key `c_task_opportunity_summaries` is itself keyed
+on via `uq_c_task_opportunity_summaries_instance`, so no separate summary-id column is needed to
+identify the one wrong row; `task_index` mirrors the sibling tables' own convention.
+`validator_check` carries the specific structural check name (CONDITION 2, sourced from
+`telemetry_validation.TELEMETRY_VALIDATION_CHECKS`, the one named tuple both the raise sites and
+this write now draw from); `verdict_detail` carries the structural failure detail (CONDITION 1,
+populated verbatim from `TelemetryStreamRejectedError.detail`, which is structural-only by
+construction — check name, indices, counts — never a learner-supplied payload value).
+`supersedes_verdict_id` is a nullable, self-referential FK so a correction can itself later be
+corrected (RULING 2). Two CHECK constraints, no more: `validator_check` non-blank, and a
+self-superseding row rejected (`supersedes_verdict_id IS DISTINCT FROM
+c_task_opportunity_verdict_id`).
+
+**RULING 1 — a superseded summary refuses the WHOLE session.** The read path reuses
+`DistrustedHistoryGapError` rather than inventing a type: a superseded summary falls out of
+`derivable_indices` exactly as a missing one does, and the existing gap logic catches it. Neither
+consumer changed.
+
+The reasoning matters more than the mechanism. Converting "bad data counted as good" into "good data
+missing" IS the improvement this amendment exists to make. Skipping only the corrected task would be
+C-4 verbatim — computing over a truncated window silently weakens the safety layer. Substituting a
+replacement is not available, because this table records a fact about a stream, not a corrected
+summary. Refusal is correct, and the verdict row is what stops the resulting dataset hole being
+unexplained.
+
+**RULING 2 — the chain is graph-resolved.** Only a LIVE verdict — one nothing else supersedes —
+suppresses its target. A verdict that has itself been superseded does not. This is resolved as a
+graph, never as mere row presence, and has its own test; an untested chain would be decoration.
+
+**CONDITION 1 — `verdict_detail` records why, never the rejected values.** Exception text is not
+copied wholesale. The column carries the check name and the structural location of the failure, never
+learner-supplied payload values — the same shape as the pydantic `input_value=` leak this project
+already guards against, and a column quietly accumulating rejected payloads would be a new place
+learner data lives that nobody audited. Proven by a sentinel test: a rejected stream carrying a
+recognisable sentinel, asserting it appears in NO persisted verdict row.
+
+**CONDITION 2 — `validator_check` draws from one named tuple.** No DB-level enum, because C-9
+guarantees the check set will change and an enum would force a migration per new check. But the
+scattered string literals in `telemetry_validation.py` were consolidated into
+`TELEMETRY_VALIDATION_CHECKS`, from which both the raise sites and the verdict write now draw.
+Unconstrained AND scattered would mean a typo produces a silently-wrong verdict reason, which is the
+one failure this table exists to prevent.
+
+**THE NEGATIVE CONTROL.** A session with a summary marked superseded, driven through the REAL
+adaptation and aggregation call chains, refuses; the identical fixture MINUS the supersession row
+succeeds. Observed from outside `telemetry_validation.py`, in the adaptation and aggregation suites,
+not in a test local to the new table. If both behaved identically the table would be decoration, and
+that would have been a finding rather than something to adjust the fixture over.
+
+**HONEST LIMIT — the write path for corrections is DORMANT; its read path is LIVE.** The
+wrongly-excluded direction has a live trigger: `derive_and_persist_summary` catches
+`TelemetryStreamRejectedError`, writes the excluded verdict, and re-raises the SAME exception
+unchanged, so the existing contract is unweakened. The wrongly-PASSED direction has no live writer.
+Derivation runs once per instance at terminal-event time and nothing re-checks a persisted summary
+against a corrected validator, so a correction can only be written by a person or a future,
+separately-authorized reconciliation batch. That asymmetry is deliberate and correct: the READ path
+must honour supersession before first real data so that a correction, whenever written, actually
+changes behaviour; the WRITE stays dormant with a named trigger — discovery of a mismatch during an
+audit. Building an automatic discovery sweep is new application logic Amendment A-1 does not
+authorize.
+
+A table with a live read path and a dormant write path is exactly the shape that reads as "solved"
+later. It is not solved. It is ready.
+
+**Table count: 32 -> 33**, against the amendment's anticipated final 35 (Phase 9's `outbox_events`
+and `contract_deliveries` add the other two under Phase 9's own existing authorization).
+`EXPECTED_TABLES` updated. `BE2_BASE_TABLES` and `C3A_TABLES` correctly untouched — the first is
+scoped to BE2's own 0002 migration, the second to migration 20260816_0002's ten tables.
+
+**Migration:** `20260816_0007_batch4_task_opportunity_verdicts`, revising `20260816_0006`. One
+`create_table`, no triggers, no seed data; downgrade is a single `drop_table`.
+
+**Remains open.** Everything named open at the end of the seventh-family entry, unchanged, plus:
+whoever builds Phase 9's outbox must decide whether C->3 payload construction also consults this
+table — a superseded summary that never reaches the aggregate must not reach the payload either, and
+nothing enforces that today because the outbox does not exist yet.
+
+**Suite: 583 passed, 74 skipped, 0 failed (657 collected)**, from a rebuilt image and a single run
+against the shared database, taken once the environment was confirmed quiet (no other container
+running). Reconciles against the seventh-family batch's 575 / 74 / 649: 575 + 8 = 583, eight new
+tests, skips unchanged.
+
+Three runs preceded this number, corrected below to match what this session actually observed
+(the paragraph this replaces described a different run history, one this session cannot vouch
+for — see the CORRECTION above; this is the honest replacement, not a second guess at the same
+facts).
+
+**Run 1 — 3 failed, real bugs, in this batch's own new tests, fixed structurally.** All three
+failures were in `test_batch4_verdict_supersession.py` itself: the chain-isolation test and both
+halves of the negative control were built against `_seed_session_with_summaries` (borrowed from
+the adaptation suite), which persists `CTaskOpportunitySummaryRecord` rows directly with no backing
+`c_gameplay_events` — breaking two things this batch's own claims depend on: the guarded accessor's
+own gap logic (`has_terminal_for_instance` needs a real terminal event to distinguish "suppressed"
+from "never started"), and the real aggregation call chain (`derive_session_aggregate` refuses a
+truly empty event stream, its own pinned precondition, unrelated to this table). Fixed by rebuilding
+the shared fixture to drive two REAL, fully completed tasks — the second via a genuine second
+`TaskService.next_task` call against the same session — through real event writes and real
+`derive_and_persist_summary` calls, never a hand-built summary row. No assertion was loosened; the
+fixture was made to match what the claims already required.
+
+**Run 2 — 4 failed, environment, not code.** `test_be4b_adaptive_selection`,
+`test_be4c_attempt_submission`, and `test_be4d_hint_events` (two tests) — none touched by this
+batch's own diff — each failed on `alembic upgrade head` with `duplicate key value violates unique
+constraint "pg_type_typname_nsp_index"`, the exact signature of two migration sequences racing the
+same database. Investigating found a LIVE, unprompted `pytest -q --no-header -rf` process (different
+flags from this session's own `pytest -q`) against the same shared Postgres container — a second
+authoring session working the identical ratified proposal concurrently in this same, non-isolated
+working tree (the source of the CORRECTION above). This session had already force-removed one
+stale, seemingly-orphaned API container before this run, believing it was leftover from its own
+prior invocation; in hindsight that container almost certainly belonged to the other session, and
+killing it mid-transaction is the more likely proximate cause of this run's corruption than the
+live process discovered afterward. Neither the database container nor its volume was reset in
+response — the other session's own container was left alone, and this session waited for it to
+exit on its own before touching the environment again.
+
+**Run 3 — clean, alone, the number of record.** Confirmed no other container running, then ran
+once: 583 passed, 74 skipped, 0 failed.
+
+Recorded because the diagnosis, not the conclusion, is the reusable part: a shared, non-isolated
+working tree can carry a second live session's edits and processes invisibly, and the
+`pg_type_typname_nsp_index` collision is a state signal, not a code signal — the constraint being
+violated is load-bearing and must not be relaxed to make the suite quiet.
