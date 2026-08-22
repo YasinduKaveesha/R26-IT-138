@@ -9,6 +9,8 @@ three). See that fixture's own header for what it proves and does not prove.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -37,6 +39,10 @@ CATALOGUE_PATH = f"{FIXTURE_DIR}/test_catalogue_c.md"
 VALID_UNAPPROVED_BUNDLE = f"{FIXTURE_DIR}/valid_unapproved_bundle_c.json"
 MISSING_FIELD_BUNDLE = f"{FIXTURE_DIR}/missing_field_bundle_c.json"
 BAD_CHECKSUM_BUNDLE = f"{FIXTURE_DIR}/bad_checksum_bundle_c.json"
+# Phase 6b (see test_c4b_routes_and_bundle_config.py's own header for why it exists): every
+# per-field status APPROVED, TEST-ONLY. Named here (R0-d) only to couple its recorded generator
+# checksum to the wheel on disk -- this file does not otherwise exercise it.
+ALL_USABLE_BUNDLE = f"{FIXTURE_DIR}/all_usable_for_tests_bundle_c.json"
 
 # Recorded once here from the disclaimer-header fixture on disk; the loader/checksum tests below
 # re-derive it live rather than trusting this constant, so this is documentation, not the signal.
@@ -331,3 +337,73 @@ def test_c2_migration_creates_only_the_runtime_bundle_table() -> None:
     assert "bulk_insert" not in lowered
     assert "component_c_generator" not in lowered
     assert "yass" not in lowered
+
+
+# ---------------------------------------------------------------------------
+# R0-d (Component_C_9b_9c_And_Generator_Plan_v1.0.md) -- couple each C runtime-bundle fixture's
+# recorded generator checksum to the sha256 of the wheel its own source_path names. Before this
+# test, that coupling was enforced only at RUNTIME, by
+# app.infrastructure.runtime_bundle_c.loader.CRuntimeBundleLoader raising
+# RuntimeBundleChecksumMismatchError during an in-image run -- which is exactly how the
+# validators batch discovered it had missed updating the C-side fixtures after a wheel rebuild
+# (buildLog1.md's "A cascade the plan missed surfaced here" paragraph, VALIDATORS BATCH entry).
+# Nothing previously asserted this at test-collection time, ahead of a real load.
+# ---------------------------------------------------------------------------
+
+_FIXTURES_EXPECTED_TO_MATCH_THE_WHEEL = (
+    VALID_UNAPPROVED_BUNDLE,
+    MISSING_FIELD_BUNDLE,
+    ALL_USABLE_BUNDLE,
+)
+
+
+@pytest.mark.parametrize("fixture_path", _FIXTURES_EXPECTED_TO_MATCH_THE_WHEEL)
+def test_fixture_generator_checksum_matches_wheel_on_disk(fixture_path: str) -> None:
+    """SIGNAL: this fixture's generator.checksum.value equals the live-computed sha256 of the
+    wheel file named at generator.source_path -- read from the fixture and the wheel on disk,
+    never the manifest, so this is an independent cross-check rather than the same comparison the
+    manifest's own T5-host test already makes. Would FAIL if a fixture's recorded checksum went
+    stale after a wheel rebuild (this plan's G2 or 9b-0) without every fixture being updated in
+    lockstep -- exactly the gap the validators batch found missing for the C-side fixtures.
+    bad_checksum_bundle_c.json is deliberately excluded from this parametrization; see
+    test_bad_checksum_fixture_is_deliberately_wrong_not_stale below for why."""
+    with open(fixture_path, encoding="utf-8") as f:
+        bundle = json.load(f)
+    generator = bundle["generator"]
+    wheel_path = Path(generator["source_path"])
+    assert wheel_path.is_file(), f"{fixture_path}: wheel not found at {wheel_path}"
+    actual_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+    assert generator["checksum"]["algorithm"] == "sha256"
+    assert generator["checksum"]["value"] == actual_sha256, (
+        fixture_path,
+        "recorded",
+        generator["checksum"]["value"],
+        "actual",
+        actual_sha256,
+    )
+
+
+def test_bad_checksum_fixture_is_deliberately_wrong_not_stale() -> None:
+    """SIGNAL: bad_checksum_bundle_c.json's generator.checksum.value is (a) the deliberate
+    all-'f' constant this fixture was built with and (b) NOT equal to the real wheel's sha256.
+    This is the one fixture R0-d must NOT assert matches the wheel -- it exists so
+    CRuntimeBundleLoader has a real mismatch to reject (see
+    test_bundle_checksum_mismatch_produces_409_with_request_id_via_real_error_handlers and
+    test_resolve_c_bundle_and_catalogue_raises_conflict_error_directly above, both of which
+    depend on this fixture staying wrong). Asserting it here, rather than simply omitting it from
+    the parametrized test above, means a future editor who runs a blanket 'sync all fixture
+    checksums to the wheel' pass gets a red test instead of silently deleting the negative
+    control."""
+    with open(BAD_CHECKSUM_BUNDLE, encoding="utf-8") as f:
+        bundle = json.load(f)
+    generator = bundle["generator"]
+    wheel_path = Path(generator["source_path"])
+    assert wheel_path.is_file()
+    actual_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+
+    recorded = generator["checksum"]["value"]
+    assert len(recorded) == 64 and set(recorded) == {"f"}, (
+        "bad_checksum_bundle_c.json's checksum must stay the deliberate all-f value",
+        recorded,
+    )
+    assert recorded != actual_sha256, "bad_checksum_bundle_c.json's checksum must stay wrong"

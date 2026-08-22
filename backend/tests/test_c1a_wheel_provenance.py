@@ -185,10 +185,18 @@ VERBATIM_64 = (
 )
 assert len(VERBATIM_64) == 64
 
-# COR-2's five Phase 1 pin locations, minus requirements.lock (moved to its own always-runs test,
-# test_requirements_lock_hash_matches_wheel_on_disk, since requirements.lock IS COPYd into the
-# image -- Dockerfile line 18 -- so gating it behind the host-checkout skip would hide a real,
-# in-container-checkable signal). The remaining four are still genuinely absent in-container.
+# COR-2's original five Phase 1 batch 1a pin-DECLARATION locations (requirements.in,
+# requirements.lock, Dockerfile, .dockerignore, this manifest), minus requirements.lock (moved to
+# its own always-runs test, test_requirements_lock_hash_matches_wheel_on_disk, since
+# requirements.lock IS COPYd into the image -- Dockerfile line 18 -- so gating it behind the
+# host-checkout skip would hide a real, in-container-checkable signal). The remaining four are
+# still genuinely absent in-container. NOTE (R0-b, Component_C_9b_9c_And_Generator_Plan_v1.0.md):
+# these five were never the whole count -- the manifest's own cor_2_five_pin_locations block was
+# corrected to 9, adding the four tests/fixtures/runtime_bundle_c/*.json locations, which are
+# covered by a separate test (test_fixture_generator_checksum_matches_wheel_on_disk and
+# test_bad_checksum_fixture_is_deliberately_wrong_not_stale in
+# test_c2_catalogue_and_runtime_bundle.py), not this file. This list stays five entries
+# deliberately: it is the file-declaration subset, not the full pin-location count.
 HOST_ONLY_PIN_LOCATIONS = (
     ("requirements.in", "filename"),
     ("Dockerfile", "filename"),
@@ -229,6 +237,49 @@ def test_verbatim_file_matches_source_manifest_sha256(rel_path: str) -> None:
     assert packaged_file.is_file(), f"{rel_path} listed in SOURCE_MANIFEST.txt but missing on disk"
     actual = hashlib.sha256(packaged_file.read_bytes()).hexdigest()
     assert actual == entries[rel_path], (rel_path, actual, entries[rel_path])
+
+
+# ---------------------------------------------------------------------------
+# R0-c (Component_C_9b_9c_And_Generator_Plan_v1.0.md) -- SOURCE_MANIFEST.txt's algorithm
+# recomputed live and compared against component-c-live-engine-manifest.json's recorded
+# package_source_manifest.sha256/file_count. COMPUTED, not asserted -- reuses B's own
+# implementation directly (tests/test_validators_batch.py:84-112,
+# test_b_source_manifest_recomputed_matches_recorded_hash_and_count), same algorithm, same shape.
+# Before this test, only B had one; nothing would go red if C's package_source_manifest fields
+# went stale, and both upcoming wheel rebuilds (this plan's G2 and 9b-0) change C's file
+# inventory. HOST-CHECKOUT ONLY, same split as T1 above.
+# ---------------------------------------------------------------------------
+def test_c_source_manifest_recomputed_matches_recorded_hash_and_count() -> None:
+    """SIGNAL: re-running the manifest's own documented algorithm (SHA-256 of UTF-8 lines
+    '<package-relative-posix-path>\\t<lowercase-sha256-of-file-bytes-as-shipped>\\n', one line per
+    *.py file under packaging/component_c_internal excluding build/ and *.egg-info/, sorted by
+    path) against the real files on disk produces the exact sha256 and file_count
+    component-c-live-engine-manifest.json's package_source_manifest records, and that
+    SOURCE_MANIFEST.txt on disk equals the recomputed content exactly. Would FAIL if a file were
+    added/removed/edited under packaging/component_c_internal without regenerating
+    SOURCE_MANIFEST.txt, or if the manifest's recorded hash/count went stale -- the exact gap a
+    wheel rebuild that changes C's file inventory (9b-0's emit.py addition, or G2's re-pin) would
+    otherwise open silently."""
+    if not _HOST_CHECKOUT_AVAILABLE:
+        pytest.skip(_HOST_CHECKOUT_SKIP_REASON)
+
+    lines: list[tuple[str, str]] = []
+    for path in PACKAGING_ROOT.rglob("*.py"):
+        if "build" in path.relative_to(PACKAGING_ROOT).parts:
+            continue
+        if any(part.endswith(".egg-info") for part in path.relative_to(PACKAGING_ROOT).parts):
+            continue
+        rel = path.relative_to(PACKAGING_ROOT).as_posix()
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        lines.append((rel, digest))
+    lines.sort(key=lambda pair: pair[0])
+    content = "".join(f"{path}\t{digest}\n" for path, digest in lines)
+    computed_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    manifest = json.loads(C_MANIFEST_PATH.read_text(encoding="utf-8"))
+    assert computed_sha256 == manifest["package_source_manifest"]["sha256"]
+    assert len(lines) == manifest["package_source_manifest"]["file_count"]
+    assert SOURCE_MANIFEST_PATH.read_text(encoding="utf-8") == content
 
 
 # ---------------------------------------------------------------------------

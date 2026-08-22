@@ -7454,3 +7454,168 @@ Recorded because the diagnosis, not the conclusion, is the reusable part: a shar
 working tree can carry a second live session's edits and processes invisibly, and the
 `pg_type_typname_nsp_index` collision is a state signal, not a code signal — the constraint being
 violated is load-bearing and must not be relaxed to make the suite quiet.
+
+## 2026-08-20 — R0: prerequisites for both upcoming wheel rebuilds
+
+`Component_C_9b_9c_And_Generator_Plan_v1.0.md`'s R0 batch. Four gaps found during planning, each
+one that would otherwise be hit twice — once per rebuild (G2's re-pin, 9b-0's `emit.py` rebuild).
+STOP-CHECK held: HEAD `5a3a4db4b8cc5b1d0ac46f96ceb50c2b3930a626`, branch `C_backend`, clean tree,
+baseline 583 passed / 74 skipped / 0 failed / 657 collected, confirmed before any edit. No wheel
+rebuilt into the repo, no pin moved, no version bumped, no `app/` behaviour changed, no 9b/9c work
+touched.
+
+**R0-a — the docker run wrapper, committed and runnable, and the reproducibility finding.**
+`provenance/component-c-live-engine-manifest.json`'s `package.build_command` documented the INNER
+command; the OUTER `docker run` wrapper — the base image by digest, the read-only `/src` mount,
+the copy to a writable `/build_src`, the `/dist` bind mount — existed only as prose at this file's
+own "Real build." paragraph (2026-08-15 entry above) and had been reconstructed by hand for every
+rebuild since. `backend/scripts/build_component_c_wheel.py` is that wrapper now: it refuses any
+`--outdir` that resolves inside the repository (explicitly including
+`backend/provenance/wheels/`), builds inside
+`python:3.11.15-slim-bookworm@sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba`
+with the pinned `setuptools==80.10.2 wheel==0.46.3 build==1.2.2.post1`, and prints a sha256
+comparison against the currently-committed wheel.
+
+Run once, to a scratch directory outside the repo (this session's `AppData\Local\Temp` scratchpad,
+never committed): the build succeeded — 69 archive entries, `top_level.txt` correct — but the
+result is **NOT byte-identical** to the committed
+`prabathi_component_c_live_engine-0.1.0+c2.09267ab-py3-none-any.whl`. Committed sha256
+`62b85a051733b00f16791a04c019a229924bbae0144de3441c27666eff3c3b39`; this rebuild's sha256
+`4f80e99ae2a90216a390ca02a664e8abaa3490e77c1cf42b207ea4172ad23ccd`.
+
+Investigated rather than left at that. Entry-by-entry comparison of the two `.whl` zip archives
+(same 69 names, same order, same sizes) found **zero content differences** — every one of the 69
+files' bytes hashes identically between the committed wheel and the fresh rebuild. The only
+difference across the whole archive is the per-entry embedded timestamp, on all 69 entries. This
+is the byte-identity claim's real strength, stated precisely: the *package contents* reproduce
+exactly; the *zip container* does not, because of timestamp non-determinism in how `wheel`/
+`setuptools` stamp entries.
+
+Tested `SOURCE_DATE_EPOCH` as the standard remedy, twice, against the committed wheel's own
+embedded timestamps (`2026-08-16 14:00:00` on the 65 source-copied entries, `2026-08-16 14:00:18`
+on the 4 freshly-generated `dist-info/*` entries — an 18-second gap between the two groups).
+Setting `SOURCE_DATE_EPOCH=1786888800` (`14:00:00`) made the 65 source entries match the committed
+wheel exactly and left only the 4 `dist-info/*` entries different (at `14:00:00` instead of
+`14:00:18`). Setting `SOURCE_DATE_EPOCH=1786888818` (`14:00:18`) flipped it: the 4 `dist-info/*`
+entries matched exactly and the 65 source entries differed (at `14:00:18` instead of `14:00:00`).
+No single `SOURCE_DATE_EPOCH` value reproduces the committed wheel's own two-group timestamp
+pattern, because a `SOURCE_DATE_EPOCH`-driven build stamps every entry — copied and generated
+alike — with the *same* value; the committed wheel's two different embedded timestamps are the
+signature of a build that did **not** set `SOURCE_DATE_EPOCH` at all (copied files keep their
+on-disk mtime, freshly-generated `dist-info/*` files get the real wall-clock moment they were
+written, 18 seconds into that specific historical build). That means the committed wheel is not
+itself byte-reproducible even in principle from source alone — reproducing it exactly would
+require knowing the original build's real wall-clock start time to the second, which is not
+recorded anywhere.
+
+**The finding, stated plainly:** this wheel is reproducible at the file-content level (verified,
+zero differences across all 69 entries in three separate rebuild attempts) and is **not**
+byte-identical at the archive level, because the original 2026-08-15 build was not built with
+`SOURCE_DATE_EPOCH` set and therefore embeds two different non-deterministic timestamp sources
+into the same archive. Going forward, setting `SOURCE_DATE_EPOCH` (to a fixed reference such as
+the pinned commit's date) would make *future* rebuilds byte-identical *to each other*, but cannot
+retroactively reproduce *this specific* committed artefact's exact bytes. No recorded checksum was
+adjusted and the committed wheel was not touched or replaced; this is a finding about how strong
+the provenance chain's byte-identity claim actually is, not a defect fixed by editing a hash.
+
+**How `requirements.lock` is regenerated — documented because nothing else does.** `pip-compile`
+appears nowhere in this repository (confirmed by grep). Every re-pin to date has hand-edited
+exactly the two-line `./provenance/wheels/<filename>.whl` + `--hash=sha256:<value>` block for the
+wheel(s) that moved: `git show ce00274 -- requirements.lock` (the validators batch) touches 4
+lines total (4 insertions / 4 deletions) across the whole file — the B and C path+hash pairs,
+nothing else. A `pip-compile` regeneration would touch far more (ordering, comment headers, often
+transitive hash sets) even for a one-line semantic change. This is recorded as an undocumented
+manual step, not fixed — an undocumented manual step is worse than a documented one, and now it is
+documented, in `scripts/build_component_c_wheel.py`'s own docstring and here.
+
+**R0-b — the stale pin-location count, corrected.** `component-c-live-engine-manifest.json`'s
+`cor_2_five_pin_locations` said `count: 5`: `requirements.in`, `requirements.lock`, `Dockerfile`,
+`.dockerignore`, the manifest itself — reasoned in `why_not_eight` as correct because Component
+C's own runtime-bundle chain did not exist yet at Phase 1 batch 1a. Verified this batch by
+grepping the whole repository for every file referencing the wheel by exact filename or checksum:
+**nine** files record the pin today, those five plus the four
+`tests/fixtures/runtime_bundle_c/*.json` fixtures — `valid_unapproved_bundle_c.json`,
+`missing_field_bundle_c.json`, `bad_checksum_bundle_c.json`, `all_usable_for_tests_bundle_c.json`
+— each carrying the wheel's exact filename in `generator.source_path` and its sha256 in
+`generator.checksum.value`. It went stale because Phase 2 (2026-08-16, "Catalogue loader and
+runtime bundle") built three of those fixtures and Phase 6b added the fourth, each meeting exactly
+the condition `why_not_eight` named as the reason the count would grow — and nothing revisited the
+block when they landed. `bad_checksum_bundle_c.json` is counted as the ninth location despite
+carrying a deliberately wrong `ffff…` checksum: the property this count tracks is recording the
+wheel by exact filename, which that fixture still does correctly, and its checksum must stay
+wrong (see R0-d below). No tenth location was found — `test_c1a_wheel_provenance.py` and
+`test_validators_batch.py` (both verification code reading the pin locations, not independent pin
+declarations), `buildLog1.md` (a historical log), `adapter.py`/`persistence_models.py`/the C2
+migration (docstrings naming only the distribution, never a version), C's own `pyproject.toml`/
+`IMPORT_POLICY.md`, and the wheel binaries themselves were all checked and excluded, each with the
+reason recorded in the manifest's new `correction_note_R0_B` field. The manifest's `count`,
+`locations`, and reasoning were corrected together; `why_not_eight` is kept verbatim, marked
+HISTORICAL, per this file's own correction convention — not silently overwritten.
+
+*Also recorded, not corrected:* `backend/requirements.txt` is confirmed stale legacy — pins
+Component B at `0.1.0+be3.0e86fdc` with no Component C entry at all — and confirmed not installed
+by `Dockerfile`, which `COPY`s and installs only `requirements.lock`. Inert today, but a trap for
+a future pin sweep that assumes every `requirements*` file is current. Left untouched, not
+deleted, per instruction.
+
+**R0-c — C's manifest-recompute test, added.** `test_c_source_manifest_recomputed_matches_recorded_hash_and_count`
+in `tests/test_c1a_wheel_provenance.py`, placed immediately after T1, reusing
+`test_validators_batch.py`'s B-side implementation directly — same algorithm (SHA-256 of UTF-8
+lines `<path>\t<sha256-of-bytes>\n`, one line per `*.py` file under `packaging/component_c_internal`
+excluding `build/`/`*.egg-info/`, sorted by path), same shape, no second approach invented.
+Host-checkout-only, gated on the file's own `_HOST_CHECKOUT_AVAILABLE`, same split as T1 — skips
+in-container with the same reason, since `packaging/` is `.dockerignore`'d. Verified by hand
+before wiring it in (computed sha256 and file_count both matched the manifest's recorded values,
+`SOURCE_MANIFEST.txt` matched the recomputed content exactly) and confirmed it actually executes
+(not merely skips) by bind-mounting the full host tree over the built image and running it alone:
+**1 passed**. What it would have caught: neither of the two upcoming rebuilds (G2's re-pin,
+9b-0's `emit.py` addition, which by itself moves `file_count` 65 -> 66) had any test that would go
+red if `package_source_manifest.sha256`/`file_count` went stale relative to the files actually on
+disk — only B had this check before.
+
+**R0-d — the fixture-checksum coupling test, added.** Two tests in
+`tests/test_c2_catalogue_and_runtime_bundle.py`, the file that already owns Component C's
+runtime-bundle-chain fixtures: `test_fixture_generator_checksum_matches_wheel_on_disk`
+(parametrized over `valid_unapproved_bundle_c.json`, `missing_field_bundle_c.json`,
+`all_usable_for_tests_bundle_c.json` — reads each fixture's `generator.source_path`, hashes the
+wheel file it names, asserts the live sha256 equals `generator.checksum.value`) and
+`test_bad_checksum_fixture_is_deliberately_wrong_not_stale` (asserts `bad_checksum_bundle_c.json`'s
+checksum is the deliberate all-`f` constant AND does not match the real wheel — proving the
+mismatch is by design, not staleness, so a future blanket "sync all fixture checksums" pass fails
+loudly instead of silently deleting the negative control). Before this batch, that coupling was
+enforced only at runtime, by `runtime_bundle_c/loader.py`'s `RuntimeBundleChecksumMismatchError` —
+which is exactly how the validators batch discovered it had missed updating the C-side fixtures
+after a wheel rebuild (`buildLog1.md`'s "A cascade the plan missed surfaced here" paragraph).
+Nothing previously asserted this at collection time, ahead of a real load. Verified the assertion
+logic by hand against the real fixtures and wheel before wiring it in: all three positive fixtures
+matched the real wheel's sha256
+(`62b85a051733b00f16791a04c019a229924bbae0144de3441c27666eff3c3b39`); the bad-checksum fixture's
+recorded value was confirmed both all-`f` and unequal to the real wheel's hash.
+
+**Verification.** `docker compose -f compose.yaml down -v`, `docker compose -f compose.yaml build
+api` (clean build), then `docker compose -f compose.yaml run --rm api python -m pytest -q` once,
+alone, against a fresh volume: **587 passed, 75 skipped, 0 failed, 1 warning (662 collected)**.
+Reconciles against the 583 / 74 / 657 baseline: five new tests total (R0-c's one host-only test +
+R0-d's four), `583 + 4 = 587` passed (the four R0-d tests, which run for real in-container — the
+wheel and fixture JSONs are both `COPY`'d into the image), `74 + 1 = 75` skipped (R0-c's host-only
+test, correctly absent from the image's `packaging/` tree), `657 + 5 = 662` collected. The one
+warning is the pre-existing, unrelated `httpx`/`starlette.testclient` deprecation notice, unchanged
+from prior runs. No existing test weakened, skipped, or modified.
+
+**Files created:** `backend/scripts/build_component_c_wheel.py`. **Files modified:**
+`backend/provenance/component-c-live-engine-manifest.json` (`cor_2_five_pin_locations` corrected,
+`correction_note_R0_B` added), `backend/tests/test_c1a_wheel_provenance.py` (R0-c test added, the
+pre-existing `HOST_ONLY_PIN_LOCATIONS` comment annotated to point at the corrected count so it
+isn't read as still saying five is the total), `backend/tests/test_c2_catalogue_and_runtime_bundle.py`
+(R0-d tests added, `ALL_USABLE_BUNDLE` constant added), `backend/buildLog1.md` (this entry). No
+wheel rebuilt into the repository, no pin moved, no version bumped, no file under `backend/app/`
+touched, no frontend file, no migration, no new table, no 9b/9c work touched, no threshold or gate
+weakened, no approval/approver/role/date/signature/scientific-decision recorded anywhere in this
+batch's changes.
+
+**Remains open.** The reproducibility gap itself (R0-a's finding) is not fixed — fixing it would
+mean deciding whether to set `SOURCE_DATE_EPOCH` for future builds (and to what value) and is a
+build-process decision for the owner, not something this batch adjudicates. `requirements.txt`'s
+staleness is recorded, not resolved — deletion was left to the owner rather than assumed. Both
+upcoming rebuilds (G2, 9b-0) still need to update all nine pin locations atomically per the
+corrected count, not the stale five.
