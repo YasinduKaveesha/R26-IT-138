@@ -748,6 +748,126 @@ def test_adapter_references_no_seed_derivation_symbol() -> None:
 
 
 # =====================================================================================
+# 9c-0 (Component_C_9b_9c_And_Generator_Plan_v1.0 "9c-0 -- resolve the identifier question
+# FIRST") -- the identifier-derivation prohibition, as an allow-listed AST guard over the
+# WHOLE application tree, not just live_engine_c/. The determination (D1): student_number()
+# is sha256(learner_id) % 10_000 (app/application/opportunity_selection.py:151-154); derived
+# ids in that 10,000-wide space collide at roughly 50% by ~118 learners and ~12% by 50,
+# while assigned ids in the same space collide at zero -- the space is not the defect,
+# deriving into it is. Outbound student_id (the frozen C->3 contract's ^STU-[0-9]{4}$,
+# models.contracts.StudentId) must come from the shared intervention-session mapping --
+# assigned and recorded, never derived from this function. The contract's own ID-05
+# invariant (_student_prefix(identifier) != student_id, contracts.py:26-27,96-107) is a
+# prefix-consistency check, not a uniqueness check, so it cannot catch a derived-id
+# collision -- this guard has to exist in code because the frozen contract offers no
+# defence.
+#
+# The trap (D2), named as a prohibition, not an omission: package_student_id() already
+# returns exactly ^STU-[0-9]{4}$ -- the same shape the C->3 contract's student_id wants.
+# Reusing it for an outbound payload is one line, looks correct, passes the contract's own
+# regex AND ID-05 cleanly, and silently merges two learners who happen to derive the same
+# 4-digit number. That collision is invisible to every frozen validator.
+#
+# Scope of the allow-list, deliberately over app/ as a whole rather than only
+# live_engine_c/: the next batch this feeds (9c-1's shared outbox/contract-delivery
+# tables) is explicitly shared B/C infrastructure and will NOT live under live_engine_c/,
+# which is C-specific. A guard scoped only to live_engine_c/ would go green while staying
+# silent about exactly the layer -- the outbox, wherever 9c-1 places it, or 9b-1's emission
+# surface, or the route layer -- where a 4-digit key is most tempting to reach for as a
+# shard/route key. Scanning the whole app/ tree with an explicit two-file allow-list covers
+# all of those regardless of where they land.
+# =====================================================================================
+
+_PROHIBITED_IDENTITY_DERIVATION_SYMBOLS = frozenset(
+    {"student_number", "package_student_id", "package_item_opportunity_id"}
+)
+
+# Every file under app/ that may reference the three symbols above -- exactly these two,
+# no others. A third entry may only be added by a batch that justifies the new consumer
+# in the same change as the allow-list edit (see buildLog1.md's 9c-0 entry, "Remains
+# open" -- 9b-1 and 9c-1 are named as the batches expected to next add code this guard
+# covers). Never widen this set just to make a red run green.
+_IDENTITY_DERIVATION_ALLOWED_FILES = frozenset(
+    {
+        # The definition site: student_number(), package_item_opportunity_id(),
+        # package_student_id() are all defined here.
+        Path("app/application/opportunity_selection.py"),
+        # The one legitimate consumer: package_student_id() -> SkillMasteryUpdate.student_id
+        # (session_completion.py:424), which stays internal storage (SessionAggregateResultRecord
+        # via adapter.aggregate_session) and reaches no outbound contract today.
+        Path("app/application/session_completion.py"),
+    }
+)
+
+
+def _symbols_referenced_in(tree: ast.AST, symbols: frozenset[str]) -> set[str]:
+    """Shared by the real guard and its negative control, so the two can never drift apart --
+    unlike the seed-derivation precedent above, which hand-writes its AST walk inline in both
+    places. Matches ast.Import / ast.ImportFrom / ast.Attribute / ast.Name exactly as that
+    precedent does; never a text search, so a docstring naming these symbols in prose (as this
+    very block does, repeatedly, above) cannot trip it."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            found |= {alias.name for alias in node.names} & symbols
+        elif isinstance(node, ast.Import):
+            found |= {alias.name.split(".")[-1] for alias in node.names} & symbols
+        elif isinstance(node, ast.Attribute) and node.attr in symbols:
+            found.add(node.attr)
+        elif isinstance(node, ast.Name) and node.id in symbols:
+            found.add(node.id)
+    return found
+
+
+def test_identity_derivation_symbols_confined_to_allowed_files() -> None:
+    """SIGNAL (D1/D2/D3): asserts student_number, package_student_id and
+    package_item_opportunity_id are referenced -- as an import, an attribute access, or a bare
+    name -- in NO file under app/ except the two files in
+    _IDENTITY_DERIVATION_ALLOWED_FILES. Scans the whole app/ tree (rglob), not just
+    live_engine_c/, because the outbound-contract paths this prohibition protects (9c-1's shared
+    outbox, 9b-1's emission surface, the route layer) are not guaranteed to live under
+    live_engine_c/ -- 9c-1's outbox is explicitly shared B/C infrastructure and will not.
+    Non-vacuity: asserts app/ resolves and the scanned file set is non-empty (83 files at this
+    commit, not pinned exactly so the guard does not go red on every new module). Would FAIL if
+    any third file anywhere under app/ started referencing any of the three symbols -- e.g. a
+    future outbox/routing module reaching for the 4-digit derivation as a shard or delivery key
+    -- forcing that addition through an explicit, reviewed allow-list edit instead of silently
+    passing."""
+    app_root = Path("app")
+    assert app_root.is_dir()
+    scanned_files = sorted(app_root.rglob("*.py"))
+    assert scanned_files, "no *.py files found under app/ -- scan set degraded to a no-op"
+
+    violations: dict[Path, set[str]] = {}
+    for path in scanned_files:
+        relative = path.relative_to(".") if path.is_absolute() else path
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        found = _symbols_referenced_in(tree, _PROHIBITED_IDENTITY_DERIVATION_SYMBOLS)
+        if found and relative not in _IDENTITY_DERIVATION_ALLOWED_FILES:
+            violations[relative] = found
+
+    assert not violations, violations
+
+
+def test_identity_derivation_guard_negative_control_catches_synthetic_violation() -> None:
+    """POSITIVE PROOF the confinement guard above does real work, not merely observing that no
+    file happens to violate it. Parses SYNTHETIC, in-memory module source -- never a file under
+    app/, which would be a real boundary breach waiting to be committed by accident -- and
+    asserts _symbols_referenced_in (the SAME helper the real test above uses, so this cannot
+    silently drift from what it validates) actually fires on it. Would FAIL if the detection
+    logic stopped recognising a known-bad reference to package_student_id."""
+    violating_source = (
+        "from app.application.opportunity_selection import package_student_id\n"
+        "\n"
+        "def build_outbound_payload(learner_id):\n"
+        "    return package_student_id(learner_id)\n"
+    )
+    violating_tree = ast.parse(violating_source, filename="<synthetic-identity-derivation-violation>")
+    found = _symbols_referenced_in(violating_tree, _PROHIBITED_IDENTITY_DERIVATION_SYMBOLS)
+    assert found == {"package_student_id"}, found
+
+
+# =====================================================================================
 # Phase 1 batch 1b — no domain config field may carry a default (G1: a default on a config
 # field is a recorded threshold). Asserted structurally, not reviewed.
 # =====================================================================================

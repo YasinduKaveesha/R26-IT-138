@@ -7619,3 +7619,123 @@ build-process decision for the owner, not something this batch adjudicates. `req
 staleness is recorded, not resolved — deletion was left to the owner rather than assumed. Both
 upcoming rebuilds (G2, 9b-0) still need to update all nine pin locations atomically per the
 corrected count, not the stale five.
+
+---
+
+## 2026-08-22 — 9c-0: the identifier determination, written down
+
+**Why.** Per `Component_C_9b_9c_And_Generator_Plan_v1.0.md`'s "9c-0 — resolve the identifier
+question FIRST (condition 3)," the outbound `student_id` question must be settled and recorded
+*before* 9c-1 designs the outbox tables, not alongside them. This batch answers Component B's
+binding condition 3 without touching any Component B file, which also satisfies condition 5.
+
+**D1 — the determination.** `student_number(learner_id)` (`app/application/
+opportunity_selection.py:151-154`) is `sha256(str(learner_id)) % 10_000`. Outbound `student_id`
+(the frozen C→3 contract's `^STU-[0-9]{4}$`, `models.contracts.StudentId`) **must not** be carried
+from `student_number()` or either identifier derived from it. It must come from the shared
+`SharedInterventionSessionMapping` — assigned and recorded, never derived. The arithmetic that
+binds this: derived ids drawn from a 10,000-wide space collide at roughly 50% by ~118 learners and
+~12% by 50 (birthday-bound approximation); assigned ids in the same space collide at zero, because
+assignment is a bijection enforced at write time, not a hash with a fixed modulus. **The
+10,000-wide space itself is not the defect — the frozen contract owns that shape
+(`Yass/Implementation_v1.0/models/contracts.py:8`) — deriving an outbound identity into it is.**
+The contract's own `ID-05` invariant (`contracts.py:96-107`, `_student_prefix` at `:26-27`) is a
+**prefix-consistency** check, not a uniqueness check — two learners colliding on `STU-0042` would
+produce internally consistent mapping rows, session ids and payloads that pass `ID-05` and every
+other frozen validator cleanly. The contract offers no defence against a derived-id collision,
+which is why this had to be enforced in code, not only in prose.
+
+**D2 — the trap, named as a prohibition.** `package_student_id()` (`opportunity_selection.py:
+167-173`) already returns exactly `^STU-[0-9]{4}$` — the same shape the C→3 contract's
+`student_id` wants. Reusing it for an outbound payload is one line, looks correct, passes the
+contract's regex and `ID-05` cleanly, and silently merges two learners who happen to derive the
+same 4-digit number — a collision invisible to every frozen validator, per D1. This generalises
+the precedent already established for B's mastery payload: `_to_pkg_mastery_payload`
+(`app/infrastructure/live_engine_c/adapter.py:676`) already takes its three `mastery_source_*`
+identity fields from its caller and documents that it "never derives or invents them from C's own
+identifiers (G3)." 9c-0 writes the same rule down for C's own outbound `student_id`, not a new
+one.
+
+**D3 — the executable guard.** Added to `backend/tests/test_be2_architecture_guards.py` (no new
+test file), following the seed-derivation guard's established AST-symbol-reference template
+(`_PROHIBITED_SEED_DERIVATION_SYMBOLS` / `test_adapter_references_no_seed_derivation_symbol`,
+lines 712-747), improved on one point: the AST walk is factored into a single shared
+`_symbols_referenced_in()` helper used by both the real guard and its negative control, so the two
+cannot drift apart the way the precedent's two hand-written inline walks in principle could.
+
+Scope was widened during supervisor review from the three `live_engine_c/` directories (the
+original fixed parameter) to an allow-list over the **whole `app/` tree**: 9c-1's shared outbox is
+explicitly shared B/C infrastructure and will not live under `live_engine_c/` (C-specific), so a
+guard scoped only there would go green while staying silent about exactly the layer — the outbox
+wherever 9c-1 places it, 9b-1's emission surface, or the route layer — where a 4-digit derived key
+is most tempting to reach for as a shard or delivery key. The final guard (`test_
+identity_derivation_symbols_confined_to_allowed_files`) scans every `*.py` under `app/` (rglob)
+and asserts `student_number`, `package_student_id` and `package_item_opportunity_id` are
+referenced — as an import, attribute access, or bare name, via `ast.Import`/`ast.ImportFrom`/
+`ast.Attribute`/`ast.Name`, never a text search — in no file except an explicit two-entry
+allow-list: `app/application/opportunity_selection.py` (the definition site) and `app/application/
+session_completion.py` (the one legitimate consumer — `package_student_id` →
+`SkillMasteryUpdate.student_id` → `adapter.aggregate_session` → `SessionAggregateResultRecord`,
+internal storage, reaching no outbound contract today).
+
+Non-vacuity, verified independently (not taken on the supervisor's word): 83 `*.py` files resolve
+under `app/` at this commit; the guard asserts this set non-empty and `app/` a real directory,
+without pinning the count exactly, so it will not go red on ordinary growth. Across all 83, exactly
+the two allow-listed files reference the three symbols; zero others do — confirmed by an
+independent local dry-run of the identical scan logic before relying on the docker run.
+
+**Negative control** (`test_identity_derivation_guard_negative_control_catches_synthetic_
+violation`), matching this file's own convention (every guard here has a paired synthetic-
+violation test, e.g. lines 521, 662, 877, 974): parses in-memory synthetic source calling
+`package_student_id` from a mock "outbound payload builder," never a real file under `app/`, and
+asserts the shared `_symbols_referenced_in()` helper fires on it. Demonstrated for real (not
+claimed) with a standalone run inside the built container reproducing the same detection logic
+against that synthetic source:
+```
+found: {'package_student_id'}
+Traceback (most recent call last):
+  File "<string>", line 26, in <module>
+AssertionError: ('SIMULATING the confinement guard failing on this synthetic module ...', {'package_student_id'})
+```
+confirming the mechanism actually detects the symbol rather than passing vacuously.
+
+**D4 — the named dependency, recorded on the register.** `SharedInterventionSessionMapping`
+(`Yass/Implementation_v1.0/models/contracts.py:85-107`) exists in **neither** component today — no
+table, no model, no code in Component B or C. Component B's 9c approval does not cover building
+it; it needs its own gate. Recorded here exactly as: **the outbound identifier has no assigned
+source until shared session mapping exists, and that needs its own gate** — not "9c-0 is
+incomplete." 9c-0's deliverable is the written prohibition plus this named dependency, not a
+working identifier source.
+
+**Verification.** `docker compose -f compose.yaml down -v`, `docker compose -f compose.yaml build
+api` (clean build), then `docker compose -f compose.yaml run --rm api python -m pytest -q` once,
+alone, against a fresh volume: **589 passed, 75 skipped, 0 failed, 1 warning (664 collected)**,
+372.18s (6m12s) suite time, 6m21.7s wall including container/db startup. Reconciles against the
+`eff9dd0` baseline of 587 / 75 / 0 / 662: two new tests added, zero removed, `587 + 2 = 589`
+passed, `75 + 0 = 75` skipped (unchanged — both new tests confirmed to run for real in-container,
+not skip, per a follow-up targeted run: `pytest tests/test_be2_architecture_guards.py -k
+identity_derivation -v` → both `PASSED`), `662 + 2 = 664` collected. The one warning is the
+pre-existing, unrelated `httpx`/`starlette.testclient` deprecation notice, unchanged from prior
+runs. No existing test weakened, skipped, or modified. No B parameter, threshold or formula
+touched; condition 5 and condition 6 hold.
+
+**Files modified:** `backend/tests/test_be2_architecture_guards.py` (two tests + the shared
+`_symbols_referenced_in()` helper + `_PROHIBITED_IDENTITY_DERIVATION_SYMBOLS` +
+`_IDENTITY_DERIVATION_ALLOWED_FILES` added; nothing existing edited), `backend/buildLog1.md` (this
+entry). No file under `backend/app/` touched, no migration, no new table, no frontend file, no
+config family/threshold/parameter/formula, no wheel/pin/version change, no approval/approver/role/
+date/signature/scientific-decision recorded anywhere in this batch's changes.
+
+**Remains open — forward obligation.** The guard's allow-list is a claim about the whole
+application tree **at this commit only**. Any batch that adds a legitimate consumer of
+`student_number`, `package_student_id` or `package_item_opportunity_id` must justify it **and**
+update `_IDENTITY_DERIVATION_ALLOWED_FILES` in the same batch — never silently widen it just to
+turn a red test green. **9b-1** (the emission surface) and **9c-1** (the outbox/routing tables)
+are named specifically as the two batches expected to next add code this guard covers; both must
+either stay off these three symbols or extend the allow-list with a stated reason. The mapping
+dependency itself (D4) remains unbuilt — where the assigned `student_id` actually comes from
+cannot be settled until `SharedInterventionSessionMapping` exists, which is 9c-1's or a later
+batch's problem, gated separately. The known-open finding from R0 (the wheel-build script's
+uncoupled `COMMITTED_WHEEL_SHA256`/`COMMITTED_WHEEL_FILENAME` pins, `build_component_c_wheel.py:
+84-85`) was seen again during this batch's planning and deliberately left untouched — it is 9b-0's
+pin sweep, not this batch's.
