@@ -7739,3 +7739,129 @@ batch's problem, gated separately. The known-open finding from R0 (the wheel-bui
 uncoupled `COMMITTED_WHEEL_SHA256`/`COMMITTED_WHEEL_FILENAME` pins, `build_component_c_wheel.py:
 84-85`) was seen again during this batch's planning and deliberately left untouched — it is 9b-0's
 pin sweep, not this batch's.
+
+---
+
+## 2026-08-22 — 9c-1a: the two shared outbox tables, tables only
+
+**Why.** `Component_C_Master_Build_Plan_v3.0.md` §11 Phase 9 authorizes `outbox_events` and
+`contract_deliveries` directly ("Neither B nor C has a transactional outbox today. Build them once,
+shared"), and Amendment A-1 already anticipated the final count of 35. No amendment was needed and
+none was sought. 9c-1 was split into 9c-1a (these tables) and 9c-1b (the enqueue path and
+condition 4's supersession enforcement), on the Phase 3a/3b precedent, so that condition 4 — the
+one condition where a missed bypass silently delivers a superseded record — gets its own
+verification pass rather than sharing one.
+
+**Provenance of this entry, stated plainly.** The builder terminated early, on an API session
+limit, immediately before writing its own build-log entry. Everything below the code itself — the
+migration up/down proof, the live schema inspection, the acceptance-criterion demonstration, the
+suite run — was performed by the supervisor after that termination, and this entry was written by
+the supervisor. It is not the builder's account of its own work.
+
+**What was built.** `OutboxEventRecord` and `ContractDeliveryRecord` in
+`app/infrastructure/persistence_models.py`, and one migration,
+`migrations/versions/20260816_0008_shared_outbox_tables.py`, revision `20260816_0008` revising
+`20260816_0007`. Both tables in one migration, no trigger, no seed data. The table names are
+deliberately unprefixed, unlike every other table in this schema, because Component B owner's
+condition 1 makes them shared infrastructure rather than shared ownership; prefixing them `c_`
+would contradict the clause that authorizes them.
+
+**Three design decisions, all of which survived into the real schema.** Ownership (condition 2) is
+recorded once, by `outbox_events.owning_component`, and derived transitively for
+`contract_deliveries` through its mandatory FK — a second, independently-writable copy on the child
+could contradict the row it joins to, which is the trap `CTaskOpportunityVerdictRecord`'s docstring
+already argues against for `verdict_kind`. There is no `status` column, for the same
+derive-don't-duplicate reason. And **neither table carries a learner identifier**: the only value
+reachable today for an outbound `student_id`-shaped field is the derivation 9c-0 prohibited four
+commits ago, so such a column would be either permanently NULL or the exact collision trap 9c-0
+exists to prevent. Identity riding inside `payload_json`, once a later batch can source it from the
+mapping, is not the same thing as promoting it to a first-class column outside that mapping.
+
+**`contract_name` is deliberately not enumerated — a supervisor ruling, recorded because it will
+look like an oversight.** The real vocabulary is `PayloadKind` at
+`packaging/component_b_internal/validators/contract_validators.py:62`, a vendored contract module
+this repository does not own. A CHECK here would be a second copy of a vocabulary whose source of
+truth lives elsewhere: gain a kind and the enum silently blocks a legitimate insert, lose one and
+it goes stale with nothing to say so — the same defect class R0 corrected two commits ago. The
+stronger reason is that it would violate condition 2 outright: a CHECK in the *shared* schema
+validating a contract vocabulary IS a shared validation path, and conditions 1-2 require one
+schema, two owners, each validating its own rows. Only a nonblank guard lives here.
+
+**Verification — migration, both directions, against a real database.** `alembic upgrade head`
+brought `alembic current` to `20260816_0008 (head)`; `information_schema` then reported **35**
+tables with both `outbox_events` and `contract_deliveries` present — the 33 -> 35 target confirmed
+against the database rather than against the model. `alembic downgrade -1` ran
+`20260816_0008 -> 20260816_0007`, after which the count was **33**, both tables were gone, and
+`alembic_version` read `20260816_0007`. The FK drop order is therefore correct. Both directions
+actually ran; neither is asserted from reading the code.
+
+**Live schema matched the models exactly, closing the drift gap two independent ways.** There is no
+schema-diff test in this repository — a hand-mirroring mistake between a model and its migration
+would be invisible to the suite — so the check was done manually and is NOT automated. At source
+level the model and migration agree column for column, type for type, nullability and constraint
+included, and `0008`'s copied `provenance_columns()`/`provenance_constraints()` helpers are
+byte-identical to `0007`'s, so the provenance half inherits proven-correct behaviour. Against the
+live database: `outbox_events` carries `outbox_event_id uuid NOT NULL`, `owning_component
+varchar(1) NOT NULL`, `contract_name varchar(32) NOT NULL`, `payload_json jsonb NOT NULL`;
+`contract_deliveries` carries `contract_delivery_id uuid NOT NULL`, `outbox_event_id uuid NOT
+NULL`, `outcome varchar(32) NOT NULL`, `delivery_detail varchar(500) NULL`; both CHECKs per table,
+one PK per table, the `outbox_event_id` FK, and the provenance `actor_user_id` FK all present. No
+`student_id`, no `learner_id`, no `status` column on either table.
+
+**Acceptance criterion 1, demonstrated rather than asserted.** `outbox_events` was temporarily
+removed from `EXPECTED_TABLES` and the guard run alone. It failed as required:
+
+```
+>       assert AUTHORIZED_TABLES == EXPECTED_TABLES
+E       AssertionError: Extra items in the left set: 'outbox_events'
+1 failed
+```
+
+The temporary edit was then reverted and the revert proven byte-perfect: the file's sha256 returned
+to `007124af437a774dd59d9138b08117a57ada9f0dabb1126a2f738a7ab996fab0`, its pre-experiment value,
+with both affected lines restored and no change to the batch's tracked diff. The guard and 9c-0's
+identity guard were both re-run afterwards and both pass.
+
+**A trap hit during that demonstration, worth recording because it produced a false green.** The
+first run of the criterion-1 experiment PASSED when it should have failed. The cause was not the
+guard: `docker compose run` executes the *built image*, and `tests/` is `COPY`d into it, so the
+host-side edit was not present in the container and the old file ran. This is exactly the "the
+image is built, not bind-mounted; skipping the rebuild silently tests stale code" rule, met from
+the other direction — it does not only hide a fix, it can manufacture a passing result for an
+experiment designed to fail. Rebuilding produced the real failure above. Any future
+edit-then-verify experiment must rebuild between the edit and the run.
+
+**A second `EXPECTED_TABLES` exists, and the work order named only one.** The batch's work order
+directed the builder to update `EXPECTED_TABLES` in `tests/test_be2_architecture_guards.py`. There
+are **two** load-bearing declarations of the authorized table set: that one, and a second in
+`tests/test_be2_persistence.py`, whose `:120` asserts `actual == EXPECTED_TABLES` against the live
+database. The builder found the second itself and updated both. The other two files mentioning
+`EXPECTED_TABLES` (`test_c2_catalogue_and_runtime_bundle.py`, `test_c7_scaffolds_and_rewards.py`)
+were checked and only reference it in prose; two is the complete set. Recorded because this is the
+same shape as the hidden pin locations R0 corrected, and the next batch touching the table set must
+update both.
+
+**Suite: 589 passed, 75 skipped, 0 failed (664 collected)**, 425.42s, from a full teardown, a
+rebuilt image, and one run against a fresh volume. The one warning is the pre-existing
+`httpx`/`starlette.testclient` deprecation notice, unchanged. Reconciles against the `128f674`
+baseline of 589 / 75 / 0 / 664 as `589 + 0 = 589` — **this batch adds no test**. That is not an
+oversight and it is worth stating rather than leaving the reader to notice: the table-set change is
+absorbed by two existing exact-equality guards whose expected values moved, and criterion 1 above
+demonstrates those guards do fail when the set is wrong. Condition 5 and condition 6 hold: no
+Component B parameter, threshold, formula, or scientific meaning was touched, and no existing test
+was weakened, skipped, or modified.
+
+**Remains open.** These two tables have **no constraint-level test coverage**. Nothing in the suite
+exercises the CHECKs, the FK, or the nullability — those were verified once, manually, by the
+migration run recorded above, and that verification is not repeatable by the suite. Nothing writes
+a row to either table; both are inert by design in this batch. The absence of a `status` column is
+deliberate and derivation-based, but the derivation is correct in shape and **undefined in
+content**: `outcome` carries no vocabulary at this commit, so "a successful outcome" is not yet a
+defined value, and 9c-1b owns both naming that vocabulary and defining delivery state against it.
+Condition 4 — superseded records must not be delivered — is untouched here and is 9c-1b's, to be
+enforced structurally at the enqueue point rather than as a filter each caller remembers. The
+missing repository-wide schema-drift test is recorded as a gap affecting all 35 tables, not this
+batch's to close. The R0 known-open finding (the wheel-build script's uncoupled
+`COMMITTED_WHEEL_SHA256`/`COMMITTED_WHEEL_FILENAME`, `scripts/build_component_c_wheel.py:84-85`,
+which R0-b's exclusion list does not name) was deliberately left untouched again; it belongs to
+9b-0's pin sweep.

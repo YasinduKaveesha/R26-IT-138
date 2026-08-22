@@ -1353,4 +1353,110 @@ class CTaskOpportunityVerdictRecord(ProvenanceMixin, Base):
     )
 
 
+class OutboxEventRecord(ProvenanceMixin, Base):
+    """Component C batch 9c-1a (Master Build Plan v3.0 §11 Phase 9; 9b_9c plan Track 9c, "9c-1 --
+    the tables and the routing"). One row per opaque outbound payload awaiting delivery, for BOTH
+    components -- Phase 9's own text: "Neither B nor C has a transactional outbox today. Build
+    ``outbox_events`` and ``contract_deliveries`` once, shared." Deliberately unprefixed (no
+    ``b_``/``c_``) because it is shared infrastructure, not shared ownership (Component B owner's
+    condition 1).
+
+    WHAT THIS TABLE DOES NOT DO. It does not construct a payload -- per the 9c-1 planning note,
+    "An outbox stores and delivers opaque payloads; it does not construct one." It does not route,
+    dispatch, poll, or attempt delivery -- no code in this batch ever writes a row here; that is
+    9c-1b and later. It does not enforce that a superseded record cannot be delivered (Component B
+    owner's condition 4) -- that enforcement point, and whatever column it turns out to need, is
+    9c-1b's design to make, not this batch's to guess.
+
+    OWNERSHIP (condition 2 -- "Component B owns its B-side rows... Component C owns its C-side
+    rows... one schema, two owners, no shared validation path"). ``owning_component`` is the single
+    source of truth for which component's row this is. ``contract_deliveries`` does NOT repeat this
+    column; it derives ownership transitively through its mandatory FK back to this table. A second,
+    independently-writable copy on the child table could contradict the row it joins to -- exactly
+    the "redundant AND capable of contradicting it" trap this same file's
+    ``CTaskOpportunityVerdictRecord`` docstring already argues against for ``verdict_kind``.
+
+    ``contract_name`` IS DELIBERATELY NOT ENUMERATED. The real, closed vocabulary
+    (``"mapping"``/``"b_to_c"``/``"b_to_3"``/``"c_to_3"``) is ``PayloadKind`` at
+    ``packaging/component_b_internal/validators/contract_validators.py:62`` -- a vendored contract
+    module this repository does not own. A CHECK here would be a second copy of a vocabulary whose
+    source of truth lives elsewhere: if that module gains a kind, a local enum silently blocks a
+    legitimate insert; if it loses one, the enum goes stale with nothing to say so. Worse, an enum
+    here would itself violate condition 2 -- a CHECK in the SHARED schema that validates a value
+    against a contract's own vocabulary IS a shared validation path. Validating ``contract_name``
+    against ``PayloadKind`` is each owning component's job when it enqueues a row, not this table's.
+    Only a nonblank guard lives here.
+
+    NO LEARNER IDENTIFIER (owner condition 3 / 9c-0's determination, ``buildLog1.md``'s 9c-0 entry).
+    The only value reachable today for an outbound ``student_id``-shaped field is
+    ``package_student_id()``/``student_number()`` -- exactly the derivation 9c-0 wrote down as
+    prohibited, and which ``test_identity_derivation_symbols_confined_to_allowed_files`` blocks
+    outside its two allow-listed files. A dedicated identifier column here would therefore be either
+    permanently NULL (nothing can populate it correctly) or the exact collision trap 9c-0 exists to
+    prevent. If a real assigned identifier ever rides inside ``payload_json``, sourced correctly by a
+    later batch from ``SharedInterventionSessionMapping`` once that mapping exists, that is identity
+    inside the opaque payload -- not the same thing as promoting it to a first-class column, which
+    would be a second place identity is recorded outside the mapping. Deliberately absent.
+
+    NO ``status``/``dispatched`` COLUMN. Whether an event has been delivered is derivable by joining
+    to ``contract_deliveries`` on ``outbox_event_id`` and inspecting ``outcome`` -- the same
+    derive-don't-duplicate discipline ``CTaskOpportunityVerdictRecord`` already uses to tell an
+    exclusion from a supersession by joining rather than storing a redundant discriminator. NOTE:
+    this derivation is correct in SHAPE but undefined in CONTENT at this commit -- ``outcome`` carries
+    no enum and no defined vocabulary yet (see ``ContractDeliveryRecord``), so "a successful outcome"
+    is not yet a defined value. 9c-1b, which builds the dispatcher, owns naming that vocabulary and
+    owns defining delivery state against it."""
+
+    __tablename__ = "outbox_events"
+    __table_args__ = (
+        CheckConstraint("owning_component IN ('B', 'C')", name="ck_outbox_events_owning_component"),
+        CheckConstraint("contract_name <> ''", name="ck_outbox_events_contract_name_nonblank"),
+        *ProvenanceMixin.provenance_constraints("outbox_events"),
+    )
+
+    outbox_event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owning_component: Mapped[str] = mapped_column(String(1), nullable=False)
+    contract_name: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class ContractDeliveryRecord(ProvenanceMixin, Base):
+    """Component C batch 9c-1a (Master Build Plan v3.0 §11 Phase 9; 9b_9c plan Track 9c, "9c-1 --
+    the tables and the routing"). One row per attempt to deliver an ``OutboxEventRecord`` payload
+    to its downstream contract target -- shared infrastructure alongside ``outbox_events``, built
+    for the same reason and by the same authorization; see that class's docstring for the full
+    ownership, identifier, and derivation reasoning shared by both tables.
+
+    Append-only: one row per attempt, never updated in place, so a retried delivery is a NEW row,
+    not a mutation of a prior one. ``outbox_event_id`` is mandatory -- a delivery record with no
+    event it attempted to deliver is not a delivery record. This table carries no ``owning_component``
+    of its own; ownership is derived transitively through this same FK (see ``OutboxEventRecord``'s
+    docstring on why a second, independently-writable copy would be a duplicate discriminator capable
+    of contradicting the row it joins to).
+
+    ``outcome`` HAS NO ENUM. No dispatcher exists yet to define what values it may take -- that is
+    9c-1b's mechanism, not this batch's. Enumerating it now would be inventing that vocabulary ahead
+    of the thing that owns it, the same defect ``CTaskOpportunityVerdictRecord.validator_check``
+    already avoids for its own not-yet-fixed vocabulary ("draws from one named tuple, no DB-level
+    enum"). Only a nonblank guard lives here; 9c-1b must define the vocabulary AND what "delivered"
+    means against it before any join against this table's ``outcome`` is meaningful."""
+
+    __tablename__ = "contract_deliveries"
+    __table_args__ = (
+        CheckConstraint("outcome <> ''", name="ck_contract_deliveries_outcome_nonblank"),
+        CheckConstraint(
+            "delivery_detail IS NULL OR delivery_detail <> ''",
+            name="ck_contract_deliveries_delivery_detail_nonblank_or_null",
+        ),
+        *ProvenanceMixin.provenance_constraints("contract_deliveries"),
+    )
+
+    contract_delivery_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    outbox_event_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("outbox_events.outbox_event_id", ondelete="RESTRICT"), nullable=False
+    )
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    delivery_detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
 AUTHORIZED_TABLES = frozenset(Base.metadata.tables)
