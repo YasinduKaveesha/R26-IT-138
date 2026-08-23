@@ -8502,3 +8502,158 @@ were not regenerated) from `5615d59`, and 44 separated `0c85345` (where the type
 generated) from the same point. More importantly, **a count relative to HEAD is false by
 construction** — it grows with every commit and was already stale when written. The durable statement
 is *"red since `393519b` (Phase 4b)"*, which does not drift.
+
+---
+
+## 2026-08-24 — Component C 10.0a: the frontend contract floor, and both frozen artefacts checked from the client side
+
+**Committed at `f6a24b1`, on top of `1d23d2b`.** Branch `C_backend`, tree clean before and after.
+Six files, 865 insertions, all under `frontend/src/api/`. No backend file touched —
+`git diff --stat -- backend/` is empty.
+
+**Provenance of this entry, and a process failure it records.** This entry was written **after** the
+commit it describes, not before, because the batch was committed without one. The frontend
+supervisor's own definition of done lists a build-log entry and the batch closed without it; the
+omission was caught by the project owner, not by the supervisor. Every prior batch in this file
+appended its entry as part of its own commit. **This one could not, and the consequence is that
+`f6a24b1` is the first Component C commit whose register entry lives in a later commit than the work
+it describes.** Recorded rather than tidied away, because the register's value depends on someone
+being able to trust that a batch and its entry are the same commit, and here they are not.
+
+**What this batch is.** The first Component C frontend code in the repository. It deliberately
+contains **no UI** — no screen, no component, nothing rendered — which is what makes it verifiable
+on its own terms before any renderer exists. Split from the approved 10.0 foundation batch into
+10.0a (contract floor, no UI, provable by the contract suite alone) and 10.0b (the task loop), on
+the reasoning that 10.0 whole was larger than 10a and would have degraded VERIFY into skimming —
+the same reasoning v3.0 §11 gives for splitting Phase 10 per family in the first place.
+
+**It closes the break recorded in the two preceding entries.** `contract-freeze.test.ts` had been
+red since `393519b` (Phase 4b), where Component C's routes entered the frozen OpenAPI and the
+generated TypeScript types were not regenerated; phases 5 and 7 widened the gap. Regenerating via
+`npm run generate:contract-types` is mechanical. The reason it went unseen is the durable finding,
+already recorded on the backend side and restated here from the frontend's: **only pytest was ever
+run.** The verification gate is now both suites.
+
+**What was built.** A Component C API client over the six C routes (`component-c-api.ts`), mirroring
+`component-b-api.ts` in shape and routing every call through the existing `requestJson` with a
+`validate` guard — no second HTTP layer, no new timeout, no retry or backoff. Five runtime type
+guards for the five **response** DTOs. A development fixture gated exactly as B's is. And the
+client-side half of the drift protection for **both** frozen artefacts.
+
+**No idempotency key is sent on any C call, and the work order was wrong to ask for one.** The
+batch's work order said to take idempotency-key handling from B's precedent. The builder checked the
+routes rather than inferring from B and found that **no C route declares an `Idempotency-Key`
+header** while five B routes do — `c_session.py`'s module docstring records the Phase 4a/4b ruling
+behind that divergence (v3.0 asks only for idempotency by learner state, which
+`find_starting_or_active_for_learner` already provides; B's key/audit-event machinery was judged a
+scope expansion beyond that text). Following the instruction would have added a header the server
+never reads: **a fabricated protection**, code that appears to deduplicate retries and structurally
+cannot. The instruction was corrected, not followed and not silently skipped. This is the third time
+in this project a builder has corrected a supervisor on a load-bearing claim.
+
+**Five guards, not the nine the work order asked for.** The frozen contract carries **eight** C
+schemas, not nine — the supervisor miscounted an eight-item list in the work order's own text. Of
+the eight, three are request bodies and were deliberately left unguarded: each is constructed
+entirely from values the client already controls, and a guard over a body the client just built
+proves only that its own object literal is correct, which the compiler already guarantees. The
+module comment records **why** the three are absent so a later reader does not read the gap as an
+oversight and add them. The builder sharpened the supervisor's reasoning here: the operative
+distinction is not request-versus-response but whether the payload crosses a boundary the client
+does not control — `isProfileCreateRequest` and `isInviteTokenRequest` exist because they validate
+*stored* pending-command payloads replayed out of persistence, which is untrusted at the point of
+read.
+
+**A defect found in review and fixed before commit: the session-state vocabulary.** The guards
+initially restricted `state` to three values — `active`, `completed`, `abandoned` — copied from
+Component B's `SessionFields`, where those three are a genuine enum in the frozen contract.
+**Component C's `state` is typed as a plain string with no enum**, and its real vocabulary is
+`SESSION_STATES` (`persistence_models.py:34`): **seven** values — `starting`, `active`, `completing`,
+`completed`, `abandoned`, `expired`, `technical_failed` — every one permitted by `c_sessions`' CHECK
+constraint, and `c_sessions.state` reuses the constant unchanged by explicit Phase 4 ruling. Only
+three are reachable from Phase 4 code paths today, so the guard would not yet have failed; it would
+have begun **rejecting valid server responses** the moment `expired` or `technical_failed` became
+reachable — on precisely the paths where a client most needs to degrade gracefully. The guards now
+accept any non-empty string for `state`. `session_mode` keeps its two-value check because that one
+**is** a frozen enum on `CreateCSessionRequest`. **The rule extracted, and it generalises:** restrict
+to a vocabulary only where the frozen contract defines it, never where the real vocabulary lives in
+backend code the client cannot see. This is the same shape as the archetype-table error the template
+registry caught — a client-side restatement of a server vocabulary, narrower than the real one, and
+correct-looking today.
+
+**The fixture serves no task content, and each refusal is asserted individually.** `createSession`
+and `getActiveSession` return canned `TEST_FIXTURE_ONLY`-marked responses; `nextTask`,
+`submitAction`, `abandonSession` and `completeSession` **throw immediately** — no delay, no
+fabricated payload — and each of the four is asserted to throw **separately**, so a later
+well-meaning implementation of any one of them breaks a test rather than quietly shipping invented
+content. This restates Component B's own fixture doctrine verbatim in the code. No seam, hook, or
+commented-out branch was left for future task content. Whether the fixture should ever serve a task
+from the exemplars artefact is an **open owner decision**, live again now that the artefact exists,
+and deliberately not pre-empted here.
+
+**Guard-level tests were missing from the first implementation pass and are included now.** The
+batch's own acceptance criteria required every guard to reject each required field's absence
+individually. The first pass shipped the guards and both artefact-freeze test files but **not those
+tests**, and the omission was invisible in the test count, which reconciled exactly (`215 + 19 =
+234`). It surfaced only when the state-vocabulary fix was requested *against tests that turned out
+not to exist*. **The supervisor approved that pass on a reconciled count without checking what the
+nineteen tests were** — the "a green suite is not proof of a specific signal" trap, walked into by
+the person quoting it. The builder disclosed the gap unprompted rather than filling it silently. The
+new tests drive per-field rejection off the frozen schema's own `required` list rather than a second
+hand-maintained list, so they cannot drift from the contract.
+
+**Verification — the supervisor's, and run three times across the review.** Frontend contract suite:
+**244 tests, 244 passed, 0 failed.** Reconciles against the 215 / 214 / 1 baseline: twenty-nine
+tests added, none removed, one pre-existing failure repaired — `215 + 29 = 244`, and
+`214 + 29 + 1 = 244`. `contract-freeze.test.ts` is **untouched**; it passes because the generated
+types are current, not because the test moved. The diff is purely additive: 865 insertions, **zero
+deletions**, so no existing export was modified.
+
+**Drift protection was demonstrated, not asserted.** One bit was flipped in each frozen artefact and
+**exactly four tests failed** — both checksum assertions, the 150-entry coverage assertion, and the
+cross-artefact agreement between the exemplars' `valid_action_space` and the registry's. Both files
+were restored from copies taken beforehand and the restoration proven byte-identical with
+`sha256sum -c`. Separately, both fixes were proven to be genuinely under test by **reintroducing the
+defects they cover**: restoring the three-value state restriction failed the seven-state assertion,
+and deleting a single field check (`row_version`) failed the per-field assertion. Both were reverted
+and the reverts verified by hash, with the suite re-run green after each. A guard nobody has watched
+fail is not a guard.
+
+**One authorization was exceeded and disclosed.** The builder ran `npx tsc --noEmit` as a static
+sanity check, which was outside the single authorized command, and disclosed it rather than omitting
+it. Supervisor ruling: the check is harmless — the no-suite rule exists for concurrency and stale
+state, and a type check has neither — and it is **explicitly permitted going forward**, named in
+future prompts so it is not a judgment call. The disclosure was the correct behaviour and is the
+reason the ruling could be made at all.
+
+**A limitation of a supervisor ruling, flagged by the builder rather than silently improved.** The
+pipe-string predicate specified by the supervisor, `/^[^|]+(\|[^|]+)+$/`, correctly rejects `"|"`,
+`"same|"` and `"|changed"`, but still accepts a hybrid like `"list[int]|foo"`. None of the thirty
+real templates produces that shape, so it is latent, not live. It was built as specified and the
+limit reported; tightening it belongs to 10.0b, where the type vocabulary is actually acted on.
+
+**Files created:** `frontend/src/api/component-c-api.ts`,
+`frontend/src/api/__tests__/c-template-registry-freeze.test.ts`,
+`frontend/src/api/__tests__/c-prompt-exemplars-freeze.test.ts`,
+`frontend/src/api/__tests__/c-runtime-validation.test.ts`. **Files modified:**
+`frontend/src/api/generated/openapi-types.ts` (regenerated, never hand-edited),
+`frontend/src/api/runtime-validation.ts` (additive only). No backend file, no migration, no table,
+no route, no schema, no wheel or pin change, no parameter, threshold, formula or scientific meaning,
+and no approval, approver, role, date, signature or `CALIBRATION_PENDING` resolution recorded
+anywhere in this batch's changes.
+
+**Not verified, stated rather than implied.** The **backend suite was not re-run for this batch.**
+No backend file is touched, so 622 / 76 / 0 / 698 is expected to be unmoved, but it was **not
+measured** and is not claimed. The API client has also **never issued a live request and cannot**:
+session creation refuses while seven parameter families are unsigned, which is intended behaviour.
+Every claim above is about shape and structure, not about a working call.
+
+**Remains open.** The exemplars artefact's leak protection rests on allow-list construction on the
+backend side and that guarantee holds; but with the nested prohibited-term scan removed there for
+sound reasons, **if a generator template ever placed answer-bearing data inside `prompt_payload`,
+the artefact would carry it and neither side would catch it.** That is a generator-side property
+neither the backend guard nor these frontend tests can assert, and the exemplars test module says so
+in its own docstring rather than implying a guarantee it does not provide. The archetype table,
+`encodeActionPayload`, the field-kind layer, the fail-closed frame, the session shell and task loop,
+and local-only telemetry capture are **10.0b**. **No renderer for any of the thirty templates exists
+yet** — 10a…10h remain unbuilt. Whether the development fixture may serve a task from the exemplars
+artefact is an open owner decision.
