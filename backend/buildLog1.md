@@ -7865,3 +7865,180 @@ batch's to close. The R0 known-open finding (the wheel-build script's uncoupled
 `COMMITTED_WHEEL_SHA256`/`COMMITTED_WHEEL_FILENAME`, `scripts/build_component_c_wheel.py:84-85`,
 which R0-b's exclusion list does not name) was deliberately left untouched again; it belongs to
 9b-0's pin sweep.
+
+---
+
+## 2026-08-23 — 9c-1b: the guarded enqueue path, and condition 4 answered on both sides
+
+**Why.** 9c-1a built the two shared outbox tables and nothing that writes to them. This batch builds
+the enqueue (write) side, names the `outcome` vocabulary 9c-1a recorded as an open dependency, and
+answers Component B owner's **condition 4** — "9c must ensure superseded records cannot be delivered
+to Component 3" — on both the C side and the B side.
+
+**Provenance of this entry, stated plainly.** The builder terminated early on an API session limit,
+as it did in 9c-1a, before writing its own entry. The code below is the builder's; the verification
+— the exclusive suite run, the guard demonstrations, the revert proofs — and this entry are the
+supervisor's. This is not the builder's account of its own work.
+
+**The plan was revised against source before any code was written.** The 9b/9c plan directed that
+condition 4 be enforced "structurally, at the point a payload is enqueued… one guarded accessor,
+AST-proven that nothing bypasses it." Tracing the real path showed that mechanism **already exists
+and already does the job for C**, and that the B half has nothing to enforce. Building it again would
+have been duplicate enforcement — a second record of a property, free to drift from the first. The
+revised work order and its addendum are `Upadya/9c1b-work-order-v2.md` and
+`Upadya/9c1b-work-order-v2-ADDENDUM.md`.
+
+**Condition 4, C side — already enforced upstream, and now proven one link further.** The existing
+chain, verified end to end rather than inferred: a superseded summary is resolved by
+`_live_verdict_ids` (`telemetry_validation.py:245`, chain tip, not mere row presence); the one
+AST-guarded accessor `get_derivable_history_for_session` (`:258`) removes its `task_index` from
+DERIVABLE; the resulting non-empty gap raises `DistrustedHistoryGapError` for the WHOLE session
+(RULING 1 — refuse, never skip); and `aggregation_service.py:186` refuses **before** any
+`CSessionAggregateResultRecord` is constructed. No aggregate means nothing a C→3 payload could be
+built from. This batch adds the test that drives that whole chain and asserts both halves: the
+refusal raises, AND no aggregate row exists in the same transaction — the signal is the REFUSAL, not
+an empty table — with the discrimination pair (identical fixture minus the supersession) reaching the
+point an enqueue would occur.
+
+**THE LIMIT, disclosed rather than glossed.** This is a **partial proof bounded by a named
+dependency**. What is proven: `superseded → no aggregate → nothing exists to enqueue from`. What is
+NOT proven, and cannot be here: `no aggregate → no payload` — because **there is no payload
+constructor in this codebase to run that claim through.** `emit_c_to_3` is not in the shipped wheel
+(9b-0, blocked on an owner wheel gate) and the emission surface is unbuilt (9b-1). Proving "no
+payload" requires code that turns an aggregate into a payload so it can be shown to have nothing to
+consume; that code does not exist. **The batch that ships `emit_c_to_3` inherits the obligation to
+close this link.**
+
+**Condition 4, B side — VACUOUS TODAY, WITH A NAMED TRIGGER.** Recorded as a conditional obligation,
+not a closed item and not an open gap needing an owner. Verified by inspection, not by grep alone:
+no B→3 emission exists anywhere under `app/` — no producer, no caller, no route; and B has no
+supersession or correction concept, `session_completion.py`, `attempt_submission.py`,
+`opportunity_selection.py` and all of `app/domain/b_*.py` having been inspected for
+supersede/revision-of/corrects/invalidate/void/retract/amend semantics.
+
+The corrected statement, which supersedes the work order's own looser first wording: **Component B's
+B→3 validation capability is SHIPPED and INERT.** It exists in the vendored
+`packaging/component_b_internal/validators/contract_validators.py` — `PayloadKind` includes `b_to_3`
+(`:62`), `BToComponent3Payload` (`:99`), `validate_b_to_3_warmup()` (`:134`), a `b_to_3` branch in
+`validate_payload_against_mapping` (`:168`) — and it has no caller. The only `app/` importer is
+`app/infrastructure/live_engine_c/adapter.py:146`, and the only kind it ever validates is `"b_to_c"`
+(`:718`). No code under `app/` invokes the `b_to_3` kind. This is the seventh complete-and-inert
+mechanism in this project.
+
+Why not "satisfied": nothing is satisfied — both of the condition's terms are empty, and marking it
+satisfied would be a claim true today and false the moment either fills, the exact defect R0
+corrected. Why not "an open gap requiring an owner": with no B→3 path there is nothing a B-side
+mechanism could protect, and it would sit permanently unactionable on the register. **The trigger:**
+the moment B gains a B→3 producer — which Phase 9's own text anticipates — condition 4 becomes live
+for B, which then has **no mechanism whatsoever** to satisfy it, while inheriting a ready-made
+validator. Whichever batch builds B→3 must in the same batch either establish a B-side
+supersession/correction mechanism or obtain an explicit owner ruling that B records are not
+correctable. B has the same structural exposure C had before Amendment A-1:
+`b_session_aggregate_results` (`UniqueConstraint("session_id")`) and `b_skill_certification_results`
+(`("session_id","skill_id")`) are both insert-once. Delivered to B's owner as a standalone,
+forwardable note: `Upadya/Component_B_Condition_4_Finding.md`. It asks for no decision.
+
+**What was built.** `app/application/live_engine_c/outbox_enqueue.py` — `enqueue_outbox_event`, the
+sole permitted writer to `outbox_events`, AST-proven; and `DELIVERY_OUTCOMES`/`is_delivered`. The
+AST guard, its synthetic control, and a tests/-exemption test in `test_be2_architecture_guards.py`,
+plus 9c-0's carried-forward allow-list minimality assertion. `tests/test_9c1b_outbox_enqueue.py` —
+the condition-4 proof pair, a D1 unit test, and the four constraint tests 9c-1a shipped without.
+
+**`enqueue_outbox_event` ends this batch with ZERO real callers, deliberately.** No payload
+constructor exists under `app/`, and B has no producer. Nothing becomes reachable from a real
+request. Its `payload` stays `Mapping[str, Any]`: nothing in that signature prevents a caller
+enqueueing a payload derived from a superseded session, and that is the honest position rather than
+invented provenance checking. What protects condition 4 in this batch is that the function is
+unreachable. **NAMED FORWARD OBLIGATION for the batch that ships `emit_c_to_3`:** the payload
+constructor must take the session aggregate as its ONLY input, and this parameter should then narrow
+to that constructor's output type — so that "no aggregate" becomes STRUCTURALLY "no payload", rather
+than merely "nothing sensible to build one from."
+
+**The `outcome` vocabulary ships with exactly ONE member.** `DELIVERED = "delivered"`, sourced from
+`ContractDeliveryRecord`'s own docstring language ("a successful outcome"). Candidates considered and
+EXCLUDED as unsourced: `failed`, `rejected`, `retrying`, `expired`, `timed_out` — every one describes
+dispatcher behaviour, and no dispatcher exists in this batch, so nothing could ever produce them.
+Inventing a state machine for a mechanism that does not exist is the defect this project's docstrings
+warn against repeatedly. This CLOSES 9c-1a's recorded dependency: its exact complaint was that "a
+successful outcome is not yet a defined value," and it now is. `is_delivered` treats the empty case
+as not-delivered, honestly — until a dispatcher exists, "no row" and "no successful delivery" are the
+same fact. Whichever batch builds the dispatcher adds the rest from real error semantics it
+introduces, **after re-reading the retry/backoff/timeout prohibition below.**
+
+**Two 9c-1a docstrings were WRONG and are corrected, not amended.** Both `OutboxEventRecord` and
+`ContractDeliveryRecord` said 9c-1b builds the dispatcher. It does not — 9c-1b builds the enqueue
+(write) side and names the vocabulary; a dispatcher is the drain side, needing a delivery target,
+error semantics, and the retry behaviour this batch prohibits. Each correction quotes the wrong text
+verbatim and states the truth, per this file's own correction convention. This was a supervisor error
+introduced one batch earlier, not a design change.
+
+**Gate check: no new configuration family, and the seven-family session-start gate is untouched.**
+`DELIVERY_OUTCOMES` is a code-level NamedTuple, the same shape as `validator_check`'s vocabulary —
+not a parameter, no scientific meaning, no sign-off. **PROHIBITION, recorded because it is the live
+risk:** a delivery mechanism is exactly where `max_retries`, a backoff interval, or a timeout gets
+added, and any of those WOULD be a new configuration family needing gate membership — an eighth
+ungated family, exactly as `EvidenceWindowConfig` was. This batch introduces none, and whichever
+batch builds the dispatcher must treat the need for one as a STOP and an escalation, never a default.
+
+**Verification: 600 passed, 75 skipped, 0 failed (675 collected)**, 817.17s, from a full teardown, a
+rebuilt image, and one run against a fresh volume **with exclusivity confirmed by a mid-run container
+count**. Reconciles against the `b418cb9` baseline of 589 / 75 / 0 / 664: `589 + 11 = 600` passed,
+skips unchanged, `664 + 11 = 675` collected — eleven new tests (three D2 guard tests, one D5
+minimality assertion, and seven in the new file: the condition-4 pair, a D1 unit test, four
+constraint tests). The one warning is the pre-existing `httpx`/`starlette.testclient` deprecation
+notice. No existing test weakened, skipped, or modified.
+
+**Both file-scanning guards were demonstrated failing on REAL violations, not synthetic controls.**
+A bogus allow-list entry (`app/main.py`, which references no prohibited symbol) and a real bypassing
+module under `app/` constructing `OutboxEventRecord` were injected, the image rebuilt, and both
+guards ran:
+
+```
+E  AssertionError: app/main.py is allow-listed but references none of the prohibited symbols
+E  AssertionError: [(PosixPath('app/application/live_engine_c/_tmp_guard_probe.py'),
+   "Call(func=Name(id='OutboxEventRecord', ctx=Load()), ...")]
+2 failed in 2.71s
+```
+
+Both violations were then reverted, the revert proven byte-perfect by `sha256sum -c` against the
+pre-experiment hash, the probe module deleted, and the guards re-run green from a rebuilt image (13
+passed). The four constraint tests and the condition-4 refusal are self-demonstrating: each asserts
+through `pytest.raises`, so passing IS the mechanism firing.
+
+**A THIRD environment trap, and this one manufactured false FAILURES.** 9c-1a recorded two ways a
+stale image lies — hiding a fix, and manufacturing a false PASS for an experiment designed to fail.
+This batch found a third: **concurrent suite runs manufacture false failures in untouched suites.**
+Three supervisor runs were corrupted before the cause was found — one reporting 3 failures, one
+killed mid-flight, one reporting 8, every failure in B-side DB-dependent suites this batch never
+touches, and a different set each time. The cause was the builder running its own suite while the
+supervisor ran one, two pytest containers against one database. The tell: the "failing" D5 test
+**passed in 1.13s when run alone**, and the failures matched the re-used-volume collision pair this
+file already documents. Confirmed by killing every stray container and re-running: **zero failures,
+identical code.** Had the first number been reported, a builder would have been sent to fix code that
+was never broken. Recorded as a standing rule: **verification is the supervisor's alone; a builder
+must not run the suite, because a concurrent run is indistinguishable from a defect until measured a
+second way.**
+
+**Files created:** `app/application/live_engine_c/outbox_enqueue.py`,
+`tests/test_9c1b_outbox_enqueue.py`, `Upadya/Component_B_Condition_4_Finding.md`. **Files modified:**
+`app/infrastructure/persistence_models.py` (the two docstring corrections only — no schema change),
+`tests/test_be2_architecture_guards.py` (D2 guard, its control, the tests/-exemption test, D5's
+minimality assertion), `backend/buildLog1.md` (this entry). No migration, no new table, no schema
+change, no route, no DTO, no frontend file, no wheel/pin/version change, no B parameter, threshold,
+formula or scientific meaning, and no approval/approver/role/date/signature/scientific-decision
+recorded anywhere in this batch's changes. Conditions 5 and 6 hold.
+
+**Remains open.** `enqueue_outbox_event` builds its provenance from `session_lifecycle._provenance`,
+following the established cross-module pattern used by `adaptation_service`, `aggregation_service`
+and `scaffold_service` — but that helper hardcodes `system_actor: "c-session-lifecycle"` and
+`reason_code: "AUTHORIZED_C_SESSION_LIFECYCLE_COMMAND"`, while `outbox_events` is **shared**
+infrastructure accepting `owning_component="B"`. A B-owned row would therefore claim a C actor.
+Harmless today — the function has zero callers and nothing writes a row outside a test — but the
+B-wiring batch cannot use this accessor for a B row without either relocating it out of the
+C-specific package or recording a false actor. The deeper form of the same observation: a
+shared-infrastructure writer currently lives in a C-specific package. The dispatcher (drain side)
+remains unbuilt and unnamed, and owns extending the `outcome` vocabulary. `SharedInterventionSessionMapping`
+remains absent and separately gated. The repository-wide schema-drift gap recorded in 9c-1a is
+unchanged and belongs to no single batch. The R0 wheel-script finding (uncoupled
+`COMMITTED_WHEEL_SHA256`/`COMMITTED_WHEEL_FILENAME`, `scripts/build_component_c_wheel.py:84-85`) was
+again deliberately left untouched; it belongs to 9b-0's pin sweep.

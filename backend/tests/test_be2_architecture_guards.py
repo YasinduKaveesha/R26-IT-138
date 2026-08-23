@@ -874,6 +874,20 @@ def test_identity_derivation_guard_negative_control_catches_synthetic_violation(
     assert found == {"package_student_id"}, found
 
 
+def test_identity_derivation_allow_list_entries_are_all_minimal() -> None:
+    """D5 (batch 9c-1b, carried from 9c-0): asserts every file in
+    ``_IDENTITY_DERIVATION_ALLOWED_FILES`` actually references at least one of the three
+    prohibited symbols -- so a STALE or SPURIOUS allow-list entry (one added for a file that never
+    ends up needing it, or one left behind after its only reference is removed) FAILS instead of
+    silently widening the guard's exemption for no reason. Uses the same ``_symbols_referenced_in``
+    helper the real confinement guard and its own negative control use, so this cannot drift from
+    what it validates."""
+    for allowed_path in _IDENTITY_DERIVATION_ALLOWED_FILES:
+        tree = ast.parse(allowed_path.read_text(encoding="utf-8"), filename=str(allowed_path))
+        found = _symbols_referenced_in(tree, _PROHIBITED_IDENTITY_DERIVATION_SYMBOLS)
+        assert found, f"{allowed_path} is allow-listed but references none of the prohibited symbols"
+
+
 # =====================================================================================
 # Phase 1 batch 1b — no domain config field may carry a default (G1: a default on a config
 # field is a recorded threshold). Asserted structurally, not reviewed.
@@ -1403,6 +1417,107 @@ def test_derivable_history_guard_does_not_scan_tests_directory() -> None:
         filename="tests/test_synthetic_positive_control.py",
     )
     assert _derivable_history_raw_read_violations(test_side_tree)
+    for path in Path("app").rglob("*.py"):
+        assert "tests" not in path.parts
+
+
+# =====================================================================================
+# Batch 9c-1b, D2 -- THE OUTBOX ENQUEUE BYPASS GUARD, mirroring the J1-2
+# ``list_ordered_for_session`` guard immediately above (same AST-scan mechanism, same one-
+# allow-listed-file shape, same positive-presence assertion so a vanished real call cannot pass
+# vacuously, same tests/ exemption).
+#
+# MECHANISM DEVIATION FROM THE TEMPLATE -- APPROVED (work order v2 ADDENDUM A, "D2 mechanism
+# deviation -- approved"). The J1-2 template above flags a METHOD NAME
+# (``list_ordered_for_session``). This guard instead flags CONSTRUCTION of the
+# ``OutboxEventRecord`` CLASS -- the same shape the earlier T4 evidence-construction guards use,
+# not J1-2's method-name shape -- because ``session.add`` is used by every repository in this
+# codebase: a guard on the method name "add" would false-positive on every single repository
+# write, not just this one. Guarding the class construction itself (``OutboxEventRecord(...)``)
+# is the only shape that isolates "something built a row for this specific table" from "something
+# called .add()", which the write-side accessor unavoidably still does but which is not this
+# guard's concern.
+# =====================================================================================
+
+_ALLOWED_OUTBOX_ENQUEUE_ACCESSOR_PATH = Path("app/application/live_engine_c/outbox_enqueue.py")
+
+
+def _outbox_event_record_construction_violations(tree: ast.AST) -> list[str]:
+    """Flags any call constructing ``OutboxEventRecord`` -- D1's own text: "Sole writer to
+    outbox_events." The caller is responsible for skipping ``outbox_enqueue.py``, the one file
+    this guard permits (the accessor's own construction of the row it writes)."""
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id == "OutboxEventRecord":
+                violations.append(ast.dump(node)[:200])
+            elif isinstance(node.func, ast.Attribute) and node.func.attr == "OutboxEventRecord":
+                violations.append(ast.dump(node)[:200])
+    return violations
+
+
+def test_outbox_event_construction_permitted_only_in_outbox_enqueue() -> None:
+    """SIGNAL (D1/D2): ``OutboxEventRecord`` is constructed ONLY in
+    ``app/application/live_engine_c/outbox_enqueue.py`` (``enqueue_outbox_event``), and IS
+    constructed there -- a positive-presence check, same shape as J1-2's own
+    ``accessor_calls_it`` assertion, so this guard cannot pass vacuously if the real construction
+    is ever removed. Would FAIL if any other file under app/ constructed ``OutboxEventRecord``
+    directly (the exact bypass this guard exists to close) OR if the accessor's own construction
+    disappeared."""
+    accessor_constructs_it = False
+    violations: list[tuple[Path, str]] = []
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        found = _outbox_event_record_construction_violations(tree)
+        if path == _ALLOWED_OUTBOX_ENQUEUE_ACCESSOR_PATH:
+            accessor_constructs_it = bool(found)
+            continue
+        violations.extend((path, v) for v in found)
+    assert not violations, violations
+    assert accessor_constructs_it, "expected outbox_enqueue.py to construct OutboxEventRecord at least once"
+
+
+def test_outbox_enqueue_guard_fires_on_synthetic_violation() -> None:
+    """POSITIVE CONTROL (acceptance criterion 1): proves
+    ``_outbox_event_record_construction_violations`` actually detects a bypassing construction of
+    ``OutboxEventRecord``, and passes clean on source that never constructs it -- mirrors J1-2's
+    own ``test_derivable_history_guard_fires_on_synthetic_violation`` exactly, including the
+    passing arm on the real accessor's own shape."""
+    violating_tree = ast.parse(
+        "async def f(session):\n"
+        "    row = OutboxEventRecord(owning_component='C', contract_name='c_to_3', payload_json={})\n"
+        "    session.add(row)\n",
+        filename="<synthetic-violation>",
+    )
+    assert _outbox_event_record_construction_violations(violating_tree)
+
+    clean_tree = ast.parse(
+        "async def f(session, owning_component, contract_name, payload, request_id):\n"
+        "    return await enqueue_outbox_event(\n"
+        "        session,\n"
+        "        owning_component=owning_component,\n"
+        "        contract_name=contract_name,\n"
+        "        payload=payload,\n"
+        "        request_id=request_id,\n"
+        "    )\n",
+        filename="<synthetic-clean>",
+    )
+    assert not _outbox_event_record_construction_violations(clean_tree)
+
+
+def test_outbox_enqueue_guard_does_not_scan_tests_directory() -> None:
+    """Same discipline as J1-2's own tests/-exemption test: test-side direct construction of
+    ``OutboxEventRecord`` stays legitimate for building fixtures (the 9c-1a constraint tests in
+    ``test_9c1b_outbox_enqueue.py`` do exactly this). Demonstrated by calling the guard directly
+    against a tests/-shaped tree (which WOULD flag it) and confirming the caller discipline
+    (``Path("app").rglob`` only) is what actually protects tests/, not the function itself."""
+    test_side_tree = ast.parse(
+        "def test_something():\n"
+        "    row = OutboxEventRecord(owning_component='C', contract_name='c_to_3', payload_json={})\n"
+        "    assert row.owning_component == 'C'\n",
+        filename="tests/test_synthetic_positive_control.py",
+    )
+    assert _outbox_event_record_construction_violations(test_side_tree)
     for path in Path("app").rglob("*.py"):
         assert "tests" not in path.parts
 

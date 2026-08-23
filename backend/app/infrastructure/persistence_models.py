@@ -1404,8 +1404,16 @@ class OutboxEventRecord(ProvenanceMixin, Base):
     exclusion from a supersession by joining rather than storing a redundant discriminator. NOTE:
     this derivation is correct in SHAPE but undefined in CONTENT at this commit -- ``outcome`` carries
     no enum and no defined vocabulary yet (see ``ContractDeliveryRecord``), so "a successful outcome"
-    is not yet a defined value. 9c-1b, which builds the dispatcher, owns naming that vocabulary and
-    owns defining delivery state against it."""
+    is not yet a defined value. **CORRECTION (9c-1b, work order v2 ADDENDUM A, Ruling 2): this
+    docstring originally said "9c-1b, which builds the dispatcher, owns naming that vocabulary and
+    owns defining delivery state against it" -- that attribution was WRONG and is corrected here,
+    not merely amended. 9c-1b builds the ENQUEUE (write) side only and, in doing so, names the
+    ``outcome`` vocabulary and defines delivery state against it
+    (``app.application.live_engine_c.outbox_enqueue.DELIVERY_OUTCOMES``/``is_delivered``). It does
+    NOT build a dispatcher. A dispatcher is the DRAIN side -- it needs a delivery target, error
+    semantics, and the retry/backoff/timeout behaviour v2 §3 prohibits outright for THIS batch -- and
+    belongs to a separate, later, unnamed batch. Whoever builds it must re-read v2 §3's retry/
+    backoff/timeout prohibition before extending this vocabulary."""
 
     __tablename__ = "outbox_events"
     __table_args__ = (
@@ -1434,12 +1442,19 @@ class ContractDeliveryRecord(ProvenanceMixin, Base):
     docstring on why a second, independently-writable copy would be a duplicate discriminator capable
     of contradicting the row it joins to).
 
-    ``outcome`` HAS NO ENUM. No dispatcher exists yet to define what values it may take -- that is
-    9c-1b's mechanism, not this batch's. Enumerating it now would be inventing that vocabulary ahead
-    of the thing that owns it, the same defect ``CTaskOpportunityVerdictRecord.validator_check``
-    already avoids for its own not-yet-fixed vocabulary ("draws from one named tuple, no DB-level
-    enum"). Only a nonblank guard lives here; 9c-1b must define the vocabulary AND what "delivered"
-    means against it before any join against this table's ``outcome`` is meaningful."""
+    ``outcome`` HAS NO ENUM. No dispatcher exists yet to define what values it may take. Enumerating
+    it now would be inventing that vocabulary ahead of the thing that owns it, the same defect
+    ``CTaskOpportunityVerdictRecord.validator_check`` already avoids for its own not-yet-fixed
+    vocabulary ("draws from one named tuple, no DB-level enum"). Only a nonblank guard lives here.
+    **CORRECTION (9c-1b, work order v2 ADDENDUM A, Ruling 2): this docstring originally said "that is
+    9c-1b's mechanism, not this batch's... 9c-1b must define the vocabulary AND what 'delivered'
+    means against it" -- worded to imply 9c-1b builds a dispatcher. It does not.** 9c-1b names the
+    ``outcome`` vocabulary and defines "delivered" against it
+    (``app.application.live_engine_c.outbox_enqueue.DELIVERY_OUTCOMES``/``is_delivered``) as the
+    ENQUEUE side's own D3 deliverable -- it builds no dispatcher and adds no `failed`/`retrying`-style
+    member, because no dispatcher exists yet to source those from. A later, unnamed batch builds the
+    dispatcher and extends this vocabulary from the real error semantics it introduces, after
+    re-reading v2 §3's retry/backoff/timeout prohibition."""
 
     __tablename__ = "contract_deliveries"
     __table_args__ = (
