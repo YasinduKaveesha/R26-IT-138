@@ -8839,3 +8839,199 @@ not exercised, per the reasoning above. The C API client has still never issued 
 cannot: session creation refuses while seven parameter families are unsigned, which is intended
 behaviour. Every claim here is about shape, structure and test behaviour, not about a working call
 or a working bundle.
+
+## 2026-08-24 — Component C 10.0b-fix: a generated, bundler-safe local copy of the exemplar data
+
+**Builder's entry, written as part of this batch's own commit.** Governed by the supervisor's
+10.0b-fix builder prompt (`Component_C_Frontend/10.0b-fix-builder-prompt.md`), owner ruling
+option B.
+
+**The problem this batch fixes.** `dev-fixture-exemplars.ts` (10.0b-i) read
+`backend/contract/c-prompt-exemplars.json` and `c-template-registry.json` directly off disk via
+`node:fs` + `import.meta.url`-relative resolution. That is a static Hermes bundling failure for
+iOS and Android, not a runtime branch: `import.meta` is not supported in Hermes, and `node:fs` has
+no React Native equivalent. Neither problem is reached only when the development-fixture
+environment gate opens — the import is static, so Metro resolves it at bundle time regardless.
+10.0b-i's own register entry named this as a disclosed, unresolved risk and a blocking
+prerequisite of the batch that would first import `component-c-api.ts` from application code.
+
+**The fix — owner ruling, option B.** A generated, bundler-safe local copy of the exemplar data,
+mirroring the existing `generate-contract-types.mjs` / `openapi-types.ts` pattern (second instance
+of exactly that pattern):
+- `frontend/scripts/generate-c-prompt-exemplars.mjs` reads `backend/contract/c-prompt-exemplars.json`
+  read-only and emits `frontend/src/api/generated/c-prompt-exemplars.ts` — data and a type only, no
+  node builtin, no `import.meta`. The frozen artefact's own `"label": "TEST_FIXTURE_ONLY"` is
+  asserted present before generation (the script throws rather than silently relabelling if it
+  ever isn't) and re-exported as `TEST_FIXTURE_ONLY_EXEMPLARS_LABEL`.
+- `npm run generate:c-prompt-exemplars` added alongside the existing `generate:contract-types`.
+- `dev-fixture-exemplars.ts` rewritten to import `EXEMPLAR_ENTRIES` from the generated module
+  instead of reading either artefact off disk. Its selection logic — the alphabetically-first
+  template id, at `difficulty_level` 1, deterministic, never hardcoded — is unchanged in effect.
+- The registry read is removed rather than replaced with a second generated artefact: the
+  alphabetically-first id is now derived from `EXEMPLAR_ENTRIES` itself. This is not a behaviour
+  change — `c-prompt-exemplars-freeze.test.ts`'s own coverage assertion (150 entries, no duplicate
+  `(template_id, level)` pairs, complete 5-level coverage for every one of the registry's 30
+  template ids) already forces the two id-sets to be identical, since 30 ids x 5 levels already
+  accounts for the entire 150-entry budget. That test is unchanged and still runs every time.
+- A drift test (`c-prompt-exemplars-generated-freeze.test.ts`) regenerates and compares to the
+  committed file, mirroring `contract-freeze.test.ts`'s staleness assertion, plus a permanent
+  in-memory negative control. Per the sibling freeze tests' own established division of labour
+  (`c-template-registry-freeze.test.ts`, `c-prompt-exemplars-freeze.test.ts`), the one-time
+  real-file mutation + rebuild + revert demonstration is the supervisor's VERIFY step, not
+  performed by the builder in this batch.
+- A cross-check test (`c-prompt-exemplars-generated-cross-check.test.ts`) asserts the generated
+  copy agrees with the frozen artefact directly: 150 entries, the five-field allow-list,
+  `valid_action_space` agreement with the registry, and the `TEST_FIXTURE_ONLY` label.
+- A structural test (`no-node-builtins-outside-tests-and-scripts.test.ts`) walks every `.ts`/`.tsx`
+  file under `src/` and `app/` outside `__tests__/` and `scripts/`, one `test()` per file, and
+  asserts none contains `node:fs`, `node:path`, `node:url`, or `import.meta` — turning the
+  acceptance criterion into an assertion rather than a one-off grep.
+
+**What this batch deliberately did not do.** No UI, no `.tsx`, no screen, component, or route — that
+is 10.0b-ii. No change to `src/features/c-session/archetypes/*`. No change to the fixture's
+behaviour: same deterministic entry, same gating, `abandonSession`/`completeSession` still throw,
+each asserted individually (unchanged from 10.0b-i, not re-tested here). No change under
+`Upadya/Dev/backend/`, including either frozen artefact — this register entry is the sole
+exception, append-only. No hand-edit of any generated file, including the pre-existing
+`openapi-types.ts`. No Metro config change, resolver alias, or build-time stripping — the
+"B-strict" variant was considered and not chosen, and was not built speculatively. No new npm
+dependency. No change to `EXPO_PUBLIC_APP_ENV` / `EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE` gating.
+
+**The acceptance criterion this batch exists for, measured directly.** A temporary probe import
+(`import { createComponentCApi } from '@/src/api/component-c-api';` plus `void createComponentCApi;`
+in `app/_layout.tsx`) was added to force Metro to resolve `component-c-api.ts`'s full import graph
+— and therefore `dev-fixture-exemplars.ts`'s — during export, then reverted. `app/_layout.tsx`'s
+SHA-256 before the probe and after the revert are identical:
+`860f1200cebb799d274cf1f314bc71b15f4f5c1bdb3cb93565efa321216e5d6a` both times, and
+`git status --porcelain` shows no change to the file. Under that probe:
+- `npx expo export --platform ios` — **succeeded.** Output: `_expo/static/js/ios/entry-753283512755ebb0b36d18b1751924f4.hbc (4.83 MB)`, `Exported: dist`.
+- `npx expo export --platform android` — **succeeded.** Output: `_expo/static/js/android/entry-0ad9730768e0a9db50d242d99f1030d0.hbc (4.82 MB)`, `Exported: dist`.
+- `npx expo export --platform web` — **succeeded** (as it did before this batch), full route
+  manifest emitted, `Exported: dist`.
+- `npx tsc --noEmit` — **no output, clean.**
+
+**Generator determinism, measured.** `node scripts/generate-c-prompt-exemplars.mjs` run twice
+independently; both runs produced a file with SHA-256
+`6f47347b8491b6ad81d1c5c558e2f650ad0fe04f585d9c714a03b4c61d0006ad`.
+
+**Files changed.** `frontend/package.json` (one script line added); `frontend/src/api/dev-fixture-exemplars.ts`
+(rewritten); `frontend/scripts/generate-c-prompt-exemplars.mjs` (new);
+`frontend/src/api/generated/c-prompt-exemplars.ts` (new, generated);
+`frontend/src/api/__tests__/c-prompt-exemplars-generated-freeze.test.ts` (new);
+`frontend/src/api/__tests__/c-prompt-exemplars-generated-cross-check.test.ts` (new);
+`frontend/src/api/__tests__/no-node-builtins-outside-tests-and-scripts.test.ts` (new). No backend
+file touched other than this entry — `git status --porcelain` confirms `frontend/` only, plus this
+append.
+
+**What the builder did NOT do.** Did not run `npm run test:contract` or `expo start`, per this
+batch's own constraint — only the three `expo export` invocations and `tsc --noEmit`, both
+explicitly authorised acceptance-criterion commands. Did not run the real-file mutation/revert
+demonstration for either new freeze test — that is the supervisor's VERIFY step, per precedent. Did
+not touch any Metro config, resolver, or alias. No test count, timing, or pass/fail figure is
+recorded here beyond the export outputs and the two generator hashes, which were measured directly
+by the builder as this batch's own authorised commands.
+
+**Verification.** — supervisor's, pending
+
+**CORRECTION, recorded rather than quietly overwritten.** The first form of
+`no-node-builtins-outside-tests-and-scripts.test.ts` used a bare substring match
+(`/node:fs|node:path|node:url|import\.meta/`) over raw source text. Supervisor VERIFY ran the
+suite and found it red — 356 tests, 354 pass, 2 fail — on the guard's own two subject files,
+`src/api/dev-fixture-exemplars.ts` and `src/api/generated/c-prompt-exemplars.ts`. Neither file
+imports a node builtin or uses `import.meta`; both contain those strings only in explanatory
+comments describing why the real imports were removed. This is the project's documented
+text-search-over-AST trap: a substring match cannot distinguish a comment from code. It was caught
+in supervisor verification, not by the builder, which is the division of labour working as
+intended — the builder does not run this suite.
+
+The repair strips `//` and `/* */` comments before matching, then requires actual import/require
+syntax for the node-builtin check (`from 'node:fs'`, bare `import 'node:fs'`, `require('node:fs')`,
+dynamic `import('node:fs')`) rather than a bare substring; `import.meta` remains a bare token match
+post-strip. Stated limits, recorded in the test's own header rather than left implicit: it does
+not catch a bare non-`node:`-prefixed specifier (`from 'fs'`) — out of scope per this batch's own
+acceptance criterion, and none exist in this codebase today; the comment-stripping is regex-shaped,
+not a real tokenizer, so a string literal containing a literal `//` could have same-line trailing
+text mis-treated as commented-out (no file today does this); and a constructed/dynamic specifier
+built from a non-literal expression (e.g. string concatenation) would not be caught — true AST
+analysis would close this and was judged out of proportion to this batch's scope. No file was
+exempted by path; the same walk and the same per-file test shape apply to every candidate file,
+including the two that previously failed.
+
+Re-verified after the repair: `npx tsc --noEmit` clean; `npx expo export --platform ios` succeeded
+(`_expo/static/js/ios/entry-506a852952997b29c9375074e8f61921.hbc`, 4.83 MB); `--platform android`
+succeeded (`_expo/static/js/android/entry-08cd01583aa236fe758ac2c313fbfca5.hbc`, 4.82 MB);
+`--platform web` succeeded, full route manifest. The bundling probe in `app/_layout.tsx` was
+re-added and reverted a second time; its SHA-256 before and after is again
+`860f1200cebb799d274cf1f314bc71b15f4f5c1bdb3cb93565efa321216e5d6a`, unchanged from the first round.
+
+**Verification — supervisor's, measured.** Frontend contract suite: **356 tests, 356 passed, 0
+failed.** Reconciles against the 275 / 275 / 0 baseline at `c7643da`: eighty-one tests added, none
+removed — `275 + 81 = 356`. Register append is additive only (93 lines added, none removed, binary
+mode, zero CR bytes).
+
+**The acceptance criterion this batch exists for, re-run by the supervisor with an independently
+constructed probe.** A probe importing `createComponentCApi` was added to `app/_layout.tsx` by the
+supervisor, not reused from the builder's run:
+
+- `npx expo export --platform ios` → **succeeded**,
+  `_expo/static/js/ios/entry-6f31ae6af22c2102bc6cd141a315533e.hbc (4.83 MB)`, `Exported: dist`.
+- `npx expo export --platform android` → **succeeded**, `Exported: dist`.
+
+The same command failed before this batch with
+``SyntaxError: `import.meta` is not supported in Hermes`` at `dev-fixture-exemplars.ts:33`,
+reproduced independently by the supervisor before the batch was authorised. The probe was removed
+and the revert proven byte-perfect (`sha256sum -c` OK,
+`860f1200cebb799d274cf1f314bc71b15f4f5c1bdb3cb93565efa321216e5d6a`, matching the builder's two
+rounds); `dist/` was deleted after each export.
+
+**Generator determinism, re-measured.** Two independent runs of
+`node scripts/generate-c-prompt-exemplars.mjs` both produced
+`6f47347b8491b6ad81d1c5c558e2f650ad0fe04f585d9c714a03b4c61d0006ad`, matching the builder's reported
+hash exactly.
+
+**The drift test's real-file demonstration — the supervisor's half of the division of labour named
+in this file's sibling freeze tests.** One byte was flipped in the committed
+`src/api/generated/c-prompt-exemplars.ts` and **three** tests failed: the staleness assertion, the
+150-entry agreement, and the `valid_action_space` cross-check. The file was restored from a copy
+taken beforehand, the restoration proven byte-identical by `sha256sum -c`, and the suite re-run
+green. The generated copy is provably derived, not merely asserted to be.
+
+**The repaired guard was proven to still fire, because the repair LOOSENED it.** A guard that stops
+matching is worse than no guard, so four injection forms were each added to an application file
+(`src/api/errors.ts`), run, and reverted:
+
+| Injected form | Guard fired |
+|---|---|
+| `import { readFileSync } from 'node:fs';` | yes |
+| `const x = require('node:path');` | yes |
+| `const y = import('node:url');` | yes |
+| `const z = import.meta.url;` | yes |
+
+All four fire; the explanatory comments in the two subject files do not. `src/api/errors.ts` was
+restored and verified by hash after each injection. The guard's stated blind spots — a bare `'fs'`
+specifier, a constructed/dynamic specifier, and regex-shaped rather than tokenizer-accurate comment
+stripping — are written into the test's own header rather than left for a reader to discover.
+
+**A supervisor measurement error, disclosed.** The first attempt at the four-form check used a
+`grep -c` whose escaping did not match the test-runner's Windows-style output, and reported that
+three of the four forms did **not** fire — including `import.meta`, the very failure this batch
+exists to prevent. That reading was wrong. It was re-measured a different way before anything was
+acted on, and all four fire. Recorded because this file's own standing rule is to distrust a
+surprising number and re-measure before reporting it, and because a supervisor is not exempt from
+the rule: acting on the first reading would have sent a builder to repair a guard that was already
+correct.
+
+**What the supervisor did NOT verify.** The backend suite was not re-run; nothing under `backend/`
+is touched but this batch's own register entry, so its numbers are expected unmoved but are **not
+measured and not claimed**. `expo start` was not run — only `export`, which exercises bundling and
+not runtime, so the fixture serving a task in a running app remains unexercised. The C API client
+has still never issued a live request and cannot: session creation refuses while seven parameter
+families are unsigned, which is intended behaviour.
+
+**What this unblocks, and what it costs.** 10.0b-ii may now wire a screen to `createComponentCApi`
+without breaking the native bundle. The accepted cost, per the owner's option-B ruling, is that
+roughly 29 KB of `TEST_FIXTURE_ONLY` task content now ships inside the production bundle, dead
+behind an environment gate that cannot open in production. What makes that defensible survives in
+the implementation: the content is real generator output relayed verbatim, the `TEST_FIXTURE_ONLY`
+label is carried into the generated module, the copy is provably derived by the drift test, and the
+gate is untouched.

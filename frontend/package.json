@@ -10,6 +10,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "generate:contract-types": "node scripts/generate-contract-types.mjs",
+    "generate:c-prompt-exemplars": "node scripts/generate-c-prompt-exemplars.mjs",
     "test:contract": "node --import tsx --test src/api/__tests__/*.test.ts"
   },
   "dependencies": {
