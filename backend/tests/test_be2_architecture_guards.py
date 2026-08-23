@@ -1727,3 +1727,79 @@ def test_z5e_guard_fires_on_synthetic_violation() -> None:
         for node in ast.walk(clean_tree)
     )
     assert not found_clean
+
+
+# =====================================================================================
+# C prompt-exemplars batch (D4) -- no module under app/ may read
+# backend/contract/c-prompt-exemplars.json. It exists for the frontend development fixture and
+# for tests (tests/test_c_prompt_exemplars_freeze.py); a production code path reading it would be
+# serving manufactured content to a child, which is the failure the whole gate exists to prevent.
+#
+# MECHANISM AND ITS STATED LIMIT (supervisor ruling 2): this guard scans every ast.Constant
+# string node under app/ for the literal filename "c-prompt-exemplars.json" -- it therefore
+# catches open("contract/c-prompt-exemplars.json"), Path(...) / "c-prompt-exemplars.json",
+# .read_text() on a path built from that literal, and any other use where the filename appears
+# as a string literal in source. IT DOES NOT CATCH a path assembled dynamically -- from a
+# variable, a glob pattern, an f-string built from parts, or a config-supplied value -- since no
+# such construction would ever contain the literal filename as one AST constant. That is an
+# accepted limit of this guard, not an oversight: closing it with heuristics for dynamic
+# construction would produce false positives on unrelated string handling and yield a guard
+# nobody trusts (supervisor ruling 2, "do NOT try to close the gap"). A later reader should read
+# "no app module reads this artefact" as "no app module references it by literal filename" --
+# not as a stronger, unconditional guarantee.
+# =====================================================================================
+
+_PROMPT_EXEMPLARS_ARTEFACT_FILENAME = "c-prompt-exemplars.json"
+
+
+def _references_prompt_exemplars_artefact(tree: ast.AST) -> bool:
+    """Shared by the real guard and its negative control, so the two can never drift apart.
+    Matches ONLY a literal string constant containing the artefact's filename -- see the module
+    limit documented above."""
+    return any(
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and _PROMPT_EXEMPLARS_ARTEFACT_FILENAME in node.value
+        for node in ast.walk(tree)
+    )
+
+
+def test_no_app_module_reads_prompt_exemplars_artefact() -> None:
+    """SIGNAL: no file under app/ contains a string-literal reference to
+    "c-prompt-exemplars.json" anywhere in its source. Would FAIL if any file under app/ opened,
+    built a Path to, or otherwise referenced the artefact by its literal filename -- e.g. a
+    future task-serving code path reaching for the frontend's development fixture instead of
+    real generation. Does NOT prove the absence of a dynamically-constructed reference -- see the
+    module docstring above for that stated limit."""
+    app_root = Path("app")
+    assert app_root.is_dir()
+    scanned_files = sorted(app_root.rglob("*.py"))
+    assert scanned_files, "no *.py files found under app/ -- scan set degraded to a no-op"
+
+    offenders = []
+    for path in scanned_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if _references_prompt_exemplars_artefact(tree):
+            offenders.append(path)
+    assert not offenders, offenders
+
+
+def test_prompt_exemplars_artefact_read_guard_negative_control_fires() -> None:
+    """POSITIVE PROOF the detector above does real work, not merely observing that no file
+    happens to violate it, AND that it discriminates this specific artefact rather than
+    blanket-matching any contract filename. Parses SYNTHETIC, in-memory module source -- never a
+    file under app/, which would be a real boundary breach waiting to be committed by accident.
+    Would FAIL if the detector stopped recognising a literal reference to the artefact's
+    filename, or if it over-matched and flagged an unrelated contract file too."""
+    violating_source = 'open("backend/contract/c-prompt-exemplars.json")\n'
+    unrelated_contract_source = 'open("backend/contract/c-template-registry.json")\n'
+
+    violating_tree = ast.parse(violating_source, filename="<synthetic-prompt-exemplars-violation>")
+    unrelated_tree = ast.parse(unrelated_contract_source, filename="<synthetic-unrelated-contract-file>")
+
+    assert _references_prompt_exemplars_artefact(violating_tree), (
+        "negative control failed to catch a real literal-filename reference"
+    )
+    assert not _references_prompt_exemplars_artefact(unrelated_tree), (
+        "guard incorrectly flagged an unrelated contract filename -- it is not discriminating"
+    )
