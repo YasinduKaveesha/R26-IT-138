@@ -73,6 +73,11 @@ provenance/wheels/*
 # VALIDATORS BATCH: re-versioned wheel (B dependency pin bumped to 0.1.0+bf5.09267ab; C's own
 # file inventory unchanged). The c1 line above is kept, not replaced, same rationale as bf4/bf5.
 !provenance/wheels/prabathi_component_c_live_engine-0.1.0+c2.09267ab-py3-none-any.whl
+# 9b-0: rebuilt to ship component_c_generator/c_to_3/emit.py (DEC-1's blocker resolved -- B now
+# ships validators/). The c2 line above is kept, not replaced, same retention rationale as
+# c1/bf4/bf5 -- the superseded wheel binary stays in the repo even though it is no longer
+# installed (requirements.lock references only c3).
+!provenance/wheels/prabathi_component_c_live_engine-0.1.0+c3.09267ab-py3-none-any.whl
 !provenance/runtime-bundle.schema.json
 # Phase 2: Component C's own minimal runtime-bundle schema (validated at test/run time by
 # app.infrastructure.runtime_bundle_c.loader). Same carve-out pattern as B's schema above.

@@ -17,7 +17,7 @@ full Dev checkout does (host, or a container with the repo mounted rather than j
 
 HOST-CHECKOUT-ONLY (skip with an explicit, file-existence-driven reason in-container; same
 collected count in every environment):
-  - T1 (64 cases): SOURCE_MANIFEST.txt self-consistency -- needs packaging/.
+  - T1 (65 cases): SOURCE_MANIFEST.txt self-consistency -- needs packaging/.
   - T4-manifest (1 case): C-manifest-vs-B-manifest git_commit_sha1 equality -- needs both
     provenance/*.json files.
   - T5-host (4 cases): requirements.in / Dockerfile / .dockerignore filename presence, and the
@@ -36,7 +36,7 @@ package and its distribution metadata are both present):
     file-level check (both are wanted; they assert different things).
   - T5-lock (1 case, RECOVERED this rework): requirements.lock's --hash=sha256: for this wheel
     equals sha256sum of the actual .whl on disk.
-  - T6 (18 cases): per-module ModuleNotFoundError + importability corroboration, against the
+  - T6 (17 cases): per-module ModuleNotFoundError + importability corroboration, against the
     installed package.
   - T7-live (1 case, RECOVERED this rework): the trimmed file's NAMESPACE assertions against the
     installed package.
@@ -63,7 +63,7 @@ REQUIREMENTS_IN_PATH = BACKEND_ROOT / "requirements.in"
 REQUIREMENTS_LOCK_PATH = BACKEND_ROOT / "requirements.lock"
 DOCKERFILE_PATH = BACKEND_ROOT / "Dockerfile"
 DOCKERIGNORE_PATH = BACKEND_ROOT / ".dockerignore"
-WHEEL_FILENAME = "prabathi_component_c_live_engine-0.1.0+c2.09267ab-py3-none-any.whl"
+WHEEL_FILENAME = "prabathi_component_c_live_engine-0.1.0+c3.09267ab-py3-none-any.whl"
 WHEEL_PATH = BACKEND_ROOT / "provenance" / "wheels" / WHEEL_FILENAME
 C_DISTRIBUTION_NAME = "prabathi-component-c-live-engine"
 B_DISTRIBUTION_NAME = "upadya-component-b-live-engine"
@@ -92,9 +92,14 @@ def _require_installed_component_c_generator():
     )
 
 
-# The 16 never-ship modules (Component_C_Master_Build_Plan_v3.0 Section 6.1, plus C-22/DEC-1's
-# addition of component_c_generator.c_to_3.emit). Full dotted paths, matching the manifest's
-# excluded_by_omission.modules list exactly.
+# The 15 never-ship modules (Component_C_Master_Build_Plan_v3.0 Section 6.1). Full dotted paths,
+# matching the manifest's excluded_by_omission.modules list exactly. C-22/DEC-1's addition of
+# component_c_generator.c_to_3.emit to this list is HISTORICAL as of 9b-0
+# (Component_C_9b_9c_And_Generator_Plan_v1.0.md): DEC-1's blocker (the only shipped file importing
+# top-level `validators`, which no wheel then provided) is resolved now that B's wheel ships
+# validators/, and c_to_3/emit.py is shipped as of this rebuild -- it moved to VERBATIM_65 below
+# and its case in test_never_ship_module_is_not_importable_by_full_dotted_path moved to join the
+# positive control in test_behaviour_and_c_to_3_packages_remain_importable.
 NEVER_SHIP_MODULES = (
     "component_c_generator.behaviour.action_provider",
     "component_c_generator.behaviour.attempt_loop",
@@ -111,13 +116,14 @@ NEVER_SHIP_MODULES = (
     "component_c_generator.audits.determinism",
     "component_c_generator.audits.leakage",
     "component_c_generator.audits.population_neutrality",
-    "component_c_generator.c_to_3.emit",
 )
 
-# The 64 verbatim-shipped files, hardcoded here (not derived from SOURCE_MANIFEST.txt at
-# collection time) so parametrize collects the same 64 cases in every environment -- including
+# The 65 verbatim-shipped files, hardcoded here (not derived from SOURCE_MANIFEST.txt at
+# collection time) so parametrize collects the same 65 cases in every environment -- including
 # inside the container, where they SKIP rather than silently vanish from the collected count.
-VERBATIM_64 = (
+# Includes component_c_generator/c_to_3/emit.py as of 9b-0 (was VERBATIM_64, 64 entries, before
+# this batch resolved DEC-1's blocker -- see NEVER_SHIP_MODULES's comment above).
+VERBATIM_65 = (
     "component_c_generator/__init__.py",
     "component_c_generator/adaptation.py",
     "component_c_generator/aggregation/__init__.py",
@@ -128,6 +134,7 @@ VERBATIM_64 = (
     "component_c_generator/behaviour/summary.py",
     "component_c_generator/c_to_3/__init__.py",
     "component_c_generator/c_to_3/adapter.py",
+    "component_c_generator/c_to_3/emit.py",
     "component_c_generator/c_to_3/inputs.py",
     "component_c_generator/catalogue/__init__.py",
     "component_c_generator/catalogue/loaded_models.py",
@@ -183,7 +190,7 @@ VERBATIM_64 = (
     "component_c_generator/tasks/share_fairly.py",
     "component_c_generator/tasks/take_away_and_compare.py",
 )
-assert len(VERBATIM_64) == 64
+assert len(VERBATIM_65) == 65
 
 # COR-2's original five Phase 1 batch 1a pin-DECLARATION locations (requirements.in,
 # requirements.lock, Dockerfile, .dockerignore, this manifest), minus requirements.lock (moved to
@@ -228,7 +235,7 @@ def _source_manifest_entries() -> dict[str, str]:
 # .git directory at all -- see .dockerignore line 1) can execute `git show` against Yass. If a
 # future edit changes a packaged file's bytes without updating SOURCE_MANIFEST.txt to match, this
 # test goes red; it does not merely check the file exists.
-@pytest.mark.parametrize("rel_path", VERBATIM_64)
+@pytest.mark.parametrize("rel_path", VERBATIM_65)
 def test_verbatim_file_matches_source_manifest_sha256(rel_path: str) -> None:
     if not _HOST_CHECKOUT_AVAILABLE:
         pytest.skip(_HOST_CHECKOUT_SKIP_REASON)
@@ -288,7 +295,7 @@ def test_c_source_manifest_recomputed_matches_recorded_hash_and_count() -> None:
 # uses for its own wheel), so it is present at WHEEL_PATH in every environment this batch runs in.
 # ---------------------------------------------------------------------------
 def test_never_ship_modules_absent_from_built_wheel() -> None:
-    """SIGNAL: none of the 16 never-ship modules appears as a file inside the built .whl's zip
+    """SIGNAL: none of the 15 never-ship modules appears as a file inside the built .whl's zip
     archive -- read from the wheel's actual contents, not the source tree, so a packaging mistake
     that shipped a never-ship file would be caught even if the source tree itself looked correct.
     Would FAIL if any never-ship module's .py or package __init__.py were present in the archive."""
@@ -460,32 +467,46 @@ def test_requirements_lock_hash_matches_wheel_on_disk() -> None:
 @pytest.mark.parametrize("module_name", NEVER_SHIP_MODULES)
 def test_never_ship_module_is_not_importable_by_full_dotted_path(module_name: str) -> None:
     """SIGNAL: importlib.import_module(<full dotted path>) raises ModuleNotFoundError for each of
-    the 16 never-ship modules. The importorskip guard prevents the vacuous pass that would occur
+    the 15 never-ship modules. The importorskip guard prevents the vacuous pass that would occur
     if the wheel were not installed at all (every assertion below would then trivially "pass" for
     the wrong reason); this per-test assertion prevents the narrower vacuous pass of testing
     package-root absence when the true risk is a specific SUBMODULE. In particular
     component_c_generator.behaviour and component_c_generator.c_to_3 ARE legitimately importable
     (behaviour/__init__.py, behaviour/summary.py, c_to_3/__init__.py, c_to_3/adapter.py,
-    c_to_3/inputs.py all ship) -- if behaviour/latency.py or c_to_3/emit.py were ever later added
-    to the wheel, THIS specific parametrized case (not a package-level check) would start
-    succeeding at import and this test would go red, exactly the failure mode the guard exists to
-    catch."""
+    c_to_3/emit.py, c_to_3/inputs.py all ship) -- if behaviour/latency.py were ever later added to
+    the wheel, THIS specific parametrized case (not a package-level check) would start succeeding
+    at import and this test would go red, exactly the failure mode the guard exists to catch.
+    component_c_generator.c_to_3.emit was itself exactly this prediction come true: it WAS a
+    parametrized case here (Phase 1 batch 1a through the VALIDATORS BATCH), and 9b-0
+    (Component_C_9b_9c_And_Generator_Plan_v1.0.md) is the batch where it started succeeding at
+    import -- DEC-1's blocker resolved, B's wheel now shipping validators/. Rather than leave that
+    case here to go red, it was MOVED to join the positive control in
+    test_behaviour_and_c_to_3_packages_remain_importable below, which already proves c_to_3.adapter
+    and c_to_3.inputs DO import; c_to_3.emit now joins them there instead of being asserted absent
+    here."""
     _require_installed_component_c_generator()
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module(module_name)
 
 
 def test_behaviour_and_c_to_3_packages_remain_importable() -> None:
-    """SIGNAL: the two never-ship-adjacent packages (behaviour/, c_to_3/) that legitimately ship
-    partial contents (behaviour/summary.py; c_to_3/__init__.py, adapter.py, inputs.py) DO import
-    successfully -- proving T6's per-module ModuleNotFoundError assertions are testing specific
-    submodule absence, not accidentally relying on the whole package being unreachable. Would FAIL
-    if a never-ship-adjacent __init__.py were ever accidentally omitted."""
+    """SIGNAL: the never-ship-adjacent package behaviour/ (which legitimately ships partial
+    contents, behaviour/summary.py) and c_to_3/ (which now ships in full -- __init__.py, adapter.py,
+    emit.py, inputs.py, as of 9b-0) DO import successfully -- proving T6's per-module
+    ModuleNotFoundError assertions are testing specific submodule absence, not accidentally relying
+    on the whole package being unreachable. component_c_generator.c_to_3.emit's case moved here
+    from test_never_ship_module_is_not_importable_by_full_dotted_path in 9b-0
+    (Component_C_9b_9c_And_Generator_Plan_v1.0.md): DEC-1's blocker is resolved (B's wheel now
+    ships validators/, emit.py's only missing import) and emit.py is shipped as of this rebuild, so
+    it belongs among the imports proven to succeed, not the ones proven to fail. Would FAIL if a
+    never-ship-adjacent __init__.py were ever accidentally omitted, or if c_to_3/emit.py regressed
+    to being omitted again without this test being moved back."""
     _require_installed_component_c_generator()
     importlib.import_module("component_c_generator.behaviour")
     importlib.import_module("component_c_generator.behaviour.summary")
     importlib.import_module("component_c_generator.c_to_3")
     importlib.import_module("component_c_generator.c_to_3.adapter")
+    importlib.import_module("component_c_generator.c_to_3.emit")
     importlib.import_module("component_c_generator.c_to_3.inputs")
 
 

@@ -7,7 +7,7 @@
   "database_schema_revision": "UNRESOLVED_PLACEHOLDER_C2_TEST_FIXTURE",
   "generator": {
     "source_identifier": "prabathi-component-c-live-engine",
-    "source_path": "provenance/wheels/prabathi_component_c_live_engine-0.1.0+c2.09267ab-py3-none-any.whl",
+    "source_path": "provenance/wheels/prabathi_component_c_live_engine-0.1.0+c3.09267ab-py3-none-any.whl",
     "checksum": {
       "algorithm": "sha256",
       "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"

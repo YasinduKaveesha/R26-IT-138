@@ -24,10 +24,14 @@ USAGE (from `backend/`, or anywhere — paths below are absolute):
     python scripts/build_component_c_wheel.py --outdir /path/outside/the/repo
 
 Then compare the printed sha256 against `package.wheel_sha256` in
-`provenance/component-c-live-engine-manifest.json` (currently
-`62b85a051733b00f16791a04c019a229924bbae0144de3441c27666eff3c3b39` for
-`prabathi_component_c_live_engine-0.1.0+c2.09267ab-py3-none-any.whl`). This script prints that
-comparison itself; nothing extra needs to be typed.
+`provenance/component-c-live-engine-manifest.json`, which must equal this module's own
+`COMMITTED_WHEEL_SHA256` (for `COMMITTED_WHEEL_FILENAME`, below) — the two are required to agree,
+and this script prints that comparison itself; nothing extra needs to be typed. The filename and
+hash are deliberately not restated here in prose: a value written twice can go stale against
+itself the moment either copy moves and the other does not (9b-0 found exactly that — this
+docstring named the pin's superseded c2 filename and checksum literally, in the present tense,
+after the constants below it had already moved to c3). Read `COMMITTED_WHEEL_FILENAME` /
+`COMMITTED_WHEEL_SHA256` directly; do not paste their values back into this paragraph.
 
 HOW `requirements.lock` IS REGENERATED (documented here because this is the file that would
 otherwise document it and doesn't): NOT via `pip-compile`. `pip-compile` (or any other lockfile
@@ -49,6 +53,20 @@ or carried over from a previous version.
 Governed by `Component_C_9b_9c_And_Generator_Plan_v1.0.md`'s R0-a. Batch scope: packaging/build
 tooling only. No wheel produced by this script is ever copied into `backend/provenance/wheels/`
 by this script itself — that copy, if ever wanted, is a separate, deliberate, human action.
+
+SOURCE_DATE_EPOCH (owner-approved build-process decision, 9b-0 §0 Blocker 2, Option A). Builds
+from this point set `SOURCE_DATE_EPOCH` inside the container so `python -m build` stamps every
+zip entry with the same deterministic timestamp, making future rebuilds byte-identical **to each
+other**. This does NOT retroactively reproduce the wheel committed on 2026-08-15: that build did
+not set `SOURCE_DATE_EPOCH` and its 69 entries embed two different timestamp sources instead of
+one (`14:00:00` on the 65 source-copied entries, `14:00:18` on the 4 generated `dist-info/*`
+entries). Reproducing that wheel's bytes exactly would require the original build's wall-clock
+second, which was never recorded anywhere. This first post-boundary build is therefore a
+deliberate, owner-approved provenance boundary: a one-time, expected NOT-BYTE-IDENTICAL result
+against the currently-committed wheel, recorded here rather than disguised as a reproduction of
+it. Every rebuild after this one is compared against a wheel that itself used
+`SOURCE_DATE_EPOCH`, so from here forward byte-identity is the expected result again, and any
+future mismatch is a real finding, not this boundary repeating.
 """
 
 from __future__ import annotations
@@ -81,8 +99,18 @@ WHEEL_VERSION = "wheel==0.46.3"
 BUILD_VERSION = "build==1.2.2.post1"
 
 # The currently-committed wheel, for the byte-identity comparison this script prints.
-COMMITTED_WHEEL_FILENAME = "prabathi_component_c_live_engine-0.1.0+c2.09267ab-py3-none-any.whl"
-COMMITTED_WHEEL_SHA256 = "62b85a051733b00f16791a04c019a229924bbae0144de3441c27666eff3c3b39"
+COMMITTED_WHEEL_FILENAME = "prabathi_component_c_live_engine-0.1.0+c3.09267ab-py3-none-any.whl"
+COMMITTED_WHEEL_SHA256 = "44ce33511f03a91582f0ade6730ed600ce710ea833cdc3714f7b91f366b298a4"
+
+# Deterministic build timestamp (9b-0 §0 Blocker 2, Option A -- owner-approved build-process
+# decision, not a scientific one). Value is the pinned commit's committer date, expressed as a
+# Unix epoch second: 2026-08-08T15:44:05+05:30 for 09267abfe83829168b8b4817eb4c59d10f54e311.
+# That commit's author date and committer date are identical, so there is no ambiguity about
+# which of the two was used here. Passed into the container so python -m build stamps every zip
+# entry with this single timestamp, making rebuilds from this point byte-identical to each other.
+# It does not, and cannot, retroactively reproduce the wheel committed on 2026-08-15 -- see the
+# module docstring.
+SOURCE_DATE_EPOCH = 1786184045
 
 
 def fatal(message: str) -> "None":
@@ -174,6 +202,8 @@ def main() -> int:
         args.docker_bin,
         "run",
         "--rm",
+        "-e",
+        f"SOURCE_DATE_EPOCH={SOURCE_DATE_EPOCH}",
         "-v",
         f"{PACKAGING_SRC}:/src:ro",
         "-v",
@@ -203,6 +233,7 @@ def main() -> int:
     print(f"Produced sha256: {produced_sha256}")
     print(f"Committed wheel: {WHEELS_DIR / COMMITTED_WHEEL_FILENAME}")
     print(f"Committed sha256: {COMMITTED_WHEEL_SHA256}")
+    print(f"SOURCE_DATE_EPOCH used for this build: {SOURCE_DATE_EPOCH}")
     print()
 
     if produced_wheel.name == COMMITTED_WHEEL_FILENAME and produced_sha256 == COMMITTED_WHEEL_SHA256:
@@ -218,10 +249,24 @@ def main() -> int:
         print(
             "NOT BYTE-IDENTICAL: sha256 differs from the committed wheel. This is a finding to "
             "record, not to fix by editing any recorded checksum or by replacing the committed "
-            "wheel. The usual cause is zip entry timestamps / file-order nondeterminism in "
-            "python -m build's own wheel writer; SOURCE_DATE_EPOCH (and, if that alone is "
-            "insufficient, a deterministic re-zip pass) is the standard remedy to investigate, "
-            "not applied automatically by this script."
+            "wheel."
+        )
+        print(
+            "  If the committed wheel predates this script setting SOURCE_DATE_EPOCH (i.e. this "
+            "is the first rebuild since 9b-0 §0 Blocker 2's Option A took effect): this "
+            "mismatch is EXPECTED, exactly once. The committed wheel was built without "
+            "SOURCE_DATE_EPOCH and embeds two different timestamp sources (14:00:00 on its 65 "
+            "source-copied entries, 14:00:18 on its 4 generated dist-info/* entries); this build "
+            "used a single deterministic timestamp instead. That is a recorded provenance "
+            "boundary, not a build defect -- do not chase it by editing recorded checksums or by "
+            "trying to guess the original build's wall-clock second (it was never recorded)."
+        )
+        print(
+            "  If the committed wheel was ALREADY built with SOURCE_DATE_EPOCH set (i.e. this "
+            "is a later rebuild, past that boundary): this mismatch is real nondeterminism to "
+            "investigate -- e.g. file-order nondeterminism in python -m build's own wheel writer "
+            "that SOURCE_DATE_EPOCH alone did not fully pin, in which case a deterministic re-zip "
+            "pass is the next thing to try, not applied automatically by this script."
         )
 
     return 0

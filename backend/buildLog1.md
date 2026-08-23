@@ -8042,3 +8042,85 @@ remains absent and separately gated. The repository-wide schema-drift gap record
 unchanged and belongs to no single batch. The R0 wheel-script finding (uncoupled
 `COMMITTED_WHEEL_SHA256`/`COMMITTED_WHEEL_FILENAME`, `scripts/build_component_c_wheel.py:84-85`) was
 again deliberately left untouched; it belongs to 9b-0's pin sweep.
+
+## 2026-08-23 -- 9b-0: the wheel rebuild that ships c_to_3/emit.py (pass C2, atomic pin sweep)
+
+Rebuilt `prabathi-component-c-live-engine` at the SAME Yass pin
+(`09267abfe83829168b8b4817eb4c59d10f54e311`) to ship
+`component_c_generator/c_to_3/emit.py` (`emit_c_to_3`, `NoRealCSessionError`), moving it from
+`excluded_by_omission` back to the verbatim-shipped set. No Yass commit was needed; only C's own
+omission list changed. New wheel: `prabathi_component_c_live_engine-0.1.0+c3.09267ab-py3-none-any.whl`.
+The superseded `c2` (and `c1`) wheel binaries are retained on disk, not deleted.
+
+**DEC-1's blocker is resolved, not waived.** Phase 1 batch 1a omitted `c_to_3/emit.py` because it
+was the only shipped file importing a top-level `validators` package that no wheel then provided.
+`upadya-component-b-live-engine` now ships `validators/` (the validators batch, same pin, B
+re-versioned to `0.1.0+bf5.09267ab`) for its own contract-validation consumer. `emit.py`'s imports
+were re-verified against the pin: `models.contracts` and `validators.contract_validators` both now
+resolve from B's wheel exactly as `c_to_3/adapter.py` already imports `validators.contract_validators`
+today; the rest are intra-package relative imports. Nothing about this batch adds a caller, an
+adapter method, a port, or a domain payload type -- the symbol now exists in the wheel, and using it
+is a separate, later work order.
+
+**The `SOURCE_DATE_EPOCH` build-process decision (Option A) took effect with this rebuild.**
+`scripts/build_component_c_wheel.py` now sets `SOURCE_DATE_EPOCH=1786184045` (the pinned commit's
+committer date, author date and committer date being identical) inside the container so
+`python -m build` stamps every zip entry with one deterministic timestamp. This makes rebuilds from
+this point byte-identical **to each other** -- confirmed across two independent builds of this
+wheel -- which is the property the provenance chain actually wants going forward. It does **not**
+retroactively reproduce the wheel committed on 2026-08-15: that build predates `SOURCE_DATE_EPOCH`
+being set at all and embeds two different timestamp sources (`14:00:00` on its 65 source-copied
+entries, `14:00:18` on its 4 generated `dist-info/*` entries) that cannot be reproduced without the
+original build's wall-clock second, which was never recorded anywhere. This is recorded as a
+deliberate, one-time provenance boundary, not disguised as a reproduction and not chased by editing
+any recorded checksum. Every rebuild after this one is compared against a wheel that itself used
+`SOURCE_DATE_EPOCH`, so byte-identity is the expected result again from here forward.
+
+**Ten pin locations updated atomically, not nine.** `requirements.in`, `requirements.lock`
+(hand-edited two-line block -- `pip-compile` appears nowhere in this repository), `Dockerfile`,
+`.dockerignore` (additive -- the existing `c2` carve-out was kept, not replaced), the C manifest,
+the four `tests/fixtures/runtime_bundle_c/*.json` fixtures (three filename+checksum, one
+filename-only -- `bad_checksum_bundle_c.json` keeps its deliberate `ffff...` value; it is a negative
+control, not a stale pin), and -- the tenth -- `scripts/build_component_c_wheel.py`'s
+`COMMITTED_WHEEL_FILENAME`/`COMMITTED_WHEEL_SHA256` constants. That tenth location was a known-open
+finding recorded in the 9c-0 and 9c-1a entries above and deliberately deferred to this batch: R0-b's
+own filename/checksum grep sweep, which corrected the count from five to nine, did not name the
+script R0-a created in the same commit, so the count went stale the moment it was written rather
+than through later drift. The manifest's `cor_2_five_pin_locations` block now records ten locations
+and carries a new correction note explaining the gap.
+
+**Manifest arithmetic, all of it moved together.** `inventory.total_files_at_pin`:
+`81 = 64 + 1 + 16` -> `81 = 65 + 1 + 15`. `verbatim_files_byte_identical_to_pinned_commit.count`:
+64 -> 65, with `component_c_generator/c_to_3/emit.py` added to its path list, sorted into place.
+`package_source_manifest.file_count`: 65 -> 66, `sha256` regenerated to match the on-disk
+`SOURCE_MANIFEST.txt` (Pass B's regeneration, verified consistent here, not re-derived by this
+entry). `excluded_by_omission.modules`: 16 -> 15, `component_c_generator.c_to_3.emit` removed.
+`dec_1_c22_validators_and_emit` was marked HISTORICAL and given a correction note recording the
+resolution, rather than deleted -- the same convention this manifest already used for `why_not_eight`.
+A new `verification.rebuild_9b_0_check` entry records the rebuild itself: `emit.py` shipped, built
+with `SOURCE_DATE_EPOCH=1786184045`, confirmed byte-identical across two independent builds.
+
+**The assertion that inverts.** In `tests/test_c1a_wheel_provenance.py`: `NEVER_SHIP_MODULES` lost
+`component_c_generator.c_to_3.emit` (16 -> 15 entries). The 64-entry verbatim-files constant gained
+`component_c_generator/c_to_3/emit.py`, sorted into place, and was renamed `VERBATIM_65` throughout
+(from `VERBATIM_64`) so the name does not lie about its contents; its length assertion now reads
+`== 65`. The T6 docstring's prediction naming `c_to_3/emit.py` as a case that would "start
+succeeding at import" was the exact prediction this batch fulfills -- it is now written describing
+what happened, not what might. The parametrized `ModuleNotFoundError` case for
+`component_c_generator.c_to_3.emit` was MOVED (not deleted) out of
+`test_never_ship_module_is_not_importable_by_full_dotted_path` to join the positive control in
+`test_behaviour_and_c_to_3_packages_remain_importable`, which already proved `c_to_3.adapter` and
+`c_to_3.inputs` import successfully; `c_to_3.emit` now imports alongside them there.
+
+**Remains open.** 9b-1 (the emission surface -- a caller for `emit_c_to_3`, an adapter method, a
+port, a domain payload type) is unbuilt and unnamed by this batch on purpose. G2's
+`AdaptationDecision` interface change and the `decide_adaptation_with_safety_flags` workaround it
+would retire are untouched; this re-pin carries no `AdaptationDecision` field change, so the
+workaround's mandatory pre-re-pin test re-run requirement does not trigger the workaround's removal.
+`SharedInterventionSessionMapping` remains absent and separately gated. The repository-wide
+schema-drift gap recorded in 9c-1a is unchanged and belongs to no single batch. This builder ran no
+Docker, no pytest, and computed no hash; verification of the sha256 identity across all ten
+locations, the suite reconciliation, and the inverted assertion's demonstrated behavior are the
+supervisor's, performed independently.
+
+**Supervisor-review correction.** The pin sweep found an eleventh reference to the wheel: `scripts/build_component_c_wheel.py`'s own module docstring named the pin's filename and sha256 literally, in the present tense ("currently ..."), and had gone stale the moment the `COMMITTED_WHEEL_FILENAME`/`COMMITTED_WHEEL_SHA256` constants twelve lines below it moved to c3 -- not a pin location in the counted, programmatically-read sense (nothing parses that prose), but stale in exactly the same way the counted ones were. Corrected in this batch: the passage now points to the constants and to the manifest's `package.wheel_sha256` instead of restating their values, so it cannot drift against itself again.

@@ -18,7 +18,7 @@ WORKDIR /app
 COPY requirements.lock ./requirements.lock
 COPY provenance/wheels/upadya_component_b_live_engine-0.1.0+bf5.09267ab-py3-none-any.whl ./provenance/wheels/upadya_component_b_live_engine-0.1.0+bf5.09267ab-py3-none-any.whl
 # Phase 1 batch 1a — Component C packaging only, no adapter wiring yet (see backend/provenance/component-c-live-engine-manifest.json).
-COPY provenance/wheels/prabathi_component_c_live_engine-0.1.0+c2.09267ab-py3-none-any.whl ./provenance/wheels/prabathi_component_c_live_engine-0.1.0+c2.09267ab-py3-none-any.whl
+COPY provenance/wheels/prabathi_component_c_live_engine-0.1.0+c3.09267ab-py3-none-any.whl ./provenance/wheels/prabathi_component_c_live_engine-0.1.0+c3.09267ab-py3-none-any.whl
 RUN python -m pip install --require-hashes --no-deps -r requirements.lock
 RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app
