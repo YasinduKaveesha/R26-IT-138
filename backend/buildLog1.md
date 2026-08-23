@@ -8657,3 +8657,185 @@ in its own docstring rather than implying a guarantee it does not provide. The a
 and local-only telemetry capture are **10.0b**. **No renderer for any of the thirty templates exists
 yet** — 10a…10h remain unbuilt. Whether the development fixture may serve a task from the exemplars
 artefact is an open owner decision.
+
+## 2026-08-24 — Component C 10.0b-i: the resolution layer
+
+**Builder's entry, written as part of this batch's own commit, per owner ruling
+(10.0-work-order.md §3.0).** Governed by `Component_C_Frontend/10.0-work-order.md` §3.2 and
+`Component_C_Frontend/Component_C_Phase_10_Sub_Phase_Sequence_v1.0.md` (v1.1 in-heading) §3.
+
+**What this batch is.** The template -> archetype resolution layer: the eight-archetype table
+and `resolveArchetype`, the declared-type -> field-kind binding, `encodeActionPayload`, the
+table-coverage assertion against `c-template-registry.json`'s 30 entries, and the development
+fixture's task-serving half (`nextTask`/`submitAction`), per the owner's 2026-08-24 ruling that
+the fixture may serve tasks from `c-prompt-exemplars.json`. **No UI. No `.tsx`. No screen,
+component, or route.** Provable by `npm run test:contract` alone, exactly as 10.0a was.
+
+**The two-layer rule, carried into code rather than restated.** An archetype declares a scene;
+the fields within it are derived, one per key, from `valid_action_space`, by declared type alone
+(sequence doc v1.1 §3.0). `resolveArchetype` (`registry.ts`) therefore does not and cannot check
+an archetype's "expected shape" against `valid_action_space` -- the sequence doc's own §3.1 states
+no archetype declares one. The one check it does make against `valid_action_space` is that every
+declared type in it is bound by the field-kind layer; an unbound type fails resolution closed.
+Both `resolveArchetype` and the archetype table use own-property lookup only, never bare property
+access, so a drifted or hostile template id (`constructor`, `toString`, `__proto__`,
+`hasOwnProperty`) cannot resolve to an inherited `Object.prototype` member -- asserted directly by
+a negative-control test, not merely reasoned about.
+
+**`encodeActionPayload` (`encode-action-payload.ts`).** Driven by the wire's `valid_action_space`
+and nothing else. Iterates the declared key set; for each key, binds its declared type
+(`field-kinds.ts`), requires `values` to own that key (own-property check, for the same
+prototype-pollution reason as above), and requires the value to satisfy the bound kind. Returns
+`null` on any failure -- never a partially built payload. The boolean trap named in the work
+order is avoided by construction: every numeric check tests `typeof value === 'number'` on the
+raw value first, with no `Number(value)` coercion step anywhere in the function, so
+`Number(true) === 1` never has a chance to admit a boolean where `int` or `number` is declared.
+Tested against all 30 real registry entries, including the four multi-key cases the archetype
+table was revised to accommodate (`C-JB-04`, `C-TC-04`, `C-CC-01`, `C-SF-02`), each named
+individually in its own test rather than folded into a loop, so a regression in any one of them
+fails by name.
+
+**The pipe-string parser is new, not reused from 10.0a's classifier.** 10.0a's own entry flagged
+`c-template-registry-freeze.test.ts`'s `PIPE_STRING` regex as latent-but-not-live: it would still
+accept a hybrid shape like `"list[int]|foo"`. That regex classifies; it is not the thing that acts
+on the alternatives. `field-kinds.ts` builds its own alternatives parser for exactly that acting
+role -- splitting on `|`, rejecting fewer than two alternatives or any empty one -- without
+touching or reusing the flagged file. None of the 30 real templates produce a hybrid shape either
+way, so this was not required to close any live defect; it closes the one 10.0a's builder said
+belonged to "10.0b, where the type vocabulary is actually acted on."
+
+**A pre-existing 10.0a gap, closed here and recorded as such.** 10.0a's own acceptance criteria
+required the same activation-gating test Component B has (`contract-freeze.test.ts:58`,
+`getComponentBDevelopmentFixture`) for Component C's fixture. It was never written:
+`getComponentCDevelopmentFixture` has been exported from `component-c-api.ts` since 10.0a with
+zero test coverage and zero non-test callers anywhere in the repository -- verified by grepping
+the whole frontend tree for both the function name and `EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE`
+before this batch's code was written, and confirmed independently by the supervisor. This batch's
+own acceptance criterion 5 ("the fixture cannot activate outside
+`EXPO_PUBLIC_APP_ENV=development`, still asserted") requires it to exist and pass, and "still" was
+false until `c-dev-fixture-task-loop.test.ts`'s first test. Recorded here as closing a 10.0a gap,
+not as new-only work belonging to this batch.
+
+**The fixture's task-serving half, and what in it is real versus a marker.** `nextTask` relays
+`prompt_payload`, `interactive_assets` and `valid_action_space` verbatim from one
+`c-prompt-exemplars.json` entry -- picked deterministically (`dev-fixture-exemplars.ts`): the
+alphabetically-first template id in the registry, at `difficulty_level` 1, read from both
+artefacts at call time rather than hardcoded, so a future registry regeneration moves the pick
+with it instead of silently going stale. The remaining `CNextTaskResponse` fields have no source
+in the exemplars artefact's five-field allow-list and are supplied per the owner's 2026-08-24
+correction: `technical_status: 'OK'` and `scaffold_state: 'C0'` are real values drawn from each
+field's actual backend vocabulary (`persistence_models.py`'s CHECK constraint; `C0`..`C4`), not
+invented; `representation_mode` is the genuine on-wire value for all 30 templates today
+(`generation.py:100`), used because it makes the fixture match production rather than diverge from
+it, carried and never branched on; `task_index` is `1`, not `0`, because `GameTaskInstance`
+requires `>= 1` (`task_service.py:392`) and `0` is unreachable on the wire. `game_family_id`,
+`skill_id` and `c_task_instance_id` stay marker literals (`'development-fixture-only'` /
+`'dev-c-task-fixture-only'`), deliberately not derived from the template id: no
+template-id-to-family or -to-skill mapping exists client-side, and a plausible-looking derived
+value would manufacture a join the backend supervisor states is absent (`agent1.md` §2.3).
+`submitAction` returns a canned `CSubmitActionResult`; its `response_matched` is marked in code as
+a fixture value, not a computed verdict -- this codebase never computes correctness client-side,
+fixture included. `abandonSession` and `completeSession` are untouched and still throw immediately,
+each asserted to do so individually rather than by one blanket test, since 10.0a's own entry
+records that a per-item gap hid inside a count that reconciled exactly.
+
+**An architectural risk disclosed rather than silently assumed away.** The exemplar reader
+(`dev-fixture-exemplars.ts`) uses `node:fs` and `import.meta.url`-relative resolution, the same
+pattern the artefact-freeze test files already use, to read `c-prompt-exemplars.json` and
+`c-template-registry.json` directly off disk. This has been exercised only under
+`npm run test:contract` (plain Node via the `tsx` loader), which is this whole batch's stated
+verification surface. It has **not** been verified to survive Metro bundling for a real
+`expo start` or build -- Node's `fs` module has no React Native/Hermes equivalent, and if Metro
+statically resolves this import at bundle time rather than only at the point `nextTask` actually
+runs, bundling could fail even for builds that never activate the fixture. This batch runs no
+`expo` command and no build (out of scope), so the risk is recorded rather than tested, isolated
+to one small file (`dev-fixture-exemplars.ts`) rather than spread through `component-c-api.ts`,
+and named as the first thing to check before anyone runs the dev-gated app against a served task.
+
+**Files created:** `frontend/src/features/c-session/archetypes/registry.ts`,
+`frontend/src/features/c-session/archetypes/field-kinds.ts`,
+`frontend/src/features/c-session/archetypes/encode-action-payload.ts`,
+`frontend/src/api/dev-fixture-exemplars.ts`,
+`frontend/src/api/__tests__/c-archetype-resolution.test.ts`,
+`frontend/src/api/__tests__/c-dev-fixture-task-loop.test.ts`. **Files modified:**
+`frontend/src/api/component-c-api.ts` (additive only: one new import, `nextTask` and
+`submitAction` implemented in `createFixtureApi`; `abandonSession` and `completeSession`
+untouched). No backend file, no `.tsx`, no screen, component, or route, no change to
+`openapi-types.ts` or `runtime-validation.ts`, no new npm dependency, no retry/backoff/timeout
+beyond `client.ts`'s existing constant, and no approval, approver, role, date, signature or
+`CALIBRATION_PENDING` resolution recorded anywhere in this batch's changes.
+
+**What this batch deliberately did not do.** No archetype surface -- the eight identifiers name
+components that belong to 10a...10h. No `fail-closed-frame` or technical-block screen, no session
+shell, no task-loop UI, no telemetry capture, no motor-constancy harness -- all 10.0b-ii. No family
+notion anywhere in the archetype table, derived or otherwise. No widening of the fixture beyond
+`nextTask`/`submitAction`.
+
+**What remains open.** 10.0b-ii, the shell. The Metro-bundling risk named above, first checked
+whenever the dev-gated app is actually run against a served task. Whether the exemplar-reading
+approach here should later be replaced by a generated, Metro-safe frontend-local copy (mirroring
+`openapi-types.ts`'s own "generated, never hand-edited" pattern) if the bundling risk proves real
+-- not decided here, named for whoever hits it first.
+
+**Verification.** — supervisor's, pending
+
+**Verification — supervisor's, measured.** Frontend contract suite: **275 tests, 275 passed, 0
+failed.** Reconciles against the 244 / 244 / 0 baseline at `288a02d`: thirty-one tests added, none
+removed — `244 + 31 = 275`. The diff is additive on the register (121 lines added, none removed,
+appended in binary mode, zero CR bytes) and `component-c-api.ts`'s nine deletions are exactly the
+two throwing method bodies the owner ruling authorised replacing.
+
+**Verified criterion by criterion, not by reconciliation.** This batch's eleven acceptance criteria
+were each mapped to a named test rather than inferred from a passing count. That discipline exists
+because it was absent twice in 10.0a: the guard-level tests and the fixture-activation test were
+both required by that batch's own criteria, both missing, and both invisible in a test count that
+reconciled exactly. The supervisor approved that batch on arithmetic and a diff read, which is the
+"a green suite is not proof of a specific signal" trap. The mapping here: table set-equality and its
+two id negative controls; every registry entry resolving and every declared type bound;
+`encodeActionPayload` key-set equality across all 30 registry entries **with the four multi-key
+cases parametrised by name** (`C-JB-04`, `C-TC-04`, `C-CC-01`, `C-SF-02`); extra-key, missing-key
+and unrecognised-type refusals; boolean rejection under both `int` and `number`; wrong-typed element
+rejection under both list kinds; `resolveArchetype` returning `null` for an unknown id **and for an
+`Object.prototype` member name**; fixture activation gating; and `abandonSession`/`completeSession`
+asserted to throw **individually**, not by one blanket test.
+
+**The 10.0a gap this batch closes.** `getComponentCDevelopmentFixture` shipped in `f6a24b1` as dead
+code with zero coverage: 10.0a's own acceptance criterion required a test asserting the C fixture
+cannot activate outside `EXPO_PUBLIC_APP_ENV=development`, mirroring Component B's at
+`contract-freeze.test.ts:60`, and no such test was written. Confirmed independently by grepping the
+whole frontend tree for `EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE`, `getComponentCDevelopmentFixture` and
+`component-c-api` across `__tests__/` — zero matches before this batch. The test now exists. It is
+recorded here as closing a prior gap rather than as new work, because a reader who meets it later
+should be able to see it was owed.
+
+**An architectural risk this batch found, disclosed and NOT resolved.** `dev-fixture-exemplars.ts`
+imports `node:fs`. It is the **only** file outside `__tests__/` in the frontend source tree that
+does — verified by grep across `src/` and `app/`. Node's `fs` has no React Native / Hermes
+equivalent. The import in `component-c-api.ts` is **static**, so Metro will resolve it at bundle
+time regardless of whether the environment gate ever opens.
+
+**Why this is latent and not live today:** nothing in the application graph imports
+`component-c-api.ts` — verified by grep, the only match outside tests is a comment. 10.0b-i ships no
+UI, so the module is reachable only from `npm run test:contract`, which runs under plain Node via
+the `tsx` loader and where it demonstrably works.
+
+**It becomes live the moment 10.0b-ii wires a screen to `createComponentCApi`.** Recorded as a
+**blocking prerequisite of 10.0b-ii**: before any screen imports the C API client, the bundling
+behaviour must be established by actually building, not reasoned about. **This was not verified by
+the supervisor either** — running a bundle against a module no application code imports would pass
+trivially and prove nothing, and constructing the import to test it would be building 10.0b-ii's
+work inside 10.0a's successor. It is named, not measured, and the distinction is deliberate.
+
+The builder isolated the `fs` dependency into its own module rather than inlining it in
+`component-c-api.ts`. That was not in the approved plan — a seventh file where six were named — and
+it is accepted rather than merely tolerated: confining the one non-portable import to a single
+module is what makes a later Metro-safe replacement a one-file change instead of surgery on the API
+client.
+
+**What the supervisor did NOT verify.** The backend suite was not re-run; no backend file is touched
+(`git diff --stat -- backend/` shows only `buildLog1.md`, this batch's own register entry), so
+622 / 76 / 0 / 698 is expected unmoved but is **not measured and not claimed**. Metro bundling was
+not exercised, per the reasoning above. The C API client has still never issued a live request and
+cannot: session creation refuses while seven parameter families are unsigned, which is intended
+behaviour. Every claim here is about shape, structure and test behaviour, not about a working call
+or a working bundle.

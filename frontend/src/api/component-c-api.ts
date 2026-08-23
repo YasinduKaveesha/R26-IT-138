@@ -1,5 +1,6 @@
 import { requestJson } from '@/src/api/client';
 import { ApiClientError } from '@/src/api/errors';
+import { loadFixtureTaskExemplar } from '@/src/api/dev-fixture-exemplars';
 import {
   isCActiveSessionResponse,
   isCNextTaskResponse,
@@ -62,30 +63,78 @@ function createFixtureApi(fixture: string): ComponentCApi {
         request_id: 'dev-c-create-ok',
       };
     },
-    // The fixture covers session creation and resumption only. The task loop — serving a
-    // task, submitting an action, completing or abandoning a session — is deliberately left
-    // unimplemented — an immediate throw, no delay, no fake payload — so a fixture run can
-    // never masquerade as a real session past session creation. Restates Component B's own
-    // fixture doctrine (see component-b-api.ts's createFixtureApi): whether the task loop's
-    // prompt_payload can ever come from this fixture is an open follow-up outside this batch's
-    // scope, not a seam left here to fill in later.
     async getActiveSession() {
       return {
         session: null,
         request_id: 'dev-c-active-ok',
       };
     },
+    // abandonSession and completeSession stay unimplemented -- an immediate throw, no delay, no
+    // fake payload -- so a fixture run can never masquerade as a real session past the point a
+    // real session could be abandoned or completed. Restates Component B's own fixture doctrine.
+    // The owner's 2026-08-24 ruling (10.0-work-order.md §3) covers nextTask and submitAction
+    // only; it says nothing about these two, and that silence is not read as an invitation to
+    // widen it.
     async abandonSession() {
       throw new ApiClientError('unavailable', 'The development fixture does not implement session abandonment.');
     },
     async completeSession() {
       throw new ApiClientError('unavailable', 'The development fixture does not implement session completion.');
     },
+    // THIS FIXTURE IS A DEVELOPMENT AND TEST PATH ONLY. It is not a production task-generation
+    // path, and the backend remains the sole authority on task content in production -- the
+    // client here relays a real generator-produced exemplar, it never invents one.
+    //
+    // prompt_payload, interactive_assets and valid_action_space are relayed verbatim from one
+    // c-prompt-exemplars.json entry (loadFixtureTaskExemplar picks it deterministically -- see
+    // dev-fixture-exemplars.ts). The remaining CNextTaskResponse fields have no source in that
+    // artefact (its five-field allow-list carries only game_task_template_id, difficulty_level,
+    // prompt_payload, interactive_assets and valid_action_space) and are supplied as follows,
+    // per owner correction 2026-08-24:
+    //   - technical_status: 'OK' and scaffold_state: 'C0' are real values from each field's
+    //     actual backend vocabulary (persistence_models.py's CHECK constraint; C0..C4), not
+    //     invented ones.
+    //   - representation_mode is the genuine on-wire value for all 30 templates today
+    //     (generation.py:100 selects it from the catalogue, and the only catalogue that exists
+    //     carries this one literal) -- using it makes the fixture match production rather than
+    //     diverge from it. It is carried, never branched on, per the same trap B's
+    //     representation_type documents.
+    //   - task_index is 1, not 0: GameTaskInstance requires >= 1 (task_service.py:392) and 0 is
+    //     unreachable on the wire.
+    //   - game_family_id, skill_id and c_task_instance_id are marker literals, deliberately NOT
+    //     derived from the template id: no template-id-to-family or -to-skill mapping exists
+    //     client-side, and a plausible-looking derived value would manufacture a join the backend
+    //     supervisor states is absent (agent1.md §2.3). A fabricated-but-plausible id is worse
+    //     than an honest placeholder.
+    //   - request_id follows this file's own dev-fixture-id convention (see createSession above).
     async nextTask() {
-      throw new ApiClientError('unavailable', 'The development fixture does not implement task serving.');
+      const exemplar = loadFixtureTaskExemplar();
+      return {
+        c_task_instance_id: 'dev-c-task-fixture-only',
+        game_family_id: 'development-fixture-only',
+        game_task_template_id: exemplar.game_task_template_id,
+        task_index: 1,
+        skill_id: 'development-fixture-only',
+        difficulty_level: exemplar.difficulty_level,
+        representation_mode: 'TEST_FIXTURE_ONLY_REPRESENTATION',
+        prompt_payload: exemplar.prompt_payload,
+        interactive_assets: exemplar.interactive_assets,
+        valid_action_space: exemplar.valid_action_space,
+        scaffold_state: 'C0',
+        technical_status: 'OK',
+        request_id: 'dev-c-next-task-ok',
+      };
     },
+    // response_matched here is a canned fixture value, not a computed verdict -- this fixture
+    // never evaluates correctness. A real submission's response_matched comes from the server
+    // alone; nothing in this codebase ever computes it client-side.
     async submitAction() {
-      throw new ApiClientError('unavailable', 'The development fixture does not implement action submission.');
+      return {
+        c_task_instance_id: 'dev-c-task-fixture-only',
+        response_matched: true,
+        scaffold_level: 'C0',
+        request_id: 'dev-c-submit-action-ok',
+      };
     },
   };
 }
