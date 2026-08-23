@@ -179,6 +179,23 @@ class AggregationInputsUnavailableError(LiveEngineCError):
     none is sourced yet (see the module docstring's loop-level register entry)."""
 
 
+class NoRealCSessionError(LiveEngineCError):
+    """SF-040 (9b-1): translates ``component_c_generator.c_to_3.emit.NoRealCSessionError``.
+    Raised -- and no C->3 payload is built or returned -- when the mapping row's ``c_present`` is
+    false or its ``c_session_id`` is null.
+
+    FINDING (recorded per supervisor ruling on the 9b-1 plan): ``SharedInterventionSessionMapping.
+    validate_mapping_invariants`` (``packaging/component_b_internal/models/contracts.py:96-107``,
+    CD-04) already enforces ``c_present == (c_session_id is not None)`` on every mapping row at
+    construction, and ``emit_c_to_3`` validates the mapping row via ``validate_payload(mapping_row,
+    "mapping")`` BEFORE testing SF-040 (``component_c_generator/c_to_3/emit.py:58-60``). The two
+    disjuncts the vendored SF-040 check tests (``not c_present`` / ``c_session_id is None``) are
+    therefore logically equivalent given CD-04, and the second is not independently constructible
+    as a mapping-row fixture -- it is defensive redundancy in the vendored source, not a
+    separately reachable branch. See ``tests/test_9b1_c_to_3_emission.py`` for the one
+    constructible test case."""
+
+
 class SF043OrderingError(LiveEngineCError):
     """Phase 4: the SF-043 ordering gate at session creation -- "B runs -> B completes ->
     B emits seven mastery values -> C validates the same-session payload -> C begins." Raised

@@ -8124,3 +8124,123 @@ locations, the suite reconciliation, and the inverted assertion's demonstrated b
 supervisor's, performed independently.
 
 **Supervisor-review correction.** The pin sweep found an eleventh reference to the wheel: `scripts/build_component_c_wheel.py`'s own module docstring named the pin's filename and sha256 literally, in the present tense ("currently ..."), and had gone stale the moment the `COMMITTED_WHEEL_FILENAME`/`COMMITTED_WHEEL_SHA256` constants twelve lines below it moved to c3 -- not a pin location in the counted, programmatically-read sense (nothing parses that prose), but stale in exactly the same way the counted ones were. Corrected in this batch: the passage now points to the constants and to the manifest's `package.wheel_sha256` instead of restating their values, so it cannot drift against itself again.
+
+---
+
+## 2026-08-23 — 9b-1: the C→3 emission surface, complete and inert
+
+**Why.** 9b-0 shipped `emit_c_to_3` and `NoRealCSessionError` in the wheel but gave neither a caller.
+This batch builds the first one and proves v3.0 §11 Phase 9's four acceptance criteria against
+constructed fixtures. **Scope was the emission surface only, per the owner ruling in
+`Component_C_9b_9c_And_Generator_Plan_v1.0.md`: adapter method, port, domain payload type, four
+criteria. No mapping table. No live caller.**
+
+**Provenance of this entry.** The builder wrote the code and stopped, per the contract introduced
+after three earlier batches lost measurements to builders running the suite concurrently with the
+supervisor. All verification below, and this entry, are the supervisor's.
+
+**What was built.** `CToComponent3Payload` and `CToComponent3Provenance` as frozen domain dataclasses
+(`app/domain/live_engine_c/types.py:540,550`), structural mirrors importing nothing vendored;
+`EmissionPort` (`ports.py:361`); `NoRealCSessionError` (`errors.py`); and the adapter method
+(`app/infrastructure/live_engine_c/adapter.py:1460`) with four mapping helpers. The vendored
+exception is translated at the boundary (`:1508-1509`) exactly as every other vendored exception in
+that file already is — no vendored type escapes into `app/domain` or `app/application`.
+
+**`validate_payload(payload, "c_to_3")` now has its first caller, transitively and proven.**
+`emit.py:84` calls `validate_payload_against_mapping(payload.model_dump(), mapping_row,
+kind="c_to_3")`, which calls `validate_payload(payload, "c_to_3")` at
+`validators/contract_validators.py:155`. No redundant second call was added. The two prohibited-field
+tests are what PROVE that call fires: if it were ever bypassed, a prohibited field would pass. This
+is the same argument that justified C-22 on the B→C side — a frozen boundary check with no caller is
+not a check, and a caller with no test proving it fires is not much better.
+
+**MANDATORY DISCLOSURE — two independent reasons nothing real can be emitted.** This is stronger
+than previous inert batches and the record states both halves:
+
+- The **aggregate half** is blocked by `_AGGREGATION_INPUTS_AVAILABLE = False`
+  (`aggregation_service.py:126`, unchanged by this batch), which stays false until the target band is
+  defined — a scientific definition, not an engineering gap.
+- The **identity half** is blocked by `SharedInterventionSessionMapping` existing in neither
+  component: no table, no model, no code. B's 9c approval does not cover building it; it needs its
+  own gate.
+
+The payload carries 39 fields (verified by parsing the vendored model). The plan's own count is that
+**32 of them cannot be populated** — the composite and aggregate fields the gate blocks, plus the
+identity fields the missing mapping blocks. The correct framing, and the one used here: **the
+emission path has no possible caller until shared session mapping exists.** Not "9b-1 is incomplete."
+
+**A finding, and it was a correction to the supervisor's own work order.** The work order required
+the SF-040 test to prove BOTH arms of `emit.py:60`'s check — `c_present` false, OR `c_session_id`
+null. The builder found that the second arm is **structurally unreachable** and refused to write a
+test for it. Verified: `SharedInterventionSessionMapping.validate_mapping_invariants` enforces CD-04
+at `models/contracts.py:105-106` (`c_present != (c_session_id is not None)` raises), and
+`emit_c_to_3` validates the mapping row FIRST at `emit.py:58` — so by the time line 60 runs, CD-04
+has already forced the two disjuncts to be logically equivalent. A mapping row with `c_present=True,
+c_session_id=None` is not constructible. The disjunction's second branch is defensive redundancy,
+not a separately reachable path. One test was written, against the only constructible fixture, and
+its docstring records why. **Recorded so a later reader does not write "the other arm" test and
+believe they are covering something.** This is the second time in this project a builder has
+corrected the supervisor on a load-bearing claim.
+
+**The fixture problem, and how it was solved without inventing a value.**
+`CToComponent3Payload.validate_deterministic_invariants` (`contracts.py:254-419`) RE-DERIVES
+engagement, frustration and learner state from the aggregate fields and rejects a mismatch
+(C3-DF-06…C3-DF-11), and derives `telemetry_quality_status` itself (C3-WU-01). A fixture therefore
+cannot carry arbitrary composites past validation. The method used: choose raw counts freely but
+internally ordered (`correct <= completed <= opportunities`, `inactive <= duration`), then derive
+every rate, composite and state by **executing the already-frozen C-COMP-v1 / C-LS-v1 formulas** from
+`contracts.py:259-419` in the identical expression shape the validator uses — not an algebraic
+simplification, so float drift cannot trip the 0.005 / 1e-6 tolerances. Fixture and validator agree
+**by construction, not by tuning.** The helper lives in the test file only, never under `app/`, and
+its docstring states it mirrors rather than re-implements. The standing instruction was that if the
+fixture failed validation the failure would be reported rather than the fixture adjusted — tuning it
+until it passed would have left criterion 2 proving nothing. It passed on the first executed run; no
+adjustment was made or needed.
+
+**One assertion was deliberately omitted rather than guessed.** The builder proposed a secondary
+check that pydantic's own constrained-float validation rejects NaN on `Probability`, and disclosed
+it could not verify that behaviour under the no-execution contract. Supervisor ruling: ship no
+assertion you have not verified. It was omitted, and only the `json.dumps(..., allow_nan=False)`
+assertion — reasoned through and load-bearing — remains. A guessed assertion either fails for reasons
+unrelated to the code or passes and creates false confidence about where rejection happens.
+
+**Condition 4's proof link — the STATIC half is now proven, the dynamic half is not.** 9c-1b recorded
+that it could not prove `no aggregate → no payload` because no payload constructor existed. One
+exists now. `emit_c_to_3` requires `aggregate` as a keyword argument with no default (`emit.py:41`),
+and the adapter method mirrors that; a test asserts via `inspect.signature` that the parameter has
+`Parameter.empty` as its default and is not `Optional`. That proves the call **cannot be made**
+without an aggregate in hand. It does **not** trace a live refusal reaching this function and
+stopping, because that needs a caller which this batch's scope forbids. **Condition 4 is not
+"closed".** The static half is proven; the dynamic half is inherited by whichever batch first gives
+the emission path a real caller.
+
+**Obligation 4b — the `enqueue_outbox_event` payload narrowing is DEFERRED, deliberately.** 9c-1b
+recorded that its `payload: Mapping[str, Any]` should narrow once a constructor existed. It exists,
+and narrowing was still not done, for a reason worth recording: `outbox_events` is **shared** B/C
+infrastructure under owner conditions 1-2, and its own docstring commits to storing payloads
+opaquely. Narrowing the shared accessor to a C-specific `CToComponent3Payload` would make shared
+infrastructure C-only and would reject B-shaped payloads at the type level before B's side is built.
+A C-specific wrapper is the right shape eventually, but building one now would invent a call path
+with nothing behind it. Deferred with the reason stated, not silently skipped.
+
+**Verification: 605 passed, 76 skipped, 0 failed (681 collected)**, 1315.16s, from a full teardown, a
+rebuilt image, and one run against a fresh volume with no competing container. Reconciles against the
+`20a4343` baseline of 599 / 76 / 675: six tests added, none removed, skips unchanged — `599 + 6 =
+605`, `675 + 6 = 681`. All six were confirmed to RUN in-container, not skip, by a targeted run
+(`6 passed in 0.38s`). Independently verified beyond the count: the adapter remains the ONLY AST-level
+importer of `component_c_generator` under `app/` (a naive text grep matches fifteen files — all
+docstring mentions — which is precisely why that guard is AST-based); 9c-0's identity guard passes
+with no prohibited symbol anywhere in the new code, and the payload's `student_id` comes from the
+mapping-row fixture, never from a derivation. The one warning is the pre-existing
+`httpx`/`starlette.testclient` deprecation notice.
+
+**Remains open.** Nothing calls the adapter method outside tests, and nothing can until the shared
+session mapping exists and the aggregation gate lifts — both named above, both outside engineering's
+control. The dynamic half of condition 4's proof is inherited by the first batch to give the emission
+path a real caller. `enqueue_outbox_event`'s narrowing is deferred with the reason above. The
+dispatcher (the outbox drain side) remains unbuilt and unnamed, and still owns extending the
+`outcome` vocabulary — and must re-read the retry/backoff/timeout prohibition before doing so. The
+repository-wide schema-drift gap recorded in 9c-1a is unchanged and belongs to no single batch. The
+suite run took 21m55s against a typical 7-10 minutes; everything passed, so this is an environment
+observation rather than a code signal, on a machine whose Docker daemon crashed once earlier the same
+day.

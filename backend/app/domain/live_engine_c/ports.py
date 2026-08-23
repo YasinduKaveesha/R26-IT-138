@@ -10,7 +10,7 @@ The concrete implementation lives in ``app.infrastructure.live_engine_c.adapter`
 
 from __future__ import annotations
 
-from typing import Mapping, Optional, Protocol, Sequence
+from typing import Any, Mapping, Optional, Protocol, Sequence
 
 from .types import (
     ActivationDecision,
@@ -21,6 +21,8 @@ from .types import (
     Catalogue,
     ChildFacingReward,
     CompositeFormulaVersion,
+    CToComponent3Payload,
+    CToComponent3Provenance,
     EngagementComponents,
     EvaluationResult,
     EvidenceWindowConfig,
@@ -354,3 +356,33 @@ class CompositePort(Protocol):
         engagement_score: Optional[float],
         frustration_index: Optional[float],
     ) -> tuple[Optional[LearnerState], StateReason]: ...
+
+
+class EmissionPort(Protocol):
+    """The C -> 3 payload emission surface (v3.0 §11 Phase 9, batch 9b-1).
+
+    SF-040: no payload is built -- and none is returned -- when no real C session exists for
+    ``mapping_row`` (translated at the adapter boundary as
+    ``app.domain.live_engine_c.errors.NoRealCSessionError``, never the vendored package's own
+    exception type; see ``app.infrastructure.live_engine_c.adapter.LiveEngineCAdapter.emit_c_to_3``).
+
+    ``aggregate`` is REQUIRED with NO DEFAULT and is not ``Optional`` -- there is no code path
+    through which this method can be called without one (9b-1 obligation 4a's static half; the
+    dynamic half -- a real aggregation refusal reaching this call and stopping before it -- is not
+    provable until a live caller exists, see the adapter method's own docstring)."""
+
+    def emit_c_to_3(
+        self,
+        mapping_row: Mapping[str, Any],
+        *,
+        provenance: CToComponent3Provenance,
+        aggregate: SessionAggregate,
+        telemetry_quality_status: TelemetryQualityStatus,
+        composite_formula_version: CompositeFormulaVersion,
+        learner_state: Optional[LearnerState],
+        state_reason: StateReason,
+        engagement_components: Optional[EngagementComponents] = None,
+        engagement_score: Optional[float] = None,
+        frustration_components: Optional[FrustrationComponents] = None,
+        frustration_index: Optional[float] = None,
+    ) -> CToComponent3Payload: ...

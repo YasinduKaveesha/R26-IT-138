@@ -78,6 +78,13 @@ from component_c_generator.aggregation.derive import (
 from component_c_generator.behaviour.summary import (
     derive_task_opportunity_summary as _pkg_derive_task_opportunity_summary,
 )
+from component_c_generator.c_to_3.emit import (
+    NoRealCSessionError as _PkgNoRealCSessionError,
+    emit_c_to_3 as _pkg_emit_c_to_3,
+)
+from component_c_generator.c_to_3.inputs import (
+    CToComponent3Provenance as _PkgCToComponent3Provenance,
+)
 from component_c_generator.catalogue.loader import (
     CatalogueValidationError as _PkgCatalogueValidationError,
     catalogue_file_checksum as _pkg_catalogue_file_checksum,
@@ -142,7 +149,11 @@ from component_c_generator.tasks.registry import (
     supported_template_ids as _pkg_supported_template_ids,
 )
 
-from models.contracts import BToCMasteryPayload as _PkgBToCMasteryPayload
+from models.contracts import (
+    BToCMasteryPayload as _PkgBToCMasteryPayload,
+    EngagementComponents as _PkgCToComponent3EngagementComponents,
+    FrustrationComponents as _PkgCToComponent3FrustrationComponents,
+)
 from validators.contract_validators import (
     ContractValidationError as _PkgContractValidationError,
     validate_payload as _pkg_validate_payload,
@@ -152,6 +163,7 @@ from app.domain.live_engine_c.errors import (
     CatalogueUnavailableError,
     MasteryPayloadContractValidationError,
     NoEligibleRecoveryTemplateError,
+    NoRealCSessionError,
     QLearningDisabledError,
     RecoveryPreconditionError,
     SF043OrderingError,
@@ -170,6 +182,8 @@ from app.domain.live_engine_c.types import (
     Catalogue,
     ChildFacingReward,
     CompositeFormulaVersion,
+    CToComponent3Payload,
+    CToComponent3Provenance,
     EngagementComponents,
     EvaluationResult,
     EvidenceWindowConfig,
@@ -670,6 +684,100 @@ def _map_frustration_components(components) -> FrustrationComponents:
         floor_hit_component=components.floor_hit_component,
         quit_after_error_component=components.quit_after_error_component,
         safety_override_component=components.safety_override_component,
+    )
+
+
+def _to_pkg_provenance(provenance: CToComponent3Provenance) -> _PkgCToComponent3Provenance:
+    return _PkgCToComponent3Provenance(
+        c_session_number=provenance.c_session_number,
+        policy_version=provenance.policy_version,
+        production_timestamp=provenance.production_timestamp,
+    )
+
+
+def _to_pkg_c_to_3_engagement_components(
+    components: EngagementComponents,
+) -> _PkgCToComponent3EngagementComponents:
+    """Reverse direction of ``_map_engagement_components`` above. Constructs
+    ``models.contracts.EngagementComponents`` -- the SAME type ``emit_c_to_3`` type-hints (it is
+    reused verbatim as the composites package's own output type, see
+    ``component_c_generator.composites.engagement_frustration``'s module docstring), never a
+    different, structurally-similar package type."""
+    return _PkgCToComponent3EngagementComponents(
+        completion_component=components.completion_component,
+        activity_component=components.activity_component,
+        target_band_component=components.target_band_component,
+        accuracy_component=components.accuracy_component,
+    )
+
+
+def _to_pkg_c_to_3_frustration_components(
+    components: FrustrationComponents,
+) -> _PkgCToComponent3FrustrationComponents:
+    """Reverse direction of ``_map_frustration_components`` above. Constructs
+    ``models.contracts.FrustrationComponents`` -- see ``_to_pkg_c_to_3_engagement_components``."""
+    return _PkgCToComponent3FrustrationComponents(
+        error_run_component=components.error_run_component,
+        excess_attempt_component=components.excess_attempt_component,
+        inactivity_burden_component=components.inactivity_burden_component,
+        floor_hit_component=components.floor_hit_component,
+        quit_after_error_component=components.quit_after_error_component,
+        safety_override_component=components.safety_override_component,
+    )
+
+
+def _map_c_to_3_payload(payload) -> CToComponent3Payload:
+    """Straight 1:1 field copy from the vendored, already-validated ``models.contracts.
+    CToComponent3Payload`` to the domain mirror (D1) -- no computation, same convention as every
+    other ``_map_*`` helper in this file."""
+    return CToComponent3Payload(
+        schema_version=payload.schema_version,
+        student_id=payload.student_id,
+        intervention_session_id=payload.intervention_session_id,
+        intervention_session_number=payload.intervention_session_number,
+        intervention_session_date=payload.intervention_session_date,
+        c_session_id=payload.c_session_id,
+        c_session_number=payload.c_session_number,
+        component_source=payload.component_source,
+        production_timestamp=payload.production_timestamp,
+        policy_version=payload.policy_version,
+        composite_formula_version=payload.composite_formula_version,
+        state_rule_version=payload.state_rule_version,
+        telemetry_quality_status=payload.telemetry_quality_status,
+        session_technical_issue_flag=payload.session_technical_issue_flag,
+        task_opportunity_count=payload.task_opportunity_count,
+        completed_task_count=payload.completed_task_count,
+        correct_task_count=payload.correct_task_count,
+        total_attempt_count=payload.total_attempt_count,
+        accuracy_rate=payload.accuracy_rate,
+        avg_attempts_per_task=payload.avg_attempts_per_task,
+        task_completion_rate=payload.task_completion_rate,
+        inactivity_periods=payload.inactivity_periods,
+        inactive_time_sec=payload.inactive_time_sec,
+        session_duration_sec=payload.session_duration_sec,
+        time_in_target_band_sec=payload.time_in_target_band_sec,
+        consecutive_error_max=payload.consecutive_error_max,
+        difficulty_floor_hits=payload.difficulty_floor_hits,
+        quit_after_error=payload.quit_after_error,
+        safety_override_count=payload.safety_override_count,
+        c_mean_game_task_latency_sec=payload.c_mean_game_task_latency_sec,
+        c_median_game_task_latency_sec=payload.c_median_game_task_latency_sec,
+        current_difficulty_level=payload.current_difficulty_level,
+        difficulty_trend=payload.difficulty_trend,
+        engagement_components=(
+            _map_engagement_components(payload.engagement_components)
+            if payload.engagement_components is not None
+            else None
+        ),
+        engagement_score=payload.engagement_score,
+        frustration_components=(
+            _map_frustration_components(payload.frustration_components)
+            if payload.frustration_components is not None
+            else None
+        ),
+        frustration_index=payload.frustration_index,
+        learner_state=payload.learner_state,
+        state_reason=payload.state_reason,
     )
 
 
@@ -1346,3 +1454,57 @@ class LiveEngineCAdapter:
             engagement_score,
             frustration_index,
         )
+
+    # ---- EmissionPort ---------------------------------------------------------------
+
+    def emit_c_to_3(
+        self,
+        mapping_row: Mapping[str, object],
+        *,
+        provenance: CToComponent3Provenance,
+        aggregate: SessionAggregate,
+        telemetry_quality_status: TelemetryQualityStatus,
+        composite_formula_version: CompositeFormulaVersion,
+        learner_state: Optional[LearnerState],
+        state_reason: StateReason,
+        engagement_components: Optional[EngagementComponents] = None,
+        engagement_score: Optional[float] = None,
+        frustration_components: Optional[FrustrationComponents] = None,
+        frustration_index: Optional[float] = None,
+    ) -> CToComponent3Payload:
+        """SF-040 (9b-1): calls the vendored ``component_c_generator.c_to_3.emit.emit_c_to_3``
+        and maps its validated result to the domain ``CToComponent3Payload`` (D1). Translates the
+        vendored ``NoRealCSessionError`` at the boundary exactly the way every other vendored
+        exception in this file is translated (e.g. ``MasteryPayloadContractValidationError``) --
+        it never escapes into ``app.domain``/``app.application`` unmapped.
+
+        ``aggregate`` is REQUIRED with NO DEFAULT and is not ``Optional`` -- this is 9b-1
+        obligation 4a's static proof: there is no way to call this method without an aggregate in
+        hand. It does not by itself trace a live aggregation refusal reaching this call and
+        stopping before it -- that dynamic half needs a real caller, which is out of this batch's
+        scope (see this method's own build-log entry)."""
+        try:
+            pkg_payload = _pkg_emit_c_to_3(
+                mapping_row,
+                provenance=_to_pkg_provenance(provenance),
+                aggregate=_to_pkg_session_aggregate(aggregate),
+                telemetry_quality_status=telemetry_quality_status,
+                composite_formula_version=composite_formula_version,
+                learner_state=learner_state,
+                state_reason=state_reason,
+                engagement_components=(
+                    _to_pkg_c_to_3_engagement_components(engagement_components)
+                    if engagement_components is not None
+                    else None
+                ),
+                engagement_score=engagement_score,
+                frustration_components=(
+                    _to_pkg_c_to_3_frustration_components(frustration_components)
+                    if frustration_components is not None
+                    else None
+                ),
+                frustration_index=frustration_index,
+            )
+        except _PkgNoRealCSessionError as exc:
+            raise NoRealCSessionError(str(exc)) from exc
+        return _map_c_to_3_payload(pkg_payload)

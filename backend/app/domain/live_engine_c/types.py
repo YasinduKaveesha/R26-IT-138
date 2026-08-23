@@ -27,6 +27,7 @@ for it here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Literal, Mapping, Optional
 
 Grade = int  # 2 or 3, enforced by callers/validators at the boundary
@@ -519,3 +520,79 @@ class ScaffoldConfig:
 class RecoveryConfig:
     config_version: str
     parameter_source_status: str
+
+
+# --------------------------------------------------------------------------------------
+# C -> 3 emission payload and provenance (9b-1, v3.0 §11 Phase 9). Backend-owned structural
+# mirrors of ``models.contracts.CToComponent3Payload`` / ``CToComponent3Provenance`` (X-3: no
+# vendored package/pydantic type crosses into app.domain). Field sets are a 1:1 copy of the
+# vendored contract model's own fields, verified directly against
+# ``packaging/component_b_internal/models/contracts.py`` and
+# ``packaging/component_c_internal/component_c_generator/c_to_3/inputs.py``. Neither type carries
+# any validation logic of its own -- ``CToComponent3Payload.validate_deterministic_invariants``
+# stays owned by the vendored, frozen contract model; this dataclass is populated only from an
+# already-validated package payload (see
+# ``app.infrastructure.live_engine_c.adapter._map_c_to_3_payload``).
+# --------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CToComponent3Provenance:
+    """Mirrors ``component_c_generator.c_to_3.inputs.CToComponent3Provenance`` exactly (its only
+    three fields) -- no derivation logic, plain data only, same convention as ``SeedLineage``."""
+
+    c_session_number: int
+    policy_version: str
+    production_timestamp: datetime
+
+
+@dataclass(frozen=True)
+class CToComponent3Payload:
+    """Mirrors ``models.contracts.CToComponent3Payload`` field-for-field (39 fields)."""
+
+    schema_version: str
+    student_id: str
+    intervention_session_id: str
+    intervention_session_number: int
+    intervention_session_date: date
+    c_session_id: str
+    c_session_number: int
+    component_source: str
+    production_timestamp: datetime
+    policy_version: str
+    composite_formula_version: CompositeFormulaVersion
+    state_rule_version: str
+    telemetry_quality_status: TelemetryQualityStatus
+    session_technical_issue_flag: bool
+
+    task_opportunity_count: int
+    completed_task_count: int
+    correct_task_count: int
+    total_attempt_count: int
+    accuracy_rate: Optional[float]
+    avg_attempts_per_task: Optional[float]
+    task_completion_rate: float
+
+    inactivity_periods: int
+    inactive_time_sec: float
+    session_duration_sec: float
+    time_in_target_band_sec: float
+
+    consecutive_error_max: int
+    difficulty_floor_hits: int
+    quit_after_error: bool
+    safety_override_count: int
+
+    c_mean_game_task_latency_sec: Optional[float]
+    c_median_game_task_latency_sec: Optional[float]
+
+    current_difficulty_level: int
+    difficulty_trend: str
+
+    engagement_components: Optional[EngagementComponents]
+    engagement_score: Optional[float]
+    frustration_components: Optional[FrustrationComponents]
+    frustration_index: Optional[float]
+
+    learner_state: Optional[LearnerState]
+    state_reason: StateReason
