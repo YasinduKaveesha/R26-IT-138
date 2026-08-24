@@ -25,14 +25,18 @@ type ExemplarEntry = {
   prompt_payload: Record<string, unknown>;
   interactive_assets: Record<string, unknown>;
   valid_action_space: Record<string, string>;
+  blanks: number | null;
+  prompt_text: string;
 };
 type RegistryEntry = { template_id: string; valid_action_space: Record<string, string> };
 
 const ALLOWED_ENTRY_FIELDS = [
+  'blanks',
   'difficulty_level',
   'game_task_template_id',
   'interactive_assets',
   'prompt_payload',
+  'prompt_text',
   'valid_action_space',
 ].sort();
 
@@ -62,7 +66,7 @@ test('the generated module has exactly the 150 entries the frozen artefact decla
   assert.deepEqual(EXEMPLAR_ENTRIES, artefact.entries);
 });
 
-test('every generated entry has exactly the five allow-listed fields and nothing else', () => {
+test('every generated entry has exactly the seven allow-listed fields and nothing else', () => {
   for (const entry of EXEMPLAR_ENTRIES) {
     assert.equal(
       hasExactlyTheAllowedFields(entry),
@@ -86,7 +90,7 @@ test("every generated entry's valid_action_space agrees with the registry", () =
   }
 });
 
-test('negative control: a sixth key on one generated entry is rejected by the allow-list check', () => {
+test('negative control: an eighth key on one generated entry is rejected by the allow-list check', () => {
   const tampered = { ...EXEMPLAR_ENTRIES[0], extra_field: 'should not be here' } as unknown as ExemplarEntry;
   assert.equal(hasExactlyTheAllowedFields(tampered), false);
 });

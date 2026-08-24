@@ -27,12 +27,14 @@ export interface CActiveSessionResponse {
 }
 
 export interface CNextTaskResponse {
+  "blanks": number | null;
   "c_task_instance_id": string;
   "difficulty_level": number;
   "game_family_id": string;
   "game_task_template_id": string;
   "interactive_assets": Record<string, unknown>;
   "prompt_payload": Record<string, unknown>;
+  "prompt_text": string;
   "representation_mode": string;
   "request_id": string;
   "scaffold_state": string;

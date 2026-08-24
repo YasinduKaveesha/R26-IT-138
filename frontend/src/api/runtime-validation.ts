@@ -440,6 +440,11 @@ export function isCNextTaskResponse(value: unknown): value is CNextTaskResponse 
   if (!Object.values(value.valid_action_space).every((entry) => typeof entry === 'string')) {
     return false;
   }
+  // `blanks` is required but nullable: present as `null`, or an integer. Absent entirely is
+  // invalid, which is why this is not folded into an `=== null || Number.isInteger(...)` check
+  // against a possibly-missing property -- `'blanks' in value` must hold first.
+  if (!Object.prototype.hasOwnProperty.call(value, 'blanks')) return false;
+  if (value.blanks !== null && !Number.isInteger(value.blanks)) return false;
   return (
     isNonEmptyString(value.c_task_instance_id) &&
     isNonEmptyString(value.game_family_id) &&
@@ -452,6 +457,7 @@ export function isCNextTaskResponse(value: unknown): value is CNextTaskResponse 
     isRecord(value.interactive_assets) &&
     isNonEmptyString(value.scaffold_state) &&
     isNonEmptyString(value.technical_status) &&
+    isNonEmptyString(value.prompt_text) &&
     isNonEmptyString(value.request_id)
   );
 }

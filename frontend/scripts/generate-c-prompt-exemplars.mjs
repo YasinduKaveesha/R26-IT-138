@@ -44,10 +44,12 @@ export function generate() {
 
   const typeBlock = [
     'export type ExemplarEntry = {',
-    '  game_task_template_id: string;',
+    '  blanks: number | null;',
     '  difficulty_level: number;',
-    '  prompt_payload: Record<string, unknown>;',
+    '  game_task_template_id: string;',
     '  interactive_assets: Record<string, unknown>;',
+    '  prompt_payload: Record<string, unknown>;',
+    '  prompt_text: string;',
     '  valid_action_space: Record<string, string>;',
     '};',
   ].join('\n');

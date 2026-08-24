@@ -131,6 +131,8 @@ const validCNextTaskResponse = {
   valid_action_space: { valid_object_ids: 'list[str]' },
   scaffold_state: 'C0',
   technical_status: 'ok',
+  blanks: null,
+  prompt_text: 'Select every object.',
   request_id: 'req-1',
 };
 
@@ -143,6 +145,22 @@ test('isCNextTaskResponse rejects a valid_action_space whose values are not all 
     isCNextTaskResponse({ ...validCNextTaskResponse, valid_action_space: { valid_object_ids: 3 } }),
     false,
   );
+});
+
+test('isCNextTaskResponse rejects an empty or non-string prompt_text', () => {
+  assert.equal(isCNextTaskResponse({ ...validCNextTaskResponse, prompt_text: '' }), false);
+  assert.equal(isCNextTaskResponse({ ...validCNextTaskResponse, prompt_text: 5 }), false);
+});
+
+// `blanks` is required but nullable: the generic per-field drop above proves absence is
+// rejected, but "reject when removed" and "accept when null" are both true of this field, and a
+// naive helper asserts only the first. These cases prove the second, plus the two non-null,
+// non-integer shapes that must still fail closed.
+test('isCNextTaskResponse accepts blanks: null and rejects a non-integer blanks', () => {
+  assert.equal(isCNextTaskResponse({ ...validCNextTaskResponse, blanks: null }), true);
+  assert.equal(isCNextTaskResponse({ ...validCNextTaskResponse, blanks: 3 }), true);
+  assert.equal(isCNextTaskResponse({ ...validCNextTaskResponse, blanks: 1.5 }), false);
+  assert.equal(isCNextTaskResponse({ ...validCNextTaskResponse, blanks: '1' }), false);
 });
 
 const validCSubmitActionResult = {

@@ -9743,3 +9743,111 @@ wording corrections to `C-NP-01/02/03` and `C-CC-02` are implemented but **await
 sign-off**: they were the supervisor's recommendation, not part of the ruling that created this
 batch. `C-CC-02`'s "this many" depends on the client rendering `target_n` adjacent to the prompt
 — an obligation recorded for 10e and deliberately not built here.
+
+## 2026-08-25 — FE-contract-catchup: the frontend clears the five reds `5d2c1ab` opened
+
+Backend commit `5d2c1ab` added `blanks` and `prompt_text` to the public `CNextTaskResponse`
+contract and to `c-prompt-exemplars.json`. This batch is the frontend's own side of that
+catch-up: no UI, no renderer, no archetype surface. Every task still renders the fail-closed
+frame; `archetype-surfaces.ts` still returns `null` for all eight.
+
+**STOP-CHECK, all six facts matched.** HEAD `5d2c1ab`, working tree clean. `npm run test:contract`
+at HEAD: **391 tests, 386 pass, 5 fail** — `contract-freeze`,
+`c-prompt-exemplars-generated-freeze`, `c-prompt-exemplars-generated-cross-check`,
+`c-prompt-exemplars-freeze`, `c-runtime-validation` — matching the brief exactly.
+`c-prompt-exemplars.json` sha256 `2b75d82c53b8556efe3c31b4394f73f58654165a9431555b402c0b3a8a2f0b26`,
+matching its sidecar. Its 150 entries carry seven keys each. `blanks` is non-null on exactly 15
+entries — `C-NP-01/02/03` at all five levels — null on the other 135. The generator's `typeBlock`
+hardcoded five fields.
+
+**What changed, and why.**
+
+- `frontend/scripts/generate-c-prompt-exemplars.mjs` — `typeBlock` now lists all seven fields
+  (`blanks`, `difficulty_level`, `game_task_template_id`, `interactive_assets`, `prompt_payload`,
+  `prompt_text`, `valid_action_space`, matching the artefact's own alphabetical key order), so the
+  data (already artefact-derived via `JSON.stringify`) and the declared type agree again.
+- `frontend/src/api/generated/c-prompt-exemplars.ts` and
+  `frontend/src/api/generated/openapi-types.ts` — regenerated via `npm run
+  generate:contract-types` then `npm run generate:c-prompt-exemplars`. Neither was hand-edited;
+  both freeze tests passed against the regenerated output unchanged. Ran both generators a second
+  time and diffed: byte-identical both times (confirmed by sha256, not just `diff`), proving
+  regeneration is idempotent.
+- `frontend/src/api/__tests__/c-prompt-exemplars-freeze.test.ts` — `ALLOWED_ENTRY_FIELDS` and the
+  local `ExemplarEntry` type widened to seven fields, exact-equality kept; the allow-list test and
+  its negative control renamed from "five"/"a sixth key" to "seven"/"an eighth key"; two new
+  positive tests (`prompt_text` non-empty on all 150 entries; `blanks` non-null on exactly the
+  `C-NP-01/02/03` id set, asserted by id set and not only by count) and two matching negative
+  controls (an empty/non-string `prompt_text`; a template silently gaining or losing non-null
+  `blanks`), all fired in both directions before being trusted.
+- `frontend/src/api/__tests__/c-prompt-exemplars-generated-cross-check.test.ts` — the same
+  allow-list widening and the same two renames, on its independent copy of the check.
+- `frontend/src/api/runtime-validation.ts` — `isCNextTaskResponse` now requires `prompt_text` as
+  a non-empty string, and requires `blanks` present with `null` or an integer — the property must
+  exist (`hasOwnProperty`) and, if not `null`, must satisfy `Number.isInteger`. `blanks: null` is
+  accepted; `blanks` absent, `1.5`, or `"1"` are all rejected.
+- `frontend/src/api/__tests__/c-runtime-validation.test.ts` — `validCNextTaskResponse` gained both
+  fields (so the existing per-required-field drop loop now covers them); added explicit cases for
+  `prompt_text` (`''` and `5` rejected) and for `blanks` (`null` accepted, `3` accepted, `1.5` and
+  `'1'` rejected) — the case a generic "drop each required field" helper cannot express, since
+  `blanks` must be both rejectable-when-absent and acceptable-when-null.
+
+**Testing.** Raw `npm run test:contract` after the batch: **397 tests, 397 pass, 0 fail,
+0 cancelled, 0 skipped, 0 todo.** All five previously-red tests pass; the six new tests
+(391 baseline + 6 = 397) all pass; no pre-existing test was touched to make this true.
+
+**What I did not do.** No git command that mutates state — no add, commit, stash, reset, clean,
+push. No archetype surface, renderer, or prompt visual — `archetype-surfaces.ts` is untouched and
+still returns `null` for all eight; nothing renders `prompt_text` or `blanks` anywhere in the UI.
+No backend file touched. No frontend copy of, or guard over, `c-prompt-wording.json` — the
+frontend still reads only `prompt_text` off the wire. No change to `component-c-api.ts`. No
+approval, approver, role, date, signature, or threshold in any file, comment, or test name. Nothing
+in scope was unclear enough to stop on.
+
+**Proposed commit** (owner runs; not executed here):
+
+```
+git add frontend/scripts/generate-c-prompt-exemplars.mjs
+git add frontend/src/api/generated/c-prompt-exemplars.ts
+git add frontend/src/api/generated/openapi-types.ts
+git add frontend/src/api/runtime-validation.ts
+git add frontend/src/api/__tests__/c-prompt-exemplars-freeze.test.ts
+git add frontend/src/api/__tests__/c-prompt-exemplars-generated-cross-check.test.ts
+git add frontend/src/api/__tests__/c-runtime-validation.test.ts
+git add backend/buildLog1.md
+git commit -m "FE-contract-catchup: teach the frontend blanks and prompt_text, clear the five reds from 5d2c1ab"
+```
+
+**Verification.** — supervisor's, pending
+
+**Verification — supervisor's, measured.** Frontend contract suite: **397 tests, 397 passed, 0
+failed.** My own run, not the builder's. Reconciles against the 391 / 386 / 5 baseline at `5d2c1ab`:
+ten test declarations added and four removed, the four being renames of existing tests rather than
+deletions, so `391 + 6 = 397` and no test was dropped.
+
+Verified directly, not read from the builder's report:
+
+- **The generated files were not hand-edited.** Both generators were re-run and both outputs are
+  sha256 byte-identical before and after: `c-prompt-exemplars.ts` `0edd3e0f…`, `openapi-types.ts`
+  `82262370…`. This is the check that matters most in a catch-up batch, because hand-patching a
+  generated file to clear a freeze test would pass every other assertion here.
+- **Both** allow-lists carry seven fields and **both** remain exact-equality (length plus positional
+  comparison, not a subset or `includes` check), with both negative controls renamed to "an eighth
+  key" and present. Widening only one would have left a hole precisely where the two-sided drift
+  protection is meant to be.
+- `isCNextTaskResponse` was **exercised against eight cases**, not read: `blanks: null` accepted;
+  `blanks` absent, `1.5`, and `"1"` each rejected; `prompt_text` absent, empty, and non-string each
+  rejected; baseline accepted. The required-but-nullable distinction is the one thing a naive
+  addition to the reject-each-required-field helper would have got wrong, and it is correct.
+- The `blanks` invariant asserts the template **id set** by `deepEqual` as well as the count of
+  fifteen, so a future template silently acquiring or losing the field is caught by identity and not
+  merely by arithmetic. Its negative control mutates `C-NP-01` to null and proves non-match — the
+  guard fires in both directions.
+- Register appended in binary mode: 75 lines added, none removed, **zero CR bytes** in the file.
+
+**What was NOT verified.** The backend suite was not re-run — this batch changes no backend file and
+the backend stands at 651 / 76 / 0, measured at `5d2c1ab`. Nothing in this batch renders `prompt_text`
+or `blanks`: `archetype-surfaces.ts` still returns `null` for all eight archetypes and every task
+still renders the fail-closed frame, correctly. The frontend half of the wording doctrine — a guard
+that the client relays `prompt_text` verbatim and never composes or rewrites it — is deliberately not
+here: there is no surface rendering it yet, so the guard belongs to 10a, and is recorded as owed by
+that sub-phase.
