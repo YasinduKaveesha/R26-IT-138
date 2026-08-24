@@ -9035,3 +9035,256 @@ behind an environment gate that cannot open in production. What makes that defen
 the implementation: the content is real generator output relayed verbatim, the `TEST_FIXTURE_ONLY`
 label is carried into the generated module, the copy is provably derived by the drift test, and the
 gate is untouched.
+
+## 2026-08-24 — Component C 10.0b-ii: the shell
+
+**Builder's entry, written as part of this batch's own commit.** Governed by the supervisor's
+10.0b-ii builder prompt (`Component_C_Frontend/10.0b-ii-builder-prompt.md`) and `10.0-work-order.md`
+section 3.3.
+
+**Disclosure: this batch terminated early on an API session limit, mid-implementation, with three of
+four planned guard tests written and the fourth not yet started.** Nothing was lost and nothing was
+committed — the supervisor assessed the tree directly on resumption (the twelve files already
+present, untracked) rather than assuming continuity, the same disclosure convention the `9c-1a` and
+`9c-1b` entries used for the same situation. This entry, the fourth test, and the config fix below
+were all completed on resumption, after the supervisor's assessment. The reconciled suite count and
+the export result the supervisor measured on that first pass are theirs to state, not restated here
+as if measured by the builder.
+
+**What this batch is.** The first Component C UI in the repository: `fail-closed-frame`, the
+technical-block screen, the C session shell, routes and task loop, local-only telemetry capture, and
+the motor-constancy layout-constants module and its guard. Every task renders `fail-closed-frame` in
+this batch — `archetype-surfaces.ts` returns `null` for all eight archetype ids, because no archetype
+surface exists yet (10a...10h build those). That is this batch working correctly, not failing.
+
+**The flat-glob finding.** `package.json`'s `test:contract` script is
+`node --import tsx --test src/api/__tests__/*.test.ts` — a FLAT, non-recursive glob. A test placed
+under a natural-looking feature directory (e.g. `src/features/c-session/__tests__/`) would exist,
+look correct in review, pass if ever run by hand, and **never run under the real gate**. That is a
+silent-vacuity trap of exactly the class this project has already shipped once (10.0a's missing
+guard-level tests, invisible inside a count that reconciled exactly). All four of this batch's new
+tests were placed flat in `src/api/__tests__/` for this reason, following 10.0b-i's own precedent of
+doing the same for source that lives under `src/features/c-session/archetypes/`. Recorded here so the
+next person adding a feature directory learns it from the register rather than by shipping an
+invisible test.
+
+**`archetype-surfaces.ts` is an addition beyond this batch's originally named file list, approved as
+such.** It is a table from archetype id to rendering surface, returning `null` for all eight ids
+today. It exists so the task loop can be built once: a later sub-phase populates one entry and the
+loop does not change, because `c-session-logic.ts`'s `planTask` already keeps "unresolvable template"
+(`resolveArchetype` returns `null`) and "resolved template, no surface registered yet" as two
+structurally distinct outcomes, rather than the same `fail-closed` case for two different reasons.
+That distinction is what makes the negative control on "every null resolve renders the fail-closed
+frame" real rather than vacuous — without it, every path in this batch would collapse to the same
+branch and a negative control would have nothing to distinguish.
+
+**A defect found in review and fixed before this entry was written: `createComponentCApi()` called
+with no config, unconditionally, inside `useMemo`.** The first draft of `c-session-screen.tsx`
+called `createComponentCApi()` with no arguments. `createComponentCApi` throws
+(`component-c-api.ts:145-147`) when no development fixture is active and no config is supplied — and
+a throw inside `useMemo` during render is not caught by any error path the screen builds, because
+that path never runs; it crashes the component tree instead. The screen therefore worked only under
+the development fixture and would have crashed at render against a real, configured backend — the
+inverse of the batch's intent, where the fixture is a development convenience and the real API is
+the target. Fixed by following Component B's own null-safe pattern
+(`live-session-screen.tsx:87-90`): `readPublicConfig()` is read first, `createComponentCApi` is
+called with a config when one resolves, or with none when the development fixture is active (which
+needs no config), and otherwise `api` is `null`. Every function that uses `api`
+(`loadNextTask`, `handleSubmit`, `bootstrap`, `leaveSession`) now guards on that before use, and the
+mount effect routes a `null` api to the screen's own generic `'technical'` failure copy — the same
+bucket an unconfigured Component B screen already routes to — rather than ever throwing during
+render.
+
+**`abandonSession` throwing under the development fixture is expected behaviour, not a defect.**
+10.0b-i and 10.0b-fix left `abandonSession`/`completeSession` throwing by design (B's fixture
+doctrine restated for C: a fixture run must never masquerade as a real session past the point a real
+session could be abandoned or completed), and this batch does not widen that. Tapping "leave session"
+under the fixture therefore throws an `ApiClientError`, which `classifySessionFailure` and
+`routeFailure` route to an ordinary neutral screen exactly as any other failed call would. Recorded
+so a later reader does not mistake this interaction for something broken.
+
+**The motor-constancy guarantee is structural, not measured**, per the work order: `motor-constants.ts`
+exports only plain constants — no function of any kind — and takes no external input, so the
+mathematical level a task is set at cannot reach it because it is not in scope where these constants
+are defined. `c-motor-constants.test.ts` asserts both halves: every export's `typeof` is not
+`'function'`, and the module's own source, with comments stripped, never references the level
+concept. The comment-stripping is not incidental — the module's own header comment explains this
+design in prose, and a bare substring match would have failed on its own explanatory comment, which
+is precisely the defect the supervisor's VERIFY caught in 10.0b-fix's node-builtins guard
+(`buildLog1.md`, "Component C 10.0b-fix", the CORRECTION paragraph). The same comment-stripping
+approach, and the same stated blind spots (regex-shaped, not a real tokenizer; no constructed/dynamic
+specifier detection), are used in `c-telemetry-no-network-call.test.ts` and
+`c-neutral-screens-no-input-surface.test.ts`, both new in this batch.
+
+**`c-neutral-screens-no-input-surface.test.ts`** scans `neutral-message-screen.tsx`,
+`fail-closed-frame.tsx` and `technical-block-screen.tsx` — the closed set of three files that make up
+the neutral-screen doctrine — for `TextInput`, an `editable` prop, or an import from an `archetypes/`
+or `renderers/` module, with comments stripped first for the same reason as above. Four negative
+controls: a fabricated `TextInput` import, a fabricated `editable` prop, a fabricated
+archetypes/renderers import, and a comment-only mention that must NOT fire, proving the
+comment-stripping actually works rather than merely being present.
+
+**`c-telemetry-no-network-call.test.ts`** scans `telemetry.ts` for `fetch(`, `XMLHttpRequest`,
+`WebSocket`, or any import from `@/src/api/*`, same comment-stripping, with negative controls for a
+fabricated `fetch` call, a fabricated API import, and a comment-only mention that must not fire.
+`telemetry.ts` itself holds an in-memory event log only — never persisted to `SecureStore`, unlike
+`session-command-store.ts`'s pending-command record. That is a deliberate choice, not an omission:
+the owner's ruling is "captured locally, transmits nothing", and surviving an app relaunch is
+capability beyond that text; telemetry that persisted but was never transmitted would also accumulate
+on a child's device indefinitely with no consumer and no retention story, which is worse than holding
+it for the running session and discarding it when the session ends.
+
+**`c-session-logic.ts`** holds every decision the shell makes: `planTask` (the fail-closed routing
+described above), `shouldContinueSession` (equality against `'active'` only — Component C's real
+`state` vocabulary is seven values, `persistence_models.py:34`, and the frozen contract leaves it
+open, so this must never enumerate the other six, the same rule 10.0a's own register entry extracted
+after finding a guard that had narrowed a server vocabulary), `decideSessionBootstrap` (never resumes
+a session whose `state` is not `'active'`, falling through to `createSession` instead — which is
+idempotent by learner state server-side, so this is not a client-side guess about what happens next —
+and fails closed to `'not-ready'` rather than inventing a `grade` or `session_mode` when neither is
+supplied), and `classifySessionFailure` (buckets a 409 into `'technical-block'` by reading only
+`error.kind`, never `.message` or `.envelope`, which is what makes two differently-caused 409s
+produce identical output — asserted directly in `c-session-logic.test.ts` by constructing two
+conflict errors with different messages and support codes and checking the classification agrees).
+
+**`grade` and `session_mode` are not invented anywhere in this batch.** `CreateCSessionRequest`
+requires both and no document this batch was built against names where a client should source them.
+They are accepted as optional inputs to `CSessionScreen`, read from optional query params by the new
+route, and when neither an active session to resume nor both values to create with is available, the
+shell renders a neutral "not ready yet" screen rather than fabricating either value. This means the
+create path is real and exercised by `decideSessionBootstrap`'s own tests, but not reachable end to
+end from the route today — a future batch supplying these (a prep screen, most likely) is what
+completes it.
+
+**Route placement.** `app/(learner)/c-session.tsx` — static, not a dynamic `[cSessionId]` segment
+like Component B's `session/[sessionId].tsx`. `createSession` takes only a request body and
+`getActiveSession` takes only a token (`component-c-api.ts:29-30`); neither takes a client-supplied
+session id, so a dynamic segment would be a parameter nothing ever fills — the same shape as the
+idempotency-key header 10.0a's builder found was never sent and did not add. No entry point from
+`home.tsx` is wired; that is a Component B screen and out of this batch's scope.
+
+**Files created:** `frontend/src/features/c-session/motor-constants.ts`,
+`frontend/src/features/c-session/telemetry.ts`,
+`frontend/src/features/c-session/archetype-surfaces.ts`,
+`frontend/src/features/c-session/c-session-logic.ts`,
+`frontend/src/features/c-session/neutral-message-screen.tsx`,
+`frontend/src/features/c-session/fail-closed-frame.tsx`,
+`frontend/src/features/c-session/technical-block-screen.tsx`,
+`frontend/src/features/c-session/c-session-screen.tsx`,
+`frontend/app/(learner)/c-session.tsx`,
+`frontend/src/api/__tests__/c-session-logic.test.ts`,
+`frontend/src/api/__tests__/c-motor-constants.test.ts`,
+`frontend/src/api/__tests__/c-telemetry-no-network-call.test.ts`,
+`frontend/src/api/__tests__/c-neutral-screens-no-input-surface.test.ts`. **No file modified** — every
+change in this batch is a new file. No backend file touched other than this entry (append-only). No
+change to `src/features/c-session/archetypes/*`, `openapi-types.ts`, `runtime-validation.ts`,
+`component-c-api.ts`, the generated exemplars, any Component B screen/route/test, or any backend
+file. No new npm dependency — `AppState` is already imported at `src/auth/supabase.ts:2`; network-loss
+detection reuses `client.ts`'s existing error classification rather than adding a network-status
+library. No retry, backoff, or timeout beyond `client.ts`'s existing constant. No reason code,
+error-kind branch, or per-cause message on the technical-block screen — its prop type carries no
+`reason`/`cause`/`kind` field of any kind. No client-side computation of correctness, level, scaffold
+level, or a safety action. No reading of or branching on `representation_mode`. No widening of the
+development fixture beyond `nextTask`/`submitAction`. No approval, approver, role, date, signature, or
+`CALIBRATION_PENDING` resolution recorded anywhere in this batch's changes.
+
+**What this batch deliberately did not do.** No archetype surface. No prompt visual. No telemetry
+transmission — asserted structurally. Component B's refresh-on-401 retry (`withToken` in
+`live-session-screen.tsx`) is not replicated in `c-session-screen.tsx`: the C API client has never
+issued a live request in this project (session creation refuses while seven parameter families are
+unsigned), so there is nothing yet to exercise a refresh against, and building it speculatively would
+be more than this batch's own loop needs. Telemetry is not persisted to `SecureStore` (see above).
+
+**The acceptance-criterion command this batch is authorised to run, run twice.** `npx tsc --noEmit`
+after the config fix: clean, no output. `npx expo export --platform ios`, run once at the end per
+this batch's own constraint, after the config fix landed and `dist/` from any prior run was removed
+first:
+
+```
+› ios bundles (1):
+_expo/static/js/ios/entry-d0fc0513fcf8ac520e16ab2a24e5cbae.hbc (4.85 MB)
+
+› Files (1):
+metadata.json (4.68 kB)
+
+Exported: dist
+```
+
+Succeeded, with no probe import needed this time — this batch's own route (`app/(learner)/c-session.tsx`)
+imports `c-session-screen.tsx`, which imports `component-c-api.ts` and, through it,
+`dev-fixture-exemplars.ts`, for the first time from real application code rather than a temporary
+probe. `dist/` was deleted after the export.
+
+**What remains open.** Every archetype surface (10a...10h). Whatever supplies `grade` and
+`session_mode` to the create path in a running app (most likely a future prep screen) — not decided
+or pre-empted here. Whether telemetry should ever be persisted, if a future ruling asks for
+survival across an app relaunch — not built speculatively here.
+
+**Verification.** — supervisor's, pending
+
+**Verification — supervisor's, measured.** Frontend contract suite: **391 tests, 391 passed, 0
+failed.** Reconciles against the 356 / 356 / 0 baseline at `36d2af5`: thirty-five tests added, none
+removed — `356 + 35 = 391`. Register append is additive only (186 lines added, none removed, binary
+mode, zero CR bytes).
+
+**The native bundle, re-run by the supervisor and now genuine.** `npx expo export --platform ios`
+**succeeded** — and unlike every prior run in this phase, **no probe was needed**. This batch's own
+route makes the import chain real: `app/(learner)/c-session.tsx` → `c-session-screen.tsx` →
+`component-c-api.ts` → `dev-fixture-exemplars.ts` → the generated exemplars module. **10.0b-fix is
+therefore proven against the real application graph rather than a synthetic import constructed to
+test it.** That was the open question that batch left behind, and it is now closed. `dist/` was
+removed before and after.
+
+**The new guard was proven to fire in both directions.** A real `TextInput` import was injected into
+`fail-closed-frame.tsx` and `offers no input surface: fail-closed-frame.tsx` **failed**. Separately,
+a comment merely *mentioning* `TextInput` was added to the same file and the guard **did not** fire.
+Both states were reverted and each revert proven byte-identical by `sha256sum -c`. Testing only the
+first direction would have left the comment-stripping unproven — which is precisely how 10.0b-fix's
+first guard shipped broken.
+
+**The config defect found in supervisor assessment is fixed and verified.** The partial batch had
+`const api = useMemo(() => createComponentCApi(), []);` with no config and no config handling
+anywhere in the screen. `createComponentCApi()` with neither a config nor an active fixture throws
+at `component-c-api.ts:145`, and because that call sat inside `useMemo` during render, the throw was
+caught by no error path this batch built — it would have failed the component tree instead of
+rendering the technical-block screen the batch exists to provide. **The screen would have worked
+only under the development fixture and crashed at render against a real backend**, inverting the
+batch's own intent. Now `readPublicConfig()` runs first, `createComponentCApi(config)` is called
+with a config when one exists, the fixture path is used when one is active, and `api` is `null`
+otherwise — guarded at every call site (`:118`, `:155`, `:176`, `:207`, `:226`), with a missing
+config routed to the existing neutral failure screen. This mirrors `live-session-screen.tsx:87-90`
+rather than inventing a second pattern.
+
+**A side effect worth recording:** the fix gives `getComponentCDevelopmentFixture` its first real
+consumer. That accessor shipped in 10.0a as dead code with zero coverage, gained a test in 10.0b-i
+that closed the gap, and is now actually used.
+
+**Scope verified.** Five `.tsx` files, all under `app/(learner)/` or `src/features/c-session/` —
+this is the first UI batch and `.tsx` is expected here, unlike every prior batch in this phase where
+its presence would have been a scope violation. Nothing under `backend/` is touched but this batch's
+own register entry. 10.0b-i's archetype modules, the generated exemplars, its generator and its
+drift tests are all untouched.
+
+**Recorded for the batches that follow.** Every task renders the fail-closed frame today, because
+`resolveArchetype` returns archetype identifiers and `resolveArchetypeSurface` returns `null` for
+all eight. **That is this batch working, not failing.** The distinction between *unknown template*
+(a true fail-closed) and *known template, no surface yet* is structural — two different code paths
+converging on one screen — rather than a comment, which is what will make the surfaces plug in
+during 10a…10h without the loop changing.
+
+**What the supervisor did NOT verify.** The backend suite was not re-run; nothing under `backend/`
+is touched but the register entry, so its numbers are expected unmoved but are **not measured and
+not claimed**. `expo start` was not run — only `export`, which exercises bundling and not runtime,
+so **no screen in this batch has ever been rendered.** The three source-text guards
+(no-input-surface, no-network-call, no-node-builtins) are regex-shaped rather than tokenizer-
+accurate and each states that limit in its own header. The C API client has still never issued a
+live request and cannot: session creation refuses while seven parameter families are unsigned, which
+is intended behaviour.
+
+**Process note, recorded because the record should show it.** This batch's builder terminated on an
+API session limit mid-implementation, with three of four tests written and no register entry — the
+same failure mode as `9c-1a` and `9c-1b`. The supervisor assessed the partial tree directly rather
+than waiting for a report that would never come, found the config defect during that assessment, and
+resumed the same agent with its context intact rather than starting a cold one. The alternative —
+treating a green suite on a partial batch as a finished batch — was available and would have shipped
+a screen that crashes at render outside the development fixture.
