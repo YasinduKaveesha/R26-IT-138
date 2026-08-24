@@ -1803,3 +1803,67 @@ def test_prompt_exemplars_artefact_read_guard_negative_control_fires() -> None:
     assert not _references_prompt_exemplars_artefact(unrelated_tree), (
         "guard incorrectly flagged an unrelated contract filename -- it is not discriminating"
     )
+
+
+# =====================================================================================
+# BE-prompt-text batch -- no module under app/ may read backend/contract/c-prompt-wording.json
+# BY FILENAME. Unlike the exemplars artefact (D4 above, which nothing under app/ may read at
+# all), prompt_text DOES need to reach app/: task_service._task_fields calls
+# app.domain.live_engine_c.prompt_wording.prompt_text_for, which reads the authoritative Python
+# module PROMPT_TEXT_BY_TEMPLATE directly. This guard keeps that the ONLY path: app/ code must
+# never re-open the frozen JSON snapshot directly, which would create a second, divergence-prone
+# route to the same content and defeat the point of having one source of truth. Same mechanism
+# and same stated limit as the D4 guard: an ast.Constant string-literal scan for the exact
+# filename, so a dynamically-assembled path would evade it (accepted limit, not closed here for
+# the same reason D4 states its own).
+# =====================================================================================
+
+_PROMPT_WORDING_ARTEFACT_FILENAME = "c-prompt-wording.json"
+
+
+def _references_prompt_wording_artefact(tree: ast.AST) -> bool:
+    """Shared by the real guard and its negative control, so the two can never drift apart.
+    Matches ONLY a literal string constant containing the artefact's filename."""
+    return any(
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and _PROMPT_WORDING_ARTEFACT_FILENAME in node.value
+        for node in ast.walk(tree)
+    )
+
+
+def test_no_app_module_reads_prompt_wording_artefact_by_filename() -> None:
+    """SIGNAL: no file under app/ contains a string-literal reference to
+    "c-prompt-wording.json" anywhere in its source -- app/ reads the authoritative
+    ``prompt_wording.PROMPT_TEXT_BY_TEMPLATE`` module, never the derived JSON snapshot. Would
+    FAIL if any file under app/ opened, built a Path to, or otherwise referenced the artefact by
+    its literal filename. Does NOT prove the absence of a dynamically-constructed reference."""
+    app_root = Path("app")
+    assert app_root.is_dir()
+    scanned_files = sorted(app_root.rglob("*.py"))
+    assert scanned_files, "no *.py files found under app/ -- scan set degraded to a no-op"
+
+    offenders = []
+    for path in scanned_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if _references_prompt_wording_artefact(tree):
+            offenders.append(path)
+    assert not offenders, offenders
+
+
+def test_prompt_wording_artefact_read_guard_negative_control_fires() -> None:
+    """POSITIVE PROOF the detector above does real work, AND that it discriminates this specific
+    artefact rather than blanket-matching any contract filename. Parses SYNTHETIC, in-memory
+    module source only."""
+    violating_source = 'open("backend/contract/c-prompt-wording.json")\n'
+    unrelated_contract_source = 'open("backend/contract/c-prompt-exemplars.json")\n'
+
+    violating_tree = ast.parse(violating_source, filename="<synthetic-prompt-wording-violation>")
+    unrelated_tree = ast.parse(unrelated_contract_source, filename="<synthetic-unrelated-contract-file>")
+
+    assert _references_prompt_wording_artefact(violating_tree), (
+        "negative control failed to catch a real literal-filename reference"
+    )
+    assert not _references_prompt_wording_artefact(unrelated_tree), (
+        "guard incorrectly flagged an unrelated contract filename -- it is not discriminating"
+    )

@@ -43,9 +43,65 @@ the name of the REVIEWED, ALREADY-FROZEN sibling field for this identical semant
 field stays plain ``bool`` -- a submitted action that reached this response has always been
 evaluated, so there is no "no verdict yet" state to represent here. That typing divergence is
 deliberate, not an oversight.
+
+BE-PROMPT-TEXT BATCH (first change to this DTO since Phase 7): two additive fields, ``blanks``
+and ``prompt_text``. Neither moves anything from private to public; both are read alongside the
+existing allow-listed fields in ``task_service._task_fields``, never in place of the private-split
+discipline stated above.
+
+``blanks: int | None`` -- the count of values the child must supply, non-null for EXACTLY
+``C-NP-01``, ``C-NP-02``, ``C-NP-03`` and ``None`` for the other 27 (asserted as a set by this
+batch's tests). Five templates set the pinned generator's ``count_b_by_level`` parameter, and it
+means a different thing for each: ``blanks`` for the three NP templates, ``group_size`` for
+``C-EG-01``, ``cols`` for ``C-EG-02`` -- both of the latter two already public inside
+``prompt_payload`` under their own names. This field is deliberately NOT "read
+``count_b_by_level`` for whichever template happens to set it"; that would re-expose
+``group_size``/``cols`` a second time under a name that means something else. It is sourced from
+``record.difficulty_vector["blanks"]`` -- a literal key the pinned generator itself writes into
+``difficulty_vector`` for exactly these three templates (verified:
+``component_c_generator/tasks/number_path.py:25,46,67``; no other template file uses that key) --
+gated by an explicit three-template allow-list, not a bare ``.get("blanks")``, so a future
+template that happened to reuse the key name for an unrelated meaning could not silently
+misreport through this field.
+
+READ THE FOLLOWING TWO PARAGRAPHS TOGETHER; NEITHER MAKES SENSE ALONE. ``difficulty_vector``
+stays on the S3 list above -- never exposed here, under any name, as itself. What ``blanks``
+exposes is ONE NAMED SCALAR derived from it, for exactly the three templates named above, and
+that is the full extent of the precedent this field sets: it is NOT a licence to mine
+``difficulty_vector`` for further public fields by the same pattern, and no other field in this
+module may be justified by pointing at this one.
+
+The reason reading that one key at request time is safe, and reading ``difficulty_vector``
+generally would not be: this is reading a value the pinned generator ALREADY COMPUTED AND
+PERSISTED PER INSTANCE, not recomputing it from configuration. The record's ``difficulty_vector``
+was written at generation time, under the generation-mode smoke gate
+(``assert_generation_config_permitted``) that instance was generated under -- so the governance
+dependency (every generation parameter is ``TEST_FIXTURE_ONLY``, none owner-assigned) was already
+exercised and recorded at that moment, nothing is hidden by reading it back out afterward. This is
+categorically different from calling ``component_c_generator.generation_config.
+default_generation_config()`` at read time, which is forbidden anywhere under ``app/`` and
+mechanically asserted so
+(``tests/test_be2_architecture_guards.py::test_no_app_code_defaults_or_calls_default_generation_config``,
+whose own docstring gives the governance reason: doing so "would hide that dependency exactly as
+``default_selection_config()`` would have for W"). A later reader who finds a
+``difficulty_vector`` read under ``app/`` and assumes it is the same class of thing as that
+forbidden call should re-read this paragraph: it is not, and the distinction is the entire reason
+this field is permitted.
+
+``prompt_text: str`` -- the child-facing question, following Component B's ``stem`` architecture
+(backend-owned, server-supplied; the frontend relays it verbatim and never composes or rewrites
+it). Present for all 30 templates. Sourced from
+``app.domain.live_engine_c.prompt_wording.PROMPT_TEXT_BY_TEMPLATE`` -- authored content, not
+generator output, so nothing here is "consuming the wheel"; the pinned generator is never touched
+by this field. **CANDIDATE WORDING, NOT OWNER-REVIEWED.** See that module's own docstring for the
+full disclosure: every string is drafted to prove the machinery works, not approved as final
+child-facing text. Governance-relevant despite not being a generation/safety/policy parameter --
+wording is content, not a member of the seven gated configuration families, but it is still the
+kind of thing the owner-review stop point exists for, and it must not be read as "not governance
+relevant" merely because it is "not an eighth family."
 """
 
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 from uuid import UUID
 
 from app.domain.c_session import StrictModel
@@ -64,6 +120,8 @@ class CTaskFields(StrictModel):
     valid_action_space: Mapping[str, str]
     scaffold_state: str
     technical_status: str
+    blanks: Optional[int]
+    prompt_text: str
 
 
 class CNextTaskResponse(CTaskFields):

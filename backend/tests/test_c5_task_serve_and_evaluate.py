@@ -840,6 +840,7 @@ def test_p6_next_task_response_exact_key_set() -> None:
                 "c_task_instance_id", "game_family_id", "game_task_template_id", "task_index",
                 "skill_id", "difficulty_level", "representation_mode", "prompt_payload",
                 "interactive_assets", "valid_action_space", "scaffold_state", "technical_status",
+                "blanks", "prompt_text",  # BE-prompt-text batch: two additive public fields
                 "request_id",
             }
             # Owner condition (P2): never the secret, never evaluator internals, never the raw

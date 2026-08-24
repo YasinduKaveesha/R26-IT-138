@@ -131,6 +131,17 @@
       "CNextTaskResponse": {
         "additionalProperties": false,
         "properties": {
+          "blanks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blanks"
+          },
           "c_task_instance_id": {
             "format": "uuid",
             "title": "C Task Instance Id",
@@ -157,6 +168,10 @@
             "additionalProperties": true,
             "title": "Prompt Payload",
             "type": "object"
+          },
+          "prompt_text": {
+            "title": "Prompt Text",
+            "type": "string"
           },
           "representation_mode": {
             "title": "Representation Mode",
@@ -203,6 +218,8 @@
           "valid_action_space",
           "scaffold_state",
           "technical_status",
+          "blanks",
+          "prompt_text",
           "request_id"
         ],
         "title": "CNextTaskResponse",

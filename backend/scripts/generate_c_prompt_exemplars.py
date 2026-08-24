@@ -28,6 +28,31 @@ anywhere in this module: not read, not filtered, not in scope. This is the disci
 only") extended to this artefact. There is no step at which the excluded fields could leak,
 because there is no step at which they are ever bound to a name.
 
+BE-PROMPT-TEXT BATCH: two more allow-listed fields, ``blanks`` and ``prompt_text`` (work order
+§5, "carry the two new fields in c-prompt-exemplars.json too, so the frontend's development
+fixture can serve a task with real wording"). Neither breaks the paragraph above.
+
+``blanks`` is derived from ``params.count_b_by_level[difficulty_level - 1]`` -- the SAME
+``params`` object this function already reads for generation, already legitimately obtained via
+``default_generation_config()`` in an offline script (never permitted in ``app/``; see
+``app/domain/c_task.py``'s docstring for the full reasoning) -- gated by the identical
+three-template allow-list ``task_service._blanks`` uses in production
+(``{"C-NP-01", "C-NP-02", "C-NP-03"}``), ``None`` otherwise. Deliberately NOT read from
+``generated.difficulty_vector["blanks"]``, even though that key exists and would give the
+identical number (verified: ``number_path.py`` writes
+``blanks = params.count_b_by_level[difficulty_level - 1]`` into ``difficulty_vector`` verbatim)
+-- reading it here would breach the paragraph above's "never referenced" guarantee for
+``difficulty_vector``, which this script has held since the previous batch and this one leaves
+intact. ``tests/test_c_prompt_exemplars_freeze.py`` independently cross-checks that this script's
+``count_b_by_level``-derived value and the record's ``difficulty_vector``-derived value (the
+production path) never disagree, so the two derivation routes this project now has for the same
+field cannot silently diverge.
+
+``prompt_text`` is read via ``app.domain.live_engine_c.prompt_wording.prompt_text_for`` -- the
+SAME function ``task_service._task_fields`` calls in production -- never a second copy of the
+wording table, so the exemplar fixture and the live serving path can never disagree about what a
+template's question text is.
+
 THE SMOKE GATE (work order §5): ``assert_generation_config_permitted`` lives app-side
 (``app/domain/live_engine_c/generation_mode_guard.py``) and is never on the path a script calling
 ``TASKS[tid].generate(...)`` directly would traverse. This script calls it explicitly, once,
@@ -76,6 +101,7 @@ from component_c_generator.generation_config import default_generation_config
 from component_c_generator.tasks.registry import TASKS, supported_template_ids
 
 from app.domain.live_engine_c.generation_mode_guard import assert_generation_config_permitted
+from app.domain.live_engine_c.prompt_wording import prompt_text_for
 
 CONTRACT_DIR = Path(__file__).resolve().parent.parent / "contract"
 ARTEFACT_PATH = CONTRACT_DIR / "c-prompt-exemplars.json"
@@ -90,6 +116,11 @@ SOURCE = (
 
 TEST_FIXTURE_LABEL = "TEST_FIXTURE_ONLY"
 DIFFICULTY_LEVELS: tuple[int, ...] = (1, 2, 3, 4, 5)
+
+# BE-prompt-text batch: identical set to task_service._BLANKS_TEMPLATE_IDS -- see module
+# docstring, "BE-PROMPT-TEXT BATCH", for why this script derives the value from count_b_by_level
+# rather than from generated.difficulty_vector even though both give the same number.
+_BLANKS_TEMPLATE_IDS = frozenset({"C-NP-01", "C-NP-02", "C-NP-03"})
 
 # The one recorded value the whole artefact's randomness is reproducible from (see module
 # docstring, "SEED DESIGN"). Mirrors the registry script's seed-0 convention.
@@ -150,7 +181,9 @@ def build_exemplars() -> dict[str, Any]:
                 ) from exc
             # Allow-list construction (work order §3): named fields only. generated.
             # correct_answer_payload and generated.difficulty_vector are never referenced --
-            # not here, not anywhere else in this module.
+            # not here, not anywhere else in this module. ``blanks`` comes from ``params``
+            # (count_b_by_level), NOT from generated.difficulty_vector -- see module docstring.
+            blanks = params.count_b_by_level[difficulty_level - 1] if template_id in _BLANKS_TEMPLATE_IDS else None
             entries.append(
                 {
                     "game_task_template_id": template_id,
@@ -158,6 +191,8 @@ def build_exemplars() -> dict[str, Any]:
                     "prompt_payload": generated.prompt_payload,
                     "interactive_assets": generated.interactive_assets,
                     "valid_action_space": generated.valid_action_space,
+                    "blanks": blanks,
+                    "prompt_text": prompt_text_for(template_id, generated.prompt_payload),
                 }
             )
 

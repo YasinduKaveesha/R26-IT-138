@@ -154,6 +154,7 @@ from app.domain.live_engine_c.action_payload_validation import (
     validate_action_payload,
 )
 from app.domain.live_engine_c.errors import LiveEngineCError, UnknownTemplateError
+from app.domain.live_engine_c.prompt_wording import prompt_text_for
 from app.domain.live_engine_c.generation_mode_guard import (
     GenerationConfigNotPermittedError,
     assert_generation_config_permitted,
@@ -286,9 +287,28 @@ def _generation_config_checksum(config: GenerationConfig) -> str:
     return hashlib.sha256(f"{config.config_version}:{config.parameter_source_status}".encode()).hexdigest()
 
 
+# BE-prompt-text batch: c_task.py's own docstring states the full reasoning. ``blanks`` is
+# meaningful for exactly these three templates -- gated by explicit membership, not a bare
+# ``record.difficulty_vector.get("blanks")``, so a future template that happened to reuse the key
+# name for an unrelated meaning could not silently misreport through this field.
+_BLANKS_TEMPLATE_IDS = frozenset({"C-NP-01", "C-NP-02", "C-NP-03"})
+
+
+def _blanks(record: CTaskInstanceRecord) -> Optional[int]:
+    """Reads a value the pinned generator already computed and persisted onto this instance's
+    ``difficulty_vector`` at generation time (never recomputed from configuration -- see
+    c_task.py's docstring for why that distinction is what makes this permitted). ``None`` for
+    every template outside the three that carry the ``"blanks"`` key."""
+    if record.game_task_template_id not in _BLANKS_TEMPLATE_IDS:
+        return None
+    return record.difficulty_vector["blanks"]
+
+
 def _task_fields(record: CTaskInstanceRecord) -> CTaskFields:
     """Allow-list construction (X-4) -- see app/domain/c_task.py's own docstring for the full
-    private/public rationale, column by column."""
+    private/public rationale, column by column. ``prompt_text`` lookup can raise
+    ``PromptWordingUnavailableError`` (a ``LiveEngineCError``); callers must translate it the same
+    way every other ``LiveEngineCError`` in this module is translated, at the call site."""
     return CTaskFields(
         c_task_instance_id=record.c_task_instance_id,
         game_family_id=record.game_family_id,
@@ -302,6 +322,8 @@ def _task_fields(record: CTaskInstanceRecord) -> CTaskFields:
         valid_action_space=record.valid_action_space,
         scaffold_state=record.scaffold_state,
         technical_status=record.technical_status,
+        blanks=_blanks(record),
+        prompt_text=prompt_text_for(record.game_task_template_id, record.prompt_payload),
     )
 
 
@@ -513,7 +535,11 @@ class TaskService:
         )
         await CGameplayEventRecordRepository(session).add(offered_event)
 
-        return CNextTaskResponse(**_task_fields(instance_record).model_dump(), request_id=request_id)
+        try:
+            task_fields = _task_fields(instance_record)
+        except LiveEngineCError as exc:
+            raise ConflictError() from exc
+        return CNextTaskResponse(**task_fields.model_dump(), request_id=request_id)
 
     async def submit_action(
         self,

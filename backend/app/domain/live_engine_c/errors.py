@@ -196,6 +196,33 @@ class NoRealCSessionError(LiveEngineCError):
     constructible test case."""
 
 
+class PromptWordingUnavailableError(LiveEngineCError):
+    """BE-prompt-text batch. Raised by ``app.domain.live_engine_c.prompt_wording.prompt_text_for``
+    in two cases:
+
+    (1) ``game_task_template_id`` has no entry at all in
+    ``PROMPT_TEXT_BY_TEMPLATE``. This should be UNREACHABLE in practice: the wording table's own
+    coverage test asserts all 30 supported template ids are present, so a real gap would be caught
+    before this ever fired. Raised anyway, as defence in depth, so a future template addition that
+    outpaces the wording table produces a deliberate, structured refusal instead of an uncaught
+    ``KeyError`` that could leak an internal lookup detail into a 500 response.
+
+    (2) the template DOES carry variants (currently ``C-EG-02``, ``C-NP-04``) but the task
+    instance's ``prompt_payload`` carries a discriminator value the wording table has no entry
+    for. Unlike (1), this IS a reachable, real fail-closed path -- it fires whenever the pinned
+    generator's payload for that template diverges from the wording table's variant coverage.
+    Wording resolution never falls back to a default string or picks an arbitrary variant: no
+    wording is better than wrong wording.
+
+    Both are translated to ``ConflictError`` at the ``next_task`` call site, the same pattern every
+    other ``LiveEngineCError`` here uses. Carries the template id only -- never any wording
+    content or payload value, since there is none that should be echoed back."""
+
+    def __init__(self, game_task_template_id: str) -> None:
+        self.game_task_template_id = game_task_template_id
+        super().__init__(f"no prompt wording for template {game_task_template_id!r}")
+
+
 class SF043OrderingError(LiveEngineCError):
     """Phase 4: the SF-043 ordering gate at session creation -- "B runs -> B completes ->
     B emits seven mastery values -> C validates the same-session payload -> C begins." Raised

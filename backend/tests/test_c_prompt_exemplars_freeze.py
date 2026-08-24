@@ -49,16 +49,24 @@ import hashlib
 import json
 from itertools import product
 from pathlib import Path
+from random import Random
 
 import pytest
 
 from component_c_generator.generation_config import default_generation_config
+from component_c_generator.tasks.registry import TASKS
 
 from app.domain.live_engine_c.generation_mode_guard import (
     GenerationConfigNotPermittedError,
     assert_generation_config_permitted,
 )
-from scripts.generate_c_prompt_exemplars import DIFFICULTY_LEVELS, _serialize_exemplars, build_exemplars
+from scripts.generate_c_prompt_exemplars import (
+    DIFFICULTY_LEVELS,
+    MASTER_SEED,
+    _entry_seed,
+    _serialize_exemplars,
+    build_exemplars,
+)
 from tests.test_be2_architecture_guards import PROHIBITED_COLUMN_TERMS
 
 CONTRACT_DIR = Path(__file__).parent.parent / "contract"
@@ -67,8 +75,14 @@ META_PATH = CONTRACT_DIR / "c-prompt-exemplars.meta.json"
 REGISTRY_PATH = CONTRACT_DIR / "c-template-registry.json"
 
 ALLOWED_ENTRY_KEYS = frozenset(
-    {"game_task_template_id", "difficulty_level", "prompt_payload", "interactive_assets", "valid_action_space"}
+    {
+        "game_task_template_id", "difficulty_level", "prompt_payload", "interactive_assets",
+        "valid_action_space", "blanks", "prompt_text",
+    }
 )
+
+# Mirrors task_service._BLANKS_TEMPLATE_IDS exactly -- BE-prompt-text batch.
+_BLANKS_TEMPLATE_IDS = frozenset({"C-NP-01", "C-NP-02", "C-NP-03"})
 
 
 def _frozen_exemplars() -> dict:
@@ -124,21 +138,77 @@ def test_exemplar_completeness_150_entries_30_times_5_no_gaps_no_extras() -> Non
 
 
 def test_every_entry_key_set_equals_allow_list_exactly() -> None:
-    """D3 item 4, first half: every entry's key set equals the five-field allow-list exactly --
-    no sixth key, no missing key."""
+    """D3 item 4, first half: every entry's key set equals the seven-field allow-list exactly --
+    no eighth key, no missing key. (Five fields through the exemplars batch; BE-prompt-text adds
+    ``blanks`` and ``prompt_text`` as the sixth and seventh.)"""
     for entry in _frozen_entries():
         assert set(entry) == ALLOWED_ENTRY_KEYS, entry["game_task_template_id"]
 
 
-def test_allow_list_negative_control_fails_on_a_sixth_key() -> None:
+def test_allow_list_negative_control_fails_on_an_eighth_key() -> None:
     """D3 item 4, second half (work order acceptance criterion 1): demonstrates, with REAL
-    output, that the same key-set assertion FAILS when a sixth key is added to a real entry --
+    output, that the same key-set assertion FAILS when an eighth key is added to a real entry --
     proving the guard can actually fire, unlike a value-scan exemption list that only ever grows."""
     real_entry = _frozen_entries()[0]
     tampered_entry = dict(real_entry, correct_answer_payload={"leaked": True})
 
     assert set(real_entry) == ALLOWED_ENTRY_KEYS
     assert set(tampered_entry) != ALLOWED_ENTRY_KEYS
+
+
+def test_blanks_non_null_for_exactly_the_three_np_templates() -> None:
+    """ACCEPTANCE CRITERION 1: ``blanks`` non-null for exactly C-NP-01/02/03 (all 5 levels each),
+    null for the other 27 templates (all 5 levels each) -- asserted as a SET, so a future template
+    silently acquiring or losing the field fails loudly rather than by coincidence of which
+    templates happened to be checked."""
+    non_null_template_ids = {
+        entry["game_task_template_id"] for entry in _frozen_entries() if entry["blanks"] is not None
+    }
+    null_template_ids = {
+        entry["game_task_template_id"] for entry in _frozen_entries() if entry["blanks"] is None
+    }
+    assert non_null_template_ids == _BLANKS_TEMPLATE_IDS
+    assert null_template_ids == {
+        entry["game_task_template_id"] for entry in _frozen_entries()
+    } - _BLANKS_TEMPLATE_IDS
+    for entry in _frozen_entries():
+        if entry["game_task_template_id"] in _BLANKS_TEMPLATE_IDS:
+            assert isinstance(entry["blanks"], int) and not isinstance(entry["blanks"], bool)
+
+
+def test_blanks_cross_check_against_generated_difficulty_vector() -> None:
+    """THE BEST CHECK IN THIS BATCH (planning-turn framing, kept here verbatim because it names
+    exactly what this test is for): this project now derives ``blanks`` two different ways in two
+    different places, for two different structural reasons --
+    ``task_service._blanks`` (production, ``app/``) reads ``record.difficulty_vector["blanks"]``
+    because calling ``default_generation_config()`` is forbidden anywhere under ``app/``;
+    ``generate_c_prompt_exemplars.build_exemplars`` (this script, NOT under ``app/``) reads
+    ``params.count_b_by_level[difficulty_level - 1]`` because reading
+    ``generated.difficulty_vector`` here would breach this module's own "never referenced"
+    guarantee for that field. Both routes are claimed to always produce the identical number,
+    by construction of the pinned generator's own source (``number_path.py`` writes
+    ``blanks = params.count_b_by_level[difficulty_level - 1]`` into ``difficulty_vector``
+    verbatim) -- this test is the one assertion that would catch the two derivation paths
+    silently diverging, by generating fresh (independently of ``build_exemplars``, which never
+    reads ``difficulty_vector``) and comparing ``generated.difficulty_vector["blanks"]`` against
+    the frozen artefact's ``blanks`` value for the three affected templates, at all five levels."""
+    config = default_generation_config()
+    for template_id in _BLANKS_TEMPLATE_IDS:
+        task = TASKS[template_id]
+        params = config.params_for(template_id)
+        for difficulty_level in DIFFICULTY_LEVELS:
+            seed = _entry_seed(MASTER_SEED, template_id, difficulty_level)
+            generated = task.generate(Random(seed), difficulty_level, params)
+            frozen_entry = next(
+                entry
+                for entry in _frozen_entries()
+                if entry["game_task_template_id"] == template_id
+                and entry["difficulty_level"] == difficulty_level
+            )
+            assert generated.difficulty_vector["blanks"] == frozen_entry["blanks"], (
+                template_id,
+                difficulty_level,
+            )
 
 
 def test_interactive_assets_empty_for_all_150() -> None:
