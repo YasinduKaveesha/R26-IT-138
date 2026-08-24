@@ -25,12 +25,14 @@ import {
 
 function makeTask(overrides: Partial<CNextTaskResponse> = {}): CNextTaskResponse {
   return {
+    blanks: 1,
     c_task_instance_id: 'task-1',
     difficulty_level: 1,
     game_family_id: 'C-GF-02',
     game_task_template_id: 'C-NP-01',
     interactive_assets: {},
     prompt_payload: { shown_sequence: [1, 2, 3] },
+    prompt_text: 'Write what comes next in the pattern.',
     representation_mode: 'TEST_FIXTURE_ONLY_REPRESENTATION',
     request_id: 'req-1',
     scaffold_state: 'C0',

@@ -9851,3 +9851,101 @@ still renders the fail-closed frame, correctly. The frontend half of the wording
 that the client relays `prompt_text` verbatim and never composes or rewrites it — is deliberately not
 here: there is no surface rendering it yet, so the guard belongs to 10a, and is recorded as owed by
 that sub-phase.
+
+## 2026-08-25 — FE-typecheck-gate: a `typecheck` script, and the dev fixture's own dead development path found by using it
+
+**What this closes.** `component-c-api.ts`'s development-fixture `nextTask()` copied
+`prompt_payload`, `interactive_assets`, `valid_action_space`, `difficulty_level` and
+`game_task_template_id` from the exemplar it relays, but not `blanks` and not `prompt_text` — both
+required on `CNextTaskResponse` since `5d2c1ab`. The fixture is how Component C is exercised without
+a backend; serving a task missing two required fields would fail `isCNextTaskResponse` at runtime and
+make 10a's surface fail closed on every task in development. Nothing caught it because nothing
+type-checked.
+
+**Scope, exactly as ordered — no UI, no renderer, no archetype surface.**
+
+1. `package.json` gains `"typecheck": "tsc --noEmit"`. No other script changed, no dependency added.
+2. `component-c-api.ts`'s `nextTask()` now carries `blanks: exemplar.blanks` and
+   `prompt_text: exemplar.prompt_text` alongside the other exemplar-sourced fields — real per-entry
+   values from the frozen exemplar artefact, never a default or a placeholder. The surrounding
+   comment block (provenance-per-field) is updated to name both.
+3. `c-session-logic.test.ts`'s `makeTask()` helper now sets `blanks: 1` and
+   `prompt_text: 'Write what comes next in the pattern.'` explicitly in its base object — `C-NP-01`'s
+   own real values at `difficulty_level: 1` — rather than leaving both to fall through
+   `...overrides: Partial<CNextTaskResponse>`, which typed them as possibly `undefined` against a
+   required, nullable-but-never-absent field. No cast, no type loosened; `isCNextTaskResponse` and
+   `CNextTaskResponse` were untouched.
+4. New guard: `c-dev-fixture-next-task-runtime-validation.test.ts`, flat in `src/api/__tests__/`.
+   Asserts the fixture's actual `nextTask()` output — not a reconstruction of it — passes
+   `isCNextTaskResponse`, with two negative controls (drop `blanks`, drop `prompt_text` from a copy
+   of that same output) proving the assertion is not vacuous. This is the guard that would have
+   caught the original defect; the typecheck script alone catches this one instance but nothing
+   short of a runtime assertion catches a future fixture that drifts from the type at the value
+   level while still satisfying it structurally by coincidence.
+
+**What was found, not assumed.** `npx tsc --noEmit` before this batch reported exactly two errors,
+both in the files this prompt named, matching its premise. Both errors' detailed messages named only
+`blanks` as the incompatible property, not `prompt_text` — TypeScript reports one representative
+mismatched property per object-literal assignability failure, not every one. Fixing `blanks` alone in
+`makeTask()` and re-running confirmed this: without also supplying `prompt_text`, a second, previously
+invisible error for that property would have surfaced. Both were fixed in the same edit, so this
+never actually manifested as a visible third error — recorded here so the reasoning is checkable,
+not just the outcome.
+
+**Verified.**
+- `npx tsc --noEmit` — zero errors, exit 0.
+- `npm run test:contract` — 400 / 400 / 0, up from the 397 / 397 / 0 baseline at `01bc1ef`; the three
+  added tests are exactly this batch's new guard file, reconciling arithmetically
+  (`397 + 3 = 400`).
+- The new guard's negative controls both fire: dropping `blanks` from the fixture's real output
+  fails `isCNextTaskResponse`; dropping `prompt_text` does too. The positive assertion — the
+  fixture's actual, unmodified output — passes.
+
+**What was not done.** No archetype surface, renderer, prompt visual, or any 10a work. No backend
+file changed. No Component B file changed. No generated file or frozen contract artefact changed.
+`isCNextTaskResponse` itself was not touched — it was already correct. `tsconfig.json` was not
+touched. No type was loosened, cast, or suppressed anywhere.
+
+**What I was unsure about.** Whether TypeScript would surface `prompt_text` as a distinct, separate
+error once `blanks` was fixed — addressed above by fixing both in one edit and reasoning through why
+only one appeared originally, rather than leaving it unverified.
+
+**Verification.** — supervisor's, pending
+
+**Verification — supervisor's, measured.** `npx tsc --noEmit`: **exit 0, no output.** This is the
+first time anything in this project has type-checked the frontend, and it is the point of the batch.
+Frontend contract suite: **400 tests, 400 passed, 0 failed.** Both my own runs. Reconciles against
+the 397 / 397 / 0 baseline at `01bc1ef`: `397 + 3 = 400`, three tests added, none removed.
+
+Verified directly, not read from the builder's report:
+
+- **The fixture was exercised, not inspected.** Invoking the real `nextTask()` under the fixture env
+  vars returns `C-BT-01` at difficulty 1 with `blanks: null` and the genuine `prompt_text`, and it
+  passes `isCNextTaskResponse`. Deleting either field from a copy of that same output flips the
+  guard to `false`. Both negative controls fire on the fixture's actual output rather than on a
+  reconstruction of it.
+- The fixture assigns `blanks: exemplar.blanks` and `prompt_text: exemplar.prompt_text` — direct
+  copies, with no `??`, no default, no placeholder, no cast. The comment block's field-provenance
+  note was updated from a five-field to a seven-field allow-list, so it stays true.
+- The test helper's defaults are `C-NP-01`'s real values, and the fix loosens no type and adds no
+  cast. `tsconfig.json` is untouched — the clean typecheck was achieved by fixing code, not by
+  relaxing diagnostics.
+- Register appended in binary mode: 60 lines added, none removed, **zero CR bytes**.
+
+**A NEW FINDING, recorded here because it becomes load-bearing at the very next sub-phase.**
+`dev-fixture-exemplars.ts`'s `loadFixtureTaskExemplar()` returns the **alphabetically first**
+template id at difficulty 1 — unconditionally, with no selection mechanism. That is `C-BT-01`, a
+Build-and-Trade template belonging to **10f**. Consequently the development fixture can serve only
+that one task, and **10a's `ordered-value-sequence` surface cannot be exercised in the running app
+at all** — the fixture will always resolve to `named-integer-fields`, which has no surface until
+10f. This was invisible while no surface existed, because every task fail-closed regardless. It is
+not a defect in this batch and was not introduced by it. 10a can still be proven against the
+exemplar artefact by test, which is what its plan proposes; what it cannot do is demonstrate itself
+end to end on device. Making the fixture's template selectable is the obvious remedy and is the
+supervisor's to authorise in 10a's work order rather than a builder's to add unasked.
+
+**What was NOT verified.** The backend suite was not re-run — no backend file changed and it stands
+at 651 / 76 / 0, measured at `5d2c1ab`. `npm run typecheck` now exists but **nothing runs it
+automatically**: it is a script, not yet a gate. Recorded as owed — every sub-phase from here states
+a clean `npm run typecheck` in its definition of done, and this supervisor runs it at every
+verification, alongside both suites.

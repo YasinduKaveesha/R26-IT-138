@@ -85,12 +85,13 @@ function createFixtureApi(fixture: string): ComponentCApi {
     // path, and the backend remains the sole authority on task content in production -- the
     // client here relays a real generator-produced exemplar, it never invents one.
     //
-    // prompt_payload, interactive_assets and valid_action_space are relayed verbatim from one
-    // c-prompt-exemplars.json entry (loadFixtureTaskExemplar picks it deterministically -- see
-    // dev-fixture-exemplars.ts). The remaining CNextTaskResponse fields have no source in that
-    // artefact (its five-field allow-list carries only game_task_template_id, difficulty_level,
-    // prompt_payload, interactive_assets and valid_action_space) and are supplied as follows,
-    // per owner correction 2026-08-24:
+    // prompt_payload, interactive_assets, valid_action_space, blanks and prompt_text are relayed
+    // verbatim from one c-prompt-exemplars.json entry (loadFixtureTaskExemplar picks it
+    // deterministically -- see dev-fixture-exemplars.ts). The remaining CNextTaskResponse fields
+    // have no source in that artefact (its seven-field allow-list carries only
+    // game_task_template_id, difficulty_level, prompt_payload, interactive_assets,
+    // valid_action_space, blanks and prompt_text) and are supplied as follows, per owner
+    // correction 2026-08-24:
     //   - technical_status: 'OK' and scaffold_state: 'C0' are real values from each field's
     //     actual backend vocabulary (persistence_models.py's CHECK constraint; C0..C4), not
     //     invented ones.
@@ -120,6 +121,8 @@ function createFixtureApi(fixture: string): ComponentCApi {
         prompt_payload: exemplar.prompt_payload,
         interactive_assets: exemplar.interactive_assets,
         valid_action_space: exemplar.valid_action_space,
+        blanks: exemplar.blanks,
+        prompt_text: exemplar.prompt_text,
         scaffold_state: 'C0',
         technical_status: 'OK',
         request_id: 'dev-c-next-task-ok',
