@@ -9949,3 +9949,85 @@ at 651 / 76 / 0, measured at `5d2c1ab`. `npm run typecheck` now exists but **not
 automatically**: it is a script, not yet a gate. Recorded as owed — every sub-phase from here states
 a clean `npm run typecheck` in its definition of done, and this supervisor runs it at every
 verification, alongside both suites.
+
+## 2026-08-25 — Component C 10a: Number Path and Order, the first genuine archetype surface
+
+**What this delivers.** `ordered-value-sequence` (C-GF-02, C-NP-01…04) — the first real `archetype-surfaces.ts` entry and the first archetype to actually render `prompt_text` and `blanks`. Scene is read from the single `list[int]`-typed key's *name* in `valid_action_space` (`entered_values` vs `arranged_values`), never from a per-template table; NP-01/02/03 render `blanks` digit-keypad-driven entry slots over the shown sequence, NP-04 renders a draggable token row the child reorders directly. `handleSubmit`, `encodeActionPayload`, `resolveArchetype` and `isCNextTaskResponse` are unmodified.
+
+**The stepper-to-keypad ruling.** The reviewed plan proposed a per-slot +/- stepper. Overruled: `C-NP-02` at difficulty 5 asks for `69, 68` from zero, and a stepper's tap count scales with the answer's magnitude, which rises with difficulty — the SPEC section 10 confound touch-target *size* constancy alone does not catch, since a stepper keeps every size constant while making interaction *cost* track difficulty regardless. Built `digit-keypad.tsx` instead: ten digit keys plus delete, one shared keypad driving whichever slot has focus, geometry constant at every difficulty. Not a free-text field — section 5.2 holds, and `free-entry.tsx`'s `TextInput` was not reused.
+
+**New files.**
+- `archetypes/ordered-value-sequence-logic.ts` — pure resolver, no React import. Iterates `valid_action_space`'s full declared key set (never assumes exactly one), classifies the scene key by name, renders any further declared key generically via the existing field-kind layer (dead code against the real registry today — no NP template declares an extra key — kept because the two-layer rule asked for it structurally, not as a table lookup).
+- `primitives/digit-keypad.tsx`, `primitives/value-token-row.tsx` — the two named shared primitives. `value-token-row` has two modes, `display-with-entry` and `reorder`; built for reuse by `partition-allocation` (10g/10h), no partition-allocation-specific behaviour added.
+- `archetypes/ordered-value-sequence-surface.tsx` — the `ArchetypeSurfaceProps` component. `null` resolution renders `FailClosedFrame`.
+- Six test files, flat in `src/api/__tests__/`, per the approved design's table: resolver correctness against the real exemplars at every difficulty level with a negative control per fail-closed path; the prompt_text never-composes guard; the end-to-end key-set proof; the motor-constancy structural proof; the representation_mode source scan; the interactive_assets carry-through proof.
+
+**Modified files, both named and authorised in advance.**
+- `archetype-surfaces.ts` — the one entry, `'ordered-value-sequence'` → the new surface.
+- `motor-constants.ts` — additive only: `TOKEN_TOUCH_TARGET_SIZE`, `TOKEN_SPACING` (the token row, deliberately not reusing `STEP_*`, which is commented as the unit-stepper's own, a separately-owned primitive), `KEYPAD_KEY_SIZE`, `KEYPAD_KEY_SPACING` (the keypad). No existing export changed.
+- `dev-fixture-exemplars.ts` — `EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_TEMPLATE` (+ `..._DIFFICULTY` companion), authorised so the dev fixture can serve something other than `C-BT-01` (10f's template) and 10a's surface can actually be exercised in a running app. Unset, behaviour is byte-for-byte unchanged; an unknown id or (id, level) pair throws, same as the pre-existing missing-entry path — never a silent fall-back.
+
+**A structural finding, not fixed here.** `c-session-screen.tsx`'s `phase.kind === 'task'` render branch is a static placeholder — it never actually mounts the `Surface` component `resolveArchetypeSurface` resolves; only `loadNextTask` checks whether one exists, to decide which phase to enter. So even with a real surface now registered, the running app cannot show it without a further change to that file, which is not among the three files this batch was authorised to touch. Flagged for the owner rather than fixed silently.
+
+**Verified.**
+- `npx tsc --noEmit` — zero errors, exit 0.
+- `npm run test:contract` — 477 / 477 / 0, up from the 400 / 400 / 0 baseline at `b274ee9`; 77 added tests reconcile arithmetically (`400 + 77 = 477`).
+- `npx expo export --platform ios` — succeeded, 1610 modules bundled including `react-native-gesture-handler` / `react-native-reanimated` and every new file, no Metro/Hermes error. `dist/` removed afterward.
+- Every negative control in the new test files fires: unknown scene-key name, two scene keys at once, a `list[str]` key alongside the scene key, missing/malformed `shown_sequence`/`values`/`direction`/`step`, `blanks` violating its scene bound in both directions, over-length sequences, empty/absent `prompt_text`, a one-character `prompt_text` mutation, a dropped `entered_values`/`arranged_values` key, an extra key on an encoded payload, an unknown fixture template id, an unknown (template, level) pair, a non-integer fixture difficulty value.
+
+**What the motor-constancy proof does NOT cover, stated once rather than implied.** No rendering library exists in this project's `devDependencies` (confirmed against `package.json`), so "identical at difficulty 1–5" is a structural proof — the geometry constants referenced are literally the same values regardless of `blanks` or `difficulty_level` — not a literal rendered-layout measurement. It does not prove a mounted screen never visually compresses a token or a key.
+
+**What was NOT done.** No other archetype. No backend file, other than this entry. No Component B file. No generated file or frozen contract artefact. No change to `handleSubmit`, `encodeActionPayload`, `resolveArchetype`, or `isCNextTaskResponse`. No `any`/`as`/`@ts-ignore`. No new npm dependency — `react-native-gesture-handler` and `react-native-reanimated` were already present. The reorder gesture's actual on-device feel is unverified: nothing in this environment can mount a React Native tree or run a simulator, so `DraggableToken`'s pan-gesture behaviour is proven only by typechecking and by `expo export`'s successful bundle, not by having been touched by a finger.
+
+**Verification.** — supervisor's, pending
+
+**Verification — supervisor's, measured.** `npx tsc --noEmit`: **exit 0, no output.** Frontend
+contract suite: **477 tests, 477 passed, 0 failed.** `npx expo export --platform ios`: **exit 0**,
+`entry-d5f81edc3f051c5fa6e7d88bcc3f5041.hbc`, 5.06 MB; `dist/` removed after. All three are my own
+runs. Reconciles against the 400 / 400 / 0 baseline at `b274ee9`: `400 + 77 = 477`, none removed.
+The bundle grew from 10.0b-ii's 4.85 MB, consistent with gesture-handler and reanimated entering the
+real import graph rather than being merely installed.
+
+Verified directly, not read from the builder's report:
+
+- **The keypad ruling is implemented as ruled.** `digit-keypad.tsx` renders keys `1`–`9`, `0` and a
+  delete control. There is no increment, decrement, `+` or `-` affordance anywhere in it.
+- **Geometry cannot vary by difficulty, structurally.** The four added constants
+  (`TOKEN_TOUCH_TARGET_SIZE`, `TOKEN_SPACING`, `KEYPAD_KEY_SIZE`, `KEYPAD_KEY_SPACING`) are plain
+  module-level numbers taking no parameter, and a grep for `difficulty_level` / `difficultyLevel`
+  across all four new source files returns **nothing** — not merely nothing outside comments,
+  nothing at all. Only the slot count varies.
+- `motor-constants.ts` changed additively; no existing export was altered.
+- Register appended in binary mode, **zero CR bytes**.
+
+**THE BUILDER'S FINDING IS CONFIRMED, AND IT IS THE MOST IMPORTANT THING IN THIS ENTRY.**
+`c-session-screen.tsx:128` resolves the archetype surface and, on success, sets
+`phase = { kind: 'task', task }`. But the render branch for that phase returns a "Getting ready…"
+spinner with a LEAVE SESSION button and **never mounts the resolved component**. `Phase`'s `task`
+variant carries only `{ kind, task }` — not the resolved surface — so the render path has nothing to
+mount even if it tried. `handleSubmit` remains uncalled, as its own comment still says.
+
+**Consequence: 10a's surface is complete, fully tested, and unreachable in the running app.** A child
+would see "Getting ready…" indefinitely. Every one of this batch's seventy-seven tests can pass
+while the feature cannot be used, because the tests exercise the resolver and the primitives, and
+nothing in this project can mount a component tree.
+
+**This is a gap in the supervisor's work order, not in the builder's work.** `c-session-screen.tsx`
+was not among the three files the work order authorised modifying, and the builder flagged it rather
+than reaching outside scope or working around it silently. That is exactly the behaviour the work
+order asks for, and it is the reason this was caught before the commit rather than after.
+
+**A documentation consequence to fix next:** committing this batch makes the comment at
+`c-session-screen.tsx:294-295` false. It states that no archetype surface exists and that the branch
+is therefore unreachable — true at `b274ee9`, false the moment this lands. The follow-up batch that
+mounts the surface fixes the comment with it.
+
+**What was NOT verified.** The reorder gesture's on-device behaviour: nothing in this project can
+mount a tree or drive a simulator, so the gesture is proven only by typecheck and by successful
+bundling. It is not claimed to work and not claimed to be broken — it is untested by touch, and the
+builder said so rather than implying otherwise. The motor-constancy proof is structural: it shows
+the constants do not vary, **not** that a mounted layout never visually compresses; there is no
+rendering library in `devDependencies` to prove the stronger claim. `GenericExtraField` is dead code
+against the current registry — no NP template declares an extra key today — built because the
+approved design named it, and correct to have built under the two-layer rule. The backend suite was
+not re-run; no backend file changed and it stands at 651 / 76 / 0, measured at `5d2c1ab`.

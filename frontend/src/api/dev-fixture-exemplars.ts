@@ -30,24 +30,58 @@ import { EXEMPLAR_ENTRIES, type ExemplarEntry } from '@/src/api/generated/c-prom
 
 export type { ExemplarEntry };
 
-/**
- * Deterministic, artefact-driven pick of exactly one exemplar: the alphabetically-first template
- * id among the generated exemplar entries, at difficulty_level 1. Never a hardcoded template id --
- * if a future regeneration changes which id sorts first, this fixture moves with it rather than
- * silently serving a stale choice. No new fixture-scenario string is introduced; nothing
- * configures which task is served.
- */
-export function loadFixtureTaskExemplar(): ExemplarEntry {
-  const sortedIds = EXEMPLAR_ENTRIES.map((entry) => entry.game_task_template_id).sort();
-  const firstTemplateId = sortedIds[0];
+// 10a addition: EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_TEMPLATE (and its companion
+// EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_DIFFICULTY) let a developer select which exemplar the fixture
+// serves. Without it the fixture can only ever serve the alphabetically-first template
+// (`C-BT-01`, 10f's `named-integer-fields`), which has no surface until 10f lands -- so 10a's own
+// surface could never be exercised in the running app. Unset, behaviour is byte-for-byte unchanged
+// from before this addition. Set to an id/level pair with no matching exemplar entry, it throws the
+// same way the pre-existing missing-entry path already did -- never a silent fall-back to the
+// first template, which would make a typo look like a correctly-configured fixture serving the
+// wrong task.
 
+function findExemplarOrThrow(templateId: string, difficultyLevel: number): ExemplarEntry {
   const entry = EXEMPLAR_ENTRIES.find(
-    (candidate) => candidate.game_task_template_id === firstTemplateId && candidate.difficulty_level === 1,
+    (candidate) => candidate.game_task_template_id === templateId && candidate.difficulty_level === difficultyLevel,
   );
   if (!entry) {
     throw new Error(
-      `Development fixture: no exemplar entry found for ${firstTemplateId} at difficulty_level 1.`,
+      `Development fixture: no exemplar entry found for ${templateId} at difficulty_level ${difficultyLevel}.`,
     );
   }
   return entry;
+}
+
+/**
+ * Artefact-driven pick of exactly one exemplar.
+ *
+ * Default (both env vars unset): the alphabetically-first template id among the generated exemplar
+ * entries, at difficulty_level 1. Never a hardcoded template id -- if a future regeneration changes
+ * which id sorts first, this fixture moves with it rather than silently serving a stale choice.
+ *
+ * When EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_TEMPLATE is set, that template id is used instead, at
+ * difficulty_level from EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_DIFFICULTY (default 1 if unset). A
+ * non-integer difficulty value, or an (id, level) pair absent from the exemplar artefact, throws.
+ */
+export function loadFixtureTaskExemplar(): ExemplarEntry {
+  const selectedTemplateId = process.env.EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_TEMPLATE?.trim() || null;
+
+  if (selectedTemplateId === null) {
+    const sortedIds = EXEMPLAR_ENTRIES.map((entry) => entry.game_task_template_id).sort();
+    return findExemplarOrThrow(sortedIds[0], 1);
+  }
+
+  const rawDifficulty = process.env.EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_DIFFICULTY?.trim();
+  let difficultyLevel = 1;
+  if (rawDifficulty) {
+    const parsed = Number(rawDifficulty);
+    if (!Number.isInteger(parsed)) {
+      throw new Error(
+        `Development fixture: EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_DIFFICULTY must be an integer, got "${rawDifficulty}".`,
+      );
+    }
+    difficultyLevel = parsed;
+  }
+
+  return findExemplarOrThrow(selectedTemplateId, difficultyLevel);
 }
