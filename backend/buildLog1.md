@@ -10245,3 +10245,11 @@ this batch supports.
 `frontend/src/api/__tests__/c-surface-remounts-per-task.test.ts`.
 
 **Verification.** — supervisor's, pending
+
+---
+
+> `backend/buildLog1.md` is closed as of its final entry, **FE-surface-remount-key**
+> (2026-08-25), and must not be appended to or edited further. It had grown past 10,000 lines;
+> `buildLog2.md` is its rotation, continuing the same living, append-only development audit log
+> under the same rules: future work is appended there as a new dated phase or batch, and every
+> entry here remains exactly as written -- never removed, rewritten, or silently altered.
