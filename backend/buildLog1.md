@@ -10177,3 +10177,71 @@ family sub-phases will copy.
 The backend suite was not re-run: no backend file is touched. It stands at **651 / 76 / 0**,
 measured at `5d2c1ab`, and remains stale with respect to the uncommitted `auth.py` change that
 batch A4 owns.
+
+## 2026-08-25 - FE-surface-remount-key: the task surface now remounts per task instance, so an entered answer cannot survive into the next question
+
+**Why.** First browser look at a Component C surface (C-NP-01 under the dev fixture). Entering a
+digit and pressing submit appeared to do nothing. Two independent causes produced one symptom; only
+the second is a defect.
+
+The first is expected and untouched: the dev fixture's `nextTask()` (component-c-api.ts:111-129)
+returns the same canned task every time, so there is no differing content to advance to under it.
+
+The second is the defect. `<Surface onSubmit={submitFromSurface} task={task} />` in
+c-session-screen.tsx carried no `key`. Same element type in the same position means React reconciles
+a new task into the SAME component instance rather than mounting a new one. Every archetype surface
+holds the child's in-progress answer in local state that is not derived from the task prop --
+ordered-value-sequence's `entryValues` and `order` -- so that state survived the re-render and the
+previously entered digit was still in the input after submit.
+
+This is not fixture-specific. Against a real backend, nothing forced a remount between genuinely
+different questions, so a stale answer from the previous question could sit in the input when a new
+one was shown and be submitted against it without ever being re-entered. 10b...10h would have copied
+the shape from 10a's own surface.
+
+**What.** One line of behaviour: `key={task.c_task_instance_id}` on the `<Surface>` element, plus a
+JSX comment recording why it is load-bearing.
+
+`c_task_instance_id` is the registry's own per-instance identifier and a required non-null string on
+`CNextTaskResponse`. It is used alone, deliberately NOT composed with `task_index`: a composite would
+encode a distrust of the contract without detecting its violation, quietly papering over a backend
+that had issued two tasks under one instance id instead of letting that surface as the defect it
+would be.
+
+No second reset mechanism was added. There is no `useEffect` reset, no manual state-clear on submit,
+and no change to any archetype surface's internal state logic. The remount IS the fix; a parallel
+mechanism would be a second thing to forget.
+
+**Known fixture limitation, stated rather than worked around.** The dev fixture returns a constant
+`c_task_instance_id`, so under the fixture the key does not change and the surface does NOT visibly
+remount between submits. The entered digit will still appear to persist there. That is the fixture
+being a fixture; no fixture special-case was added to production code, and no comment anywhere in
+this change claims the fixture now visibly advances. Demonstrating the fix behaviourally needs a
+backend serving distinct task instance ids.
+
+**Verification.**
+
+- `npx tsc --noEmit` - exit 0, achieved by fixing code. No `any`, no `as` cast, no `@ts-ignore`.
+- `npm run test:contract` - 514 tests, 514 pass, 0 fail. Baseline measured immediately before this
+  change at HEAD 682e5ba was 505 (not the 501 named in the work order; the concurrent game-hub work
+  had added a second test file in the interval). Reconciles: 505 + 9 added - 0 removed = 514.
+- The new guard is structural and comment-stripped, and was proven in BOTH directions against the
+  real file: green on the file as fixed (predicate returns `c_task_instance_id`), red on an
+  in-memory copy of the same file with the key removed, and red again on a copy whose key is bound
+  to a string constant. Seven negative controls plus one positive control (which prevents a
+  predicate that returned null unconditionally from satisfying every negative control).
+- `expo export` NOT run. This change adds no import and no module; the bundle graph is unchanged, so
+  there is nothing here that a bundle could disprove.
+- The backend suite was NOT run. No backend file was changed by this batch.
+
+**What was NOT done, and cannot be.** The remount itself was NOT observed. This project has no
+rendering library in devDependencies, so no test here can mount a tree, drive a submit and assert the
+input cleared. What is proven is that the source binds a key to a task-identifying wire field; that
+React remounts on a changed key is React's documented behaviour, relied on and not verified here. The
+behavioural half is a supervisor observation to make in a browser against a real backend, not a claim
+this batch supports.
+
+**Files touched.** `frontend/src/features/c-session/c-session-screen.tsx`,
+`frontend/src/api/__tests__/c-surface-remounts-per-task.test.ts`.
+
+**Verification.** — supervisor's, pending

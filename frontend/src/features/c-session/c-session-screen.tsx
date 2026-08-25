@@ -319,7 +319,21 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
           <Ionicons color={colors.textSecondary} name="close" size={22} />
         </Pressable>
       </View>
-      <Surface onSubmit={submitFromSurface} task={task} />
+      {/* The `key` is load-bearing, not cosmetic. Every archetype surface holds the child's
+          in-progress answer in its own local state (ordered-value-sequence's `entryValues` and
+          `order`, and whatever 10b...10h add), and none of that state is derived from the task
+          prop. Without a key, React reconciles a new task into the SAME component instance --
+          same type, same position -- so the previous question's already-entered answer survives
+          into the next question and can be submitted against it without ever being re-entered.
+          Keying on the task instance id makes every new task a new instance, which discards that
+          state as a consequence of mounting rather than by any explicit reset.
+
+          `c_task_instance_id` is the registry's own per-instance identifier and is a required
+          non-null string on CNextTaskResponse. It is used alone and deliberately not combined
+          with `task_index`: a composite would encode a distrust of the contract without
+          detecting its violation, quietly papering over a backend that had issued two tasks
+          under one instance id instead of letting that surface as the defect it would be. */}
+      <Surface key={task.c_task_instance_id} onSubmit={submitFromSurface} task={task} />
     </SafeAreaView>
   );
 }
