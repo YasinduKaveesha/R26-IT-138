@@ -2,12 +2,11 @@
 // c-session-logic.ts, mirroring live-session-screen.tsx / live-session-logic.ts's split for
 // Component B.
 //
-// The loop is create/resume -> nextTask -> resolveArchetype (via planTask) -> (surface, which does
-// not exist yet in this batch) -> submitAction. Every task renders FailClosedFrame today, because
-// archetype-surfaces.ts returns `null` for all eight archetype ids -- 10a...10h populate it. The
-// submit wiring below (`handleSubmit`) is built now so a later surface plugs in without this file
-// changing: nothing calls it yet, because there is no interactive surface capable of producing a
-// payload to submit.
+// The loop is create/resume -> nextTask -> planTaskSurface (composing planTask with surface
+// resolution) -> mount the resolved surface -> submitAction via handleSubmit. `ordered-value-
+// sequence` is the only archetype with a registered surface so far (10a); every other template
+// still renders FailClosedFrame, and archetype-surfaces.ts's own table is what 10b...10h extend --
+// this file does not change again when they do.
 //
 // This file does not implement Component B's refresh-on-401 retry (`withToken` in
 // live-session-screen.tsx). That is a deliberate simplification, not a hidden gap: the C API client
@@ -25,8 +24,10 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import type { ComponentType } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createComponentCApi, getComponentCDevelopmentFixture } from '@/src/api/component-c-api';
 import { ApiClientError } from '@/src/api/errors';
@@ -35,12 +36,13 @@ import { useAuth } from '@/src/auth/auth-context';
 import { AppText } from '@/src/components/app-text';
 import { ScreenShell } from '@/src/components/screen-shell';
 import { readPublicConfig } from '@/src/config/env';
-import { resolveArchetypeSurface } from '@/src/features/c-session/archetype-surfaces';
+import { resolveArchetypeSurface, type ArchetypeSurfaceProps } from '@/src/features/c-session/archetype-surfaces';
 import { encodeActionPayload } from '@/src/features/c-session/archetypes/encode-action-payload';
+import { HIT_SLOP, TOUCH_TARGET_MIN_SIZE } from '@/src/features/c-session/motor-constants';
 import {
   classifySessionFailure,
   decideSessionBootstrap,
-  planTask,
+  planTaskSurface,
 } from '@/src/features/c-session/c-session-logic';
 import { FailClosedFrame } from '@/src/features/c-session/fail-closed-frame';
 import { NeutralMessageScreen } from '@/src/features/c-session/neutral-message-screen';
@@ -53,7 +55,7 @@ import {
   recordTaskStarted,
   recordTechnicalIssue,
 } from '@/src/features/c-session/telemetry';
-import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { colors, radius, spacing } from '@/src/theme/tokens';
 
 export type CSessionScreenProps = {
   // Not decided or invented by this screen -- see c-session-logic.ts's decideSessionBootstrap
@@ -66,7 +68,7 @@ export type CSessionScreenProps = {
 
 type Phase =
   | { kind: 'loading' }
-  | { kind: 'task'; task: CNextTaskResponse }
+  | { kind: 'task'; task: CNextTaskResponse; Surface: ComponentType<ArchetypeSurfaceProps> }
   | { kind: 'fail-closed'; supportCode: string | null }
   | { kind: 'technical-block'; supportCode: string | null }
   | { kind: 'failure'; supportCode: string | null; copy: { title: string; detail: string } }
@@ -120,21 +122,17 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
         const task = await api.nextTask(cSessionId, accessToken);
         if (!mountedRef.current) return;
         recordTaskOffered();
-        const plan = planTask(task);
-        if (plan.kind === 'fail-closed') {
-          setPhase({ kind: 'fail-closed', supportCode: task.request_id });
-          return;
-        }
-        const Surface = resolveArchetypeSurface(plan.archetypeId);
-        if (!Surface) {
-          // Resolved to a real archetype, but no surface is registered for it yet -- still
-          // fail-closed, never a guessed rendering, but structurally a different reason than an
-          // unresolvable template (see planTask's own doc comment).
+        // Both fail-closed reasons (unresolvable template; resolved archetype with no registered
+        // surface) route to the same phase and support code here -- planTaskSurface keeps them
+        // distinguishable in its own return value so a test can prove they stay separate, even
+        // though the screen has no reason to render them differently.
+        const surfacePlan = planTaskSurface(task, resolveArchetypeSurface);
+        if (surfacePlan.kind === 'fail-closed') {
           setPhase({ kind: 'fail-closed', supportCode: task.request_id });
           return;
         }
         recordTaskStarted();
-        setPhase({ kind: 'task', task });
+        setPhase({ kind: 'task', task: surfacePlan.task, Surface: surfacePlan.Surface });
       } catch (error) {
         routeFailure(error);
       }
@@ -142,9 +140,6 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
     [api, routeFailure],
   );
 
-  // Reserved for the surface that will eventually plug into archetype-surfaces.ts. Nothing calls
-  // this in the current batch -- there is no rendered surface capable of producing a payload -- but
-  // it is wired now so a later archetype lands without this file changing.
   const handleSubmit = useCallback(
     async (
       cSessionId: string,
@@ -170,7 +165,23 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
     },
     [api, loadNextTask, routeFailure],
   );
-  void handleSubmit;
+
+  // The bridge from an archetype surface's own onSubmit (raw per-key values, no session/task
+  // plumbing -- see ArchetypeSurfaceProps) to handleSubmit's full signature. Reads cSessionId from
+  // the ref and re-fetches a fresh access token per submission rather than closing over a stale one.
+  const submitFromSurface = useCallback(
+    async (values: Record<string, unknown>) => {
+      const cSessionId = cSessionIdRef.current;
+      if (!cSessionId || phase.kind !== 'task') return;
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        routeFailure(new ApiClientError('unauthenticated', 'No access token is available.'));
+        return;
+      }
+      await handleSubmit(cSessionId, phase.task, accessToken, values);
+    },
+    [getAccessToken, handleSubmit, phase, routeFailure],
+  );
 
   const bootstrap = useCallback(async () => {
     if (!api) return;
@@ -291,52 +302,45 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
     );
   }
 
-  // phase.kind === 'task'. No archetype surface exists in this batch, so this branch is currently
-  // unreachable in practice (loadNextTask only sets it once resolveArchetypeSurface returns a
-  // component) -- kept because the loop must already know how to render one when 10a...10h land.
+  // phase.kind === 'task'. Renders whichever archetype surface resolveArchetypeSurface produced
+  // for this task, per its own ArchetypeSurfaceProps contract (task + onSubmit only -- no exit
+  // affordance in that contract, which is why the exit control lives in this wrapper rather than
+  // being threaded into the surface itself).
+  const { Surface, task } = phase;
   return (
-    <ScreenShell centered>
-      <View style={styles.iconCircle}>
-        <Ionicons color={colors.primary} name="hourglass-outline" size={44} />
+    <SafeAreaView style={styles.taskSafeArea}>
+      <View style={styles.taskExitRow}>
+        <Pressable
+          accessibilityLabel="Leave session"
+          accessibilityRole="button"
+          hitSlop={HIT_SLOP}
+          onPress={() => void leaveSession()}
+          style={({ pressed }) => [styles.taskExitButton, pressed && styles.pressed]}>
+          <Ionicons color={colors.textSecondary} name="close" size={22} />
+        </Pressable>
       </View>
-      <AppText align="center" variant="title">
-        Getting ready…
-      </AppText>
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => void leaveSession()}
-        style={({ pressed }) => [styles.leaveButton, pressed && styles.pressed]}>
-        <AppText style={styles.leaveButtonText}>LEAVE SESSION</AppText>
-      </Pressable>
-    </ScreenShell>
+      <Surface onSubmit={submitFromSurface} task={task} />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  iconCircle: {
-    alignItems: 'center',
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.xl,
-    height: 88,
-    justifyContent: 'center',
-    width: 88,
-  },
-  leaveButton: {
-    alignItems: 'center',
-    alignSelf: 'stretch',
-    backgroundColor: colors.surface1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: 2,
-    justifyContent: 'center',
-    minHeight: 56,
-    paddingHorizontal: spacing.lg,
-  },
-  leaveButtonText: {
-    fontFamily: typography.fonts.bold,
-    fontSize: 15,
-    letterSpacing: typography.letterSpacing.button,
-  },
   muted: { color: colors.textSecondary },
   pressed: { opacity: 0.85 },
+  taskExitButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surface1,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    height: TOUCH_TARGET_MIN_SIZE,
+    justifyContent: 'center',
+    width: TOUCH_TARGET_MIN_SIZE,
+  },
+  taskExitRow: {
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.smPlus,
+    paddingTop: spacing.sm,
+  },
+  taskSafeArea: { backgroundColor: colors.background, flex: 1 },
 });

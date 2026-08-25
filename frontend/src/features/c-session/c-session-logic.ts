@@ -5,12 +5,15 @@
 // It never judges an answer, never decides a mathematical level, and never chooses when a session
 // ends -- the server is authoritative on all three.
 
+import type { ComponentType } from 'react';
+
 import { ApiClientError } from '@/src/api/errors';
 import type {
   CActiveSessionResponse,
   CNextTaskResponse,
   CreateCSessionRequest,
 } from '@/src/api/generated/openapi-types';
+import type { ArchetypeSurfaceProps } from '@/src/features/c-session/archetype-surfaces';
 import { resolveArchetype, type ArchetypeId } from '@/src/features/c-session/archetypes/registry';
 
 // --- task resolution -----------------------------------------------------------------------
@@ -32,6 +35,44 @@ export function planTask(task: CNextTaskResponse): TaskPlan {
   const archetypeId = resolveArchetype(task.game_task_template_id, task.valid_action_space);
   if (archetypeId === null) return { kind: 'fail-closed' };
   return { kind: 'archetype', archetypeId, task };
+}
+
+// --- task surface resolution ----------------------------------------------------------------
+
+export type TaskSurfacePlan =
+  | { kind: 'mount'; task: CNextTaskResponse; Surface: ComponentType<ArchetypeSurfaceProps> }
+  | { kind: 'fail-closed'; reason: 'unresolvable-template' | 'no-surface-registered' };
+
+/**
+ * Composes `planTask` with surface resolution into the one decision the screen actually needs:
+ * mount a surface, or fail closed. There is no rendering library in this project's devDependencies
+ * (`@types/react`, `eslint`, `eslint-config-expo`, `tsx`, `typescript` only), so nothing can mount a
+ * component tree to prove the screen renders correctly -- this function exists so the decision
+ * itself is provable without one, mirroring `planTask`, `decideSessionBootstrap` and
+ * `classifySessionFailure`'s own split from the screen.
+ *
+ * The resolver is a parameter, not an import of archetype-surfaces.ts's concrete table, so this
+ * function is testable with a fake resolver that never touches the real registry. The screen passes
+ * `resolveArchetypeSurface` itself.
+ *
+ * Both `ComponentType` and `ArchetypeSurfaceProps` above are `import type` only -- this module still
+ * imports no react, react-native or API client value at runtime, matching this file's own header.
+ *
+ * The two fail-closed reasons are kept apart rather than collapsed, because `planTask`'s own doc
+ * comment draws this distinction deliberately: an unresolvable template is a wire-shape problem,
+ * while a resolved archetype with no registered surface is a "not built yet" problem. They already
+ * rendered identically (both `FailClosedFrame`) before this function existed and still do -- this is
+ * what makes the distinction checkable by a test rather than merely asserted in a comment.
+ */
+export function planTaskSurface(
+  task: CNextTaskResponse,
+  resolveSurface: (archetypeId: ArchetypeId) => ComponentType<ArchetypeSurfaceProps> | null,
+): TaskSurfacePlan {
+  const plan = planTask(task);
+  if (plan.kind === 'fail-closed') return { kind: 'fail-closed', reason: 'unresolvable-template' };
+  const Surface = resolveSurface(plan.archetypeId);
+  if (!Surface) return { kind: 'fail-closed', reason: 'no-surface-registered' };
+  return { kind: 'mount', task, Surface };
 }
 
 // --- session continuation ------------------------------------------------------------------

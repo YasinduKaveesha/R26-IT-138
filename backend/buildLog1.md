@@ -10031,3 +10031,78 @@ rendering library in `devDependencies` to prove the stronger claim. `GenericExtr
 against the current registry — no NP template declares an extra key today — built because the
 approved design named it, and correct to have built under the two-layer rule. The backend suite was
 not re-run; no backend file changed and it stands at 651 / 76 / 0, measured at `5d2c1ab`.
+
+## 2026-08-25 — FE-mount-surface: the mount decision moved into the pure layer, and the exit control's geometry fixed
+
+**What this closes.** The accepted, previously-uncommitted mount of `ordered-value-sequence` into `c-session-screen.tsx`'s task branch decided "mount vs fail closed, and which fail-closed reason" inline, in the render path, with no test able to reach it — this project's `devDependencies` carry no rendering library, so nothing can mount a component tree to prove a screen renders correctly. This batch moves that decision into `c-session-logic.ts`, alongside `planTask`, `decideSessionBootstrap` and `classifySessionFailure`, which already follow the same split for exactly this reason.
+
+**Scope, exactly as ordered.**
+
+1. `c-session-logic.ts` gains `planTaskSurface(task, resolveSurface)`, composing the existing `planTask` (unchanged) with an injected surface resolver. Returns `{kind: 'mount', task, Surface}` or `{kind: 'fail-closed', reason: 'unresolvable-template' | 'no-surface-registered'}` — the two fail-closed reasons `planTask`'s own doc comment already draws are now visible in the return value rather than only asserted in a comment. The resolver is a parameter specifically so this function is testable without importing `archetype-surfaces.ts`'s real table. Both new type imports (`ComponentType` from `react`, `ArchetypeSurfaceProps`) are `import type` only — this module still imports no react, react-native or API client value at runtime.
+2. `c-session-screen.tsx`'s `loadNextTask` now calls `planTaskSurface(task, resolveArchetypeSurface)` instead of the inline `planTask` + `resolveArchetypeSurface` sequence. Behaviour is identical: both fail-closed reasons still route to the same `{kind: 'fail-closed', supportCode: task.request_id}` phase, `recordTaskStarted()` still fires only once, after confirming mount.
+3. The exit control's hardcoded `height: 40, width: 40, hitSlop={12}` replaced with `TOUCH_TARGET_MIN_SIZE` (48) and `HIT_SLOP` from `motor-constants.ts` — it was sitting below the project's own documented minimum touch target. Noting for the record, as asked: the affordance changed from a full-width "LEAVE SESSION" button to a `✕` icon control in the previously-accepted work; that was a deliberate design decision, not rediscovered here.
+4. Fixed the top-of-file header comment (lines 5-10), which was stale even before the accepted mount work landed — it still said "surface, which does not exist yet in this batch" and "Every task renders FailClosedFrame today." Not named in the work order's four scope items, but squarely inside acceptance criterion 5 ("no comment in this file asserts something the code no longer does"), so corrected rather than left.
+5. Two new test files, flat in `src/api/__tests__/`:
+   - `c-plan-task-surface.test.ts` — the pure function's three outcomes (mount; fail-closed/no-surface-registered; fail-closed/unresolvable-template), the two reasons asserted distinguishable from each other directly (not merely both truthy), and negative controls including one proving the resolver is never even called once `planTask` itself has already failed closed.
+   - `c-session-screen-task-branch.test.ts` — the structural guard a pure test cannot reach: a comment-stripped scan of the real file proving its task branch references `<Surface` as JSX, with three negative controls: a fabricated static-content-only branch (literally the old dead code) scanning false, the JSX tag kept only in a comment scanning false, and a fabricated real mount scanning true.
+
+**Verified.**
+- `npx tsc --noEmit` — zero errors, exit 0.
+- `npm run test:contract` — 487 / 487 / 0, up from 477 / 477 / 0; the ten added tests are exactly the two new files (6 + 4), reconciling arithmetically.
+- `npx expo export --platform ios` — succeeded, 1610 modules, 5.06 MB bundle, matching the stated baseline exactly. `dist/` removed afterward.
+- Every new guard's negative control fires as described above.
+
+**What I could not prove, stated plainly.** Nothing here mounts a component tree — there is no rendering library in this project to do it with. `planTaskSurface`'s correctness is proven; that `c-session-screen.tsx` actually calls it correctly and that `<Surface .../>` actually renders a working UI when a real browser loads this screen is not something any test in this batch demonstrates. The structural scan proves the JSX tag is present and referenced, not that it behaves correctly at runtime.
+
+**What was NOT done.** No change to `ordered-value-sequence-*`, `value-token-row`, `digit-keypad`, or `archetype-surfaces.ts`. No change to `resolveArchetype`, `encodeActionPayload`, `isCNextTaskResponse`, or any existing behaviour of `planTask` itself — only composed. No backend file changed, other than this entry. No Component B file, generated file, or frozen contract artefact touched. No invented session-flow behaviour — advance-to-next-task was already wired in the accepted work (`handleSubmit` already lists `loadNextTask` in its own dependency array) and nothing here adds to it. No removal of the exit affordance. No new npm dependency. No type loosened, cast, or suppressed. The five other modified files (`auth.py`, `play.tsx`, `learner-home-screen.tsx`, `learner-empty-tab-screen.tsx`, `session-preparation-screen.tsx`) were not read for guidance, not edited, not reverted, and are not part of this batch's proposed commit.
+
+**Verification.** — supervisor's, pending
+
+**Verification — supervisor's, measured.** `npx tsc --noEmit`: **exit 0, no output.** Frontend
+contract suite: **487 tests, 487 passed, 0 failed.** `npx expo export --platform ios`: **exit 0**,
+`entry-89e0a6df170da71d8b1e4772779bae3b.hbc`, 5.06 MB — byte-for-byte the same entry hash the
+builder reported, and the same size as the `2e986f0` baseline, so this batch moved the decision
+without moving the bundle. All three are my own runs. Reconciles: `477 + 10 = 487`.
+
+**A small correction to the builder's own report, recorded rather than passed over:** it stated
+"all eleven ran and passed". The two new files carry **ten** tests (six plus four), and ten is what
+the count reconciles against. Nothing turns on it — no test is missing — but a number in a report
+that does not match the tree is exactly the kind of thing this register exists to catch early.
+
+Verified directly, not read from the builder's report:
+
+- **Behaviour is identical, checked line by line rather than assumed.** `recordTaskOffered()` still
+  precedes the decision; the fail-closed branch still sets `supportCode: task.request_id`;
+  `recordTaskStarted()` still fires immediately before the task phase is set; the
+  `mountedRef.current` guard is intact; and the `useCallback` dependency array is unchanged at
+  `[api, routeFailure]`. This is a pure extraction, not a behaviour change.
+- `planTaskSurface` keeps the two fail-closed reasons apart as a discriminant
+  (`'unresolvable-template'` / `'no-surface-registered'`), takes the resolver as a **parameter**, and
+  imports `ComponentType` and `ArchetypeSurfaceProps` with `import type` only — so the pure logic
+  module still pulls no React, React Native or API-client **value** at runtime, preserving the
+  property its own file header claims.
+- The exit control now uses `HIT_SLOP` and `TOUCH_TARGET_MIN_SIZE` from `motor-constants.ts`; the
+  hardcoded 40 px target is gone and the control meets the project's own documented 48 px minimum.
+- **The structural guard is the strongest one in this batch.** Four tests: the real file passes; a
+  fabricated static-only branch fails; a branch with the JSX tag present **only inside a comment**
+  fails; and a fabricated real mount passes. The third case is the comment-stripping trap this
+  project has hit four times, tested here deliberately rather than rediscovered.
+- **The five hands-off files are byte-identical to before this batch** — `auth.py` 10/0,
+  `play.tsx` 9/2, and the three tab-bar one-liners 1/1 each, exactly as they stood. None was
+  touched, and none appears in the proposed commit.
+- Register appended in binary mode, **zero CR bytes**.
+
+**On the builder's one out-of-scope edit.** It also corrected the stale top-of-file header comment,
+which still described the surface as unbuilt and claimed every task renders `FailClosedFrame`. That
+was not among the four itemised scope points, but it falls squarely inside acceptance criterion 5,
+and the builder flagged it explicitly rather than folding it in silently. Correct call, correctly
+disclosed — a confidently wrong comment in this file is worse than none, because the next reader
+trusts it.
+
+**What was NOT verified.** Nothing here can mount a component tree — there is no rendering library
+in `devDependencies`. The guard proves the task branch's **source** references the resolved surface
+as JSX; it does **not** prove that reference renders correctly at runtime, nor that the exit control
+looks right. The surface has still never been seen running by anything in this repository. The
+backend suite was not re-run; this batch changes no backend file. Note that the standing 651 / 76 / 0
+figure is measured at `5d2c1ab` and does **not** account for the uncommitted `auth.py` clock-skew
+change sitting in the tree — measuring that is the backend batch's own job, not this one's.
