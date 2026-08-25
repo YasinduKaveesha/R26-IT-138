@@ -103,6 +103,10 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
   const backgroundedRef = useRef(false);
 
   const goHome = useCallback(() => router.replace('/(learner)/home'), []);
+  // Where the task screen's own exit control (the X, `leaveSession` below) returns to -- the Play
+  // hub, not the learner's home screen. A child pressing X mid-task is going back to pick a
+  // different game, not leaving the app's home area entirely.
+  const goToGameHub = useCallback(() => router.replace('/(learner)/play'), []);
 
   const routeFailure = useCallback((error: unknown) => {
     if (!mountedRef.current) return;
@@ -214,28 +218,26 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
     }
   }, [api, getAccessToken, grade, loadNextTask, routeFailure, sessionMode]);
 
+  // Leaving is never conditional on the background `abandonSession` cleanup call succeeding -- a
+  // child pressing X wants to leave the task NOW, and stranding them on a "Something went wrong"
+  // screen because that cleanup call failed (which, under the development fixture, it always does
+  // by design -- 10.0b-i/-fix) is a worse outcome than a session the server cleans up some other
+  // way. The call is still attempted, for the real-backend case where it matters, but its result
+  // (success or failure) never changes where this takes the child: the Play hub, always.
   const leaveSession = useCallback(async () => {
     const cSessionId = cSessionIdRef.current;
-    if (!cSessionId) {
-      goHome();
-      return;
+    if (cSessionId && api) {
+      try {
+        const accessToken = await getAccessToken();
+        if (accessToken) {
+          await api.abandonSession(cSessionId, accessToken);
+        }
+      } catch {
+        // Swallowed on purpose -- see the comment above this function.
+      }
     }
-    if (!api) {
-      goHome();
-      return;
-    }
-    try {
-      const accessToken = await getAccessToken();
-      if (!accessToken) throw new ApiClientError('unauthenticated', 'No access token is available.');
-      await api.abandonSession(cSessionId, accessToken);
-      goHome();
-    } catch (error) {
-      // Under the development fixture abandonSession always throws by design (10.0b-i/-fix; not
-      // widened here) -- that surfaces as an ordinary routed failure below, which is correct
-      // behaviour for this batch, not a defect.
-      routeFailure(error);
-    }
-  }, [api, getAccessToken, goHome, routeFailure]);
+    goToGameHub();
+  }, [api, getAccessToken, goToGameHub]);
 
   useEffect(() => {
     mountedRef.current = true;

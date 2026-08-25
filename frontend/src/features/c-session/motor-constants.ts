@@ -49,3 +49,14 @@ export const TOKEN_SPACING = 12;
 export const KEYPAD_KEY_SIZE = 48;
 
 export const KEYPAD_KEY_SPACING = 8;
+
+// A ceiling on how large a key is allowed to grow (2026-08-26 request), never a floor -- keys
+// still respect KEYPAD_KEY_SIZE as their minimum (SPEC section 10's 48px accessibility floor,
+// untouched). Without a cap, `key`'s `flex: 1` lets each key's WIDTH grow to fill however wide its
+// container happens to be, and `aspectRatio: 1` then grows its HEIGHT to match -- so on a wide
+// panel the whole keypad grows taller than it needs to, purely as a side effect of screen width,
+// not of anything about the keys themselves. Capping width (via KEYPAD_GRID_MAX_WIDTH, computed
+// alongside this in digit-keypad.tsx from this same constant) caps height the same way, because
+// the keys stay square either way -- the same `aspectRatio: 1` that guarantees squareness at the
+// small end guarantees it at this end too.
+export const KEYPAD_KEY_MAX_SIZE = 64;

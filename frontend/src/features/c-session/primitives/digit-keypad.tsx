@@ -21,7 +21,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/app-text';
-import { GESTURE_LONG_PRESS_MS, HIT_SLOP, KEYPAD_KEY_SIZE, KEYPAD_KEY_SPACING } from '@/src/features/c-session/motor-constants';
+import {
+  GESTURE_LONG_PRESS_MS,
+  HIT_SLOP,
+  KEYPAD_KEY_MAX_SIZE,
+  KEYPAD_KEY_SIZE,
+  KEYPAD_KEY_SPACING,
+} from '@/src/features/c-session/motor-constants';
 import { colors, radius, typography } from '@/src/theme/tokens';
 
 // Calculator order (7-8-9 on top, 1-2-3 on the bottom digit row), not phone-dialer order (1-2-3 on
@@ -34,6 +40,15 @@ const KEYPAD_ROWS: readonly (readonly (string | null)[])[] = [
   ['1', '2', '3'],
   [null, '0', 'delete'],
 ];
+
+const KEYPAD_COLUMNS = 3;
+
+// Caps the grid's own width at 3 keys' worth of KEYPAD_KEY_MAX_SIZE plus the gaps between them,
+// so `key`'s `flex: 1` has no wider container to stretch into on a spacious panel. `aspectRatio: 1`
+// (on `key`, below) then caps height the same way, since a capped width still forces a matching
+// height -- this is the whole mechanism 2026-08-26's "reduce the keypad's height, keep keys square"
+// request rests on, not a second, independent height rule.
+const KEYPAD_GRID_MAX_WIDTH = KEYPAD_KEY_MAX_SIZE * KEYPAD_COLUMNS + KEYPAD_KEY_SPACING * (KEYPAD_COLUMNS - 1);
 
 export type DigitKeypadProps = {
   disabled?: boolean;
@@ -99,14 +114,18 @@ export function DigitKeypad({ disabled = false, onDelete, onDigit }: DigitKeypad
 const styles = StyleSheet.create({
   deleteKey: { backgroundColor: colors.surface2 },
   grid: {
+    alignSelf: 'center',
     gap: KEYPAD_KEY_SPACING,
+    maxWidth: KEYPAD_GRID_MAX_WIDTH,
+    width: '100%',
   },
-  // Width is flexible (fills the row, which now fills the card's own width); `aspectRatio: 1` keeps
-  // height matched to whatever that width ends up being, so the key stays square instead of a fixed
-  // height fighting a flexible width into a rectangle. The touch-target constancy rule
-  // (motor-constants.ts) is about the key staying the same size across difficulty levels, not about
-  // matching the screen's width -- KEYPAD_KEY_SIZE still sets the floor via `minHeight`/`minWidth`,
-  // so a key is never smaller than that minimum, only ever equal or larger.
+  // Width is flexible up to KEYPAD_GRID_MAX_WIDTH (fills the row, which now fills the card's own
+  // width, capped); `aspectRatio: 1` keeps height matched to whatever that width ends up being, so
+  // the key stays square instead of a fixed height fighting a flexible width into a rectangle. The
+  // touch-target constancy rule (motor-constants.ts) is about the key staying the same size across
+  // difficulty levels, not about matching the screen's width -- KEYPAD_KEY_SIZE still sets the
+  // floor via `minHeight`/`minWidth`, so a key is never smaller than that minimum, only ever equal
+  // or larger (and, since the grid above, never larger than KEYPAD_KEY_MAX_SIZE either).
   key: {
     alignItems: 'center',
     aspectRatio: 1,

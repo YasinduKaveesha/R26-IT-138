@@ -171,3 +171,262 @@ This is a stronger fix than the one ruled and described above, not a weaker one:
 - No other file was touched. `game-family-accents.ts` is a single-file change on top of an already-committed file (`84874ce`); it is not folded into that commit.
 
 **What was NOT verified.** `npx expo export` was not re-run — the change swaps one import path for another within the existing dependency graph and adds no new module. The backend suite is unaffected; no backend file changed.
+
+---
+
+## 2026-08-26 — feat: `value-report` archetype registered (10b), eight templates
+
+Component C frontend, sub-phase 10b (`10b-10h-master-work-order.md` §4). Registers the
+`value-report` archetype for eight templates: `C-TC-01`, `C-TC-03`, `C-TC-04`, `C-JB-01`,
+`C-JB-03`, `C-JB-04`, `C-EG-03`, `C-SF-03`. `C-TC-02` is excluded from this batch by owner ruling
+(§2.1 of the master work order — its `directed` boolean payload discriminator's evaluator behaviour
+is unresolved and private to the engine) and appears in none of the files added.
+
+**New files:** `frontend/src/features/c-session/archetypes/value-report-logic.ts` (pure resolution,
+no React/RN import — classifies `valid_action_space` by declared TYPE via the existing
+`field-kinds.ts`, never by template id or key name: exactly one `integer-field`-kind key becomes
+the scene key, any other declared key must bind to `boolean-control` or resolution fails closed),
+`value-report-surface.tsx` (reuses 10a's screen chrome, `SubmitButton` and boolean-toggle shapes
+reproduced from `ordered-value-sequence-surface.tsx`'s private `GenericExtraField`, plus the shared
+`DigitKeypad` — no new visual primitive introduced), and eight test files under
+`frontend/src/api/__tests__/` covering resolution, the key-set-equality proof (six distinct `int`
+key names, both boolean-bearing templates), the boolean-control derivation proof, prompt-text
+identity, motor constancy, fail-closed paths, the `representation_mode` guard, and
+`interactive_assets` carry-through — each with negative controls.
+
+**Edited:** `frontend/src/features/c-session/archetype-surfaces.ts` — one import and one
+`SURFACE_TABLE` entry (`'value-report': ValueReportSurface`). No other file in this batch was
+touched; `game-catalogue.ts`/`game-hub/` were not touched (family readiness is computed from
+`SURFACE_TABLE` at call time, per the master work order's own finding).
+
+**A consequence worth recording, not a defect in this batch's own files.** `registry.ts`'s
+`ARCHETYPE_TABLE` (pre-existing, unmodified here) already maps `C-TC-02` to `value-report`. Because
+`value-report-logic.ts` classifies purely by declared type — never by template id — and `C-TC-02`'s
+`valid_action_space` (`submitted_difference: int`, single key, `blanks: null`) is structurally
+identical in shape to `C-TC-03`'s, registering a `value-report` surface at all means `C-TC-02` now
+also resolves to a live, mounted surface, where before this batch it fell through to
+`FailClosedFrame` (no surface registered for any `value-report` id). This was not introduced by
+adding template-id logic — none exists — it is an emergent consequence of the two-layer rule
+applied faithfully: the archetype cannot tell `C-TC-02` apart from the other eight from the wire
+shape alone. If `directed=true` at difficulty 5 in fact requires a signed answer, `C-TC-02` will now
+render an interactive but unusable surface (no minus key) rather than the neutral fail-closed
+screen it rendered before. Flagged here for the owner rather than resolved unilaterally: excluding
+`C-TC-02` structurally would require either a template-id branch (violates the two-layer rule this
+archetype is built to prove) or a change to `registry.ts` (out of scope for this batch, and not
+requested).
+
+**Verification — measured.**
+
+- `npx tsc --noEmit` — exit 0.
+- The eight new test files run in isolation
+  (`node --import tsx --test src/api/__tests__/c-value-report-*.test.ts`): **98 tests, 98 passed, 0
+  failed.**
+- Whole-suite `npm run test:contract`, immediately before this batch: **525 tests, 525 passed, 0
+  failed.** Immediately after: **625 tests, 625 passed, 0 failed.** Reconciles: `525 + 100 = 625`,
+  `0` failures throughout. The extra 2 tests beyond the 98 added directly by this batch's own files
+  come from pre-existing table-driven tests over `SURFACE_TABLE` / the game-hub catalogue
+  (`c-game-hub-catalogue.test.ts`, `c-plan-task-surface.test.ts`,
+  `c-session-screen-task-branch.test.ts`) picking up the newly-registered `value-report` entry on
+  their own — confirmed by running those three files in isolation (21 tests, 21 passed) — which is
+  the self-updating wiring the master work order's §0 describes, not a hand-edit to those files.
+- `npx expo export --platform ios` — succeeded (`_expo/static/js/ios/entry-*.hbc`, 5.09 MB
+  bundle). `dist/` removed immediately after, per the gate's own instruction.
+
+**What was NOT verified.** Nothing in this repository can mount a React Native tree, so no test
+here proves the surface renders correctly on a real screen at difficulty 1 and 5 for any of the
+eight templates — that is the standing "look at it in a browser before the next sub-phase" step
+(master work order §6), not yet done. The backend suite is unaffected; no backend file changed
+besides this log entry.
+
+---
+
+## 2026-08-26 — fix: `value-report` now renders `prompt_payload`'s numbers (10b correction)
+
+**Found by the standing "look at it in a browser" step** (master work order §6) — exactly the
+practice A2 established and this entry vindicates again. The user pointed the dev fixture at
+`C-TC-01` and clicked into it: the screen showed the prompt text and the digit keypad, nothing
+else. The original 10b entry above stated *"every real `prompt_text` for these eight templates is
+fully backend-composed with no deictic pointer into `prompt_payload`... so there is nothing in
+`prompt_payload` this surface needs to display."* **That claim was wrong.** All eight
+`prompt_text` strings point at a quantity the text itself never states — *"Take away the amount
+shown"*, *"Add the two numbers"*, *"Subtract the second number from the first"*, *"Find the total
+for the equal groups shown"*, *"Split the number in half"* — and `interactive_assets` is `{}` on
+every real exemplar for all eight, so there was no picture standing in for the missing numbers
+either. The surface was rendering a fully unusable task: a child had no way to know what number to
+subtract, add, or split.
+
+**Fix.** `value-report-logic.ts`'s `resolveValueReportSpec` now extracts every `prompt_payload`
+value generically (never a per-template key-name table — `initial_count`/`removed_count`,
+`minuend`/`subtrahend`, `count_a`/`count_b`, `addend_a`/`addend_b`, `operand_a`/`operand_b`,
+`multiplicand`/`multiplier`, `dividend` all satisfy the same rule: every payload value must be a
+finite number, carried through in wire order as `payloadValues`), and fails closed on an empty
+`prompt_payload` or a non-numeric value (this also means a task shaped like `C-TC-02`'s, whose
+`prompt_payload` carries a boolean `directed` discriminator alongside its numbers, now fails to
+resolve rather than rendering incompletely — an emergent consequence of the generic rule, not a
+template-id check added for that purpose). `value-report-surface.tsx` renders these as read-only
+tokens between the prompt and the answer keypad, reusing `value-token-row.tsx`'s own token style
+and `TOKEN_TOUCH_TARGET_SIZE`/`TOKEN_SPACING` constants (motor-constants.ts) — no new geometry.
+`ValueTokenRow` itself was not reused directly: its only display mode couples shown values to its
+own entry slots and keypad, which would have duplicated this surface's separate answer field.
+
+**Test changes.** 7 new negative controls across `c-value-report-logic.test.ts` (empty
+`prompt_payload`, a non-numeric value) and `c-value-report-fail-closed.test.ts` (empty payload, a
+boolean value, a string value, `NaN`), plus content assertions that `payloadValues` matches each
+real exemplar's `prompt_payload` in key and value, in order, across all eight templates and all
+five difficulty levels. One motor-constancy addition confirming the payload tokens use the same
+shared constants, not a new size.
+
+**Verification — measured.**
+
+- `npx tsc --noEmit` — exit 0.
+- The nine `c-value-report-*.test.ts` files in isolation: **105 tests, 105 passed, 0 failed**
+  (up from 98 before this fix — the 7 new negative controls, 0 removed).
+- Whole-suite `npm run test:contract`, immediately before this fix: **625 tests, 625 passed, 0
+  failed.** Immediately after: **632 tests, 632 passed, 0 failed.** Reconciles: `625 + 7 = 632`.
+- `.env.local` (gitignored, not part of this diff) was repointed at
+  `EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_TEMPLATE=C-TC-01` /
+  `EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_FAMILY=C-GF-06` so the user could re-check the fix visually
+  after restarting the dev server; not reverted here, left for the user.
+
+**What was NOT verified by this entry itself.** The corrected render has not yet been independently
+re-confirmed by a screenshot on this side — the user reported the original defect and this fix
+responds to that report; the user is re-checking directly in their own browser.
+
+---
+
+## 2026-08-26 — fix: `value-report`'s payload numbers are now labelled (10b correction, part 2)
+
+**Found by the user's own re-check of the fix immediately above.** With the two numbers now
+rendered (`4`, `2` for a `C-TC-01` task), the user reported they still couldn't tell what to do:
+*"even i cant understand is it 4-2?"*. Two unlabeled tokens carry no indication of which number is
+the starting amount and which is the amount removed, or of any operation at all — the same gap as
+before, one layer down: showing the numbers wasn't sufficient without also showing what they mean.
+
+**Decision, made with the user rather than guessed.** Presented three options (humanised key
+labels; a neutral order-only visual separator; treat as a backend/content gap and stop). The user
+chose labelled tokens.
+
+**Fix.** New file `value-report-payload-labels.ts`: a fixed lookup, `labelForPayloadKey(key)`,
+covering the real `prompt_payload` key vocabulary across all eight approved templates
+(`initial_count`→"Start", `removed_count`→"Taken away", `minuend`→"Start",
+`subtrahend`→"Taken away", `count_a`/`count_b`→"First group"/"Second group",
+`addend_a`/`addend_b` and `operand_a`/`operand_b`→"First number"/"Second number",
+`multiplicand`/`multiplier`→"First number"/"Second number", `dividend`→"Number"), keyed by
+`prompt_payload` key name rather than template id (so a future template reusing an existing key,
+e.g. another `minuend`, is labelled identically with zero code change), with a mechanical
+humanised-key fallback (`some_future_quantity` → "Some Future Quantity") for any key outside the
+table, rather than failing the task closed over a label gap. `value-report-logic.ts`'s
+`PayloadValue` now carries a `label` alongside `key`/`value`; `value-report-surface.tsx` renders
+the label above each token.
+
+**Verification — measured.**
+
+- `npx tsc --noEmit` — exit 0.
+- The ten `c-value-report-*.test.ts` files in isolation: **125 tests, 125 passed, 0 failed** (up
+  from 105 — 18 in the new `c-value-report-payload-labels.test.ts` file, plus 2 more from two
+  existing source-scan tests (`c-value-report-no-representation-mode.test.ts`,
+  `c-value-report-motor-constancy.test.ts`) that iterate a file list and picked up the new module
+  automatically).
+- Whole-suite `npm run test:contract`, after this fix: **653 tests, 653 passed, 0 failed.**
+  Reconciles directly: running every OTHER test file (excluding all `c-value-report-*`) in isolation
+  gives **528**, and `528 + 125 = 653` exactly.
+- Scope unchanged from the entry above — same file family, one new file added
+  (`value-report-payload-labels.ts` + its test), nothing outside it touched.
+
+**What was NOT verified by this entry.** Whether "Start"/"Taken away"/"First number"/"Second
+number"/"Number" are the right words for the target population (children with dyscalculia) is a
+content/pedagogy judgment, not something a test can confirm — flagged to the user as a real
+possibility (option offered, not chosen) that this may still want an owner content review rather
+than resting on this label set as final. The corrected render has not been independently
+re-confirmed by a screenshot on this side; the user is re-checking directly.
+
+---
+
+## 2026-08-26 — 10b CLOSED: visual pass across all eight templates, remaining polish, two shared-file fixes
+
+**This entry closes 10b.** Everything below happened in direct response to the user driving the
+running surface in their own browser, one template at a time, exactly the standing practice the
+master work order's §6 calls for — and, as with A2, it found real things a passing test suite could
+not: a missing render, ambiguous labelling, misaligned boxes, an unclear boolean control, an
+oversized shared keypad, and a genuine bug in a shared file two turns away from `value-report`
+itself. Each is recorded here in one place rather than left scattered across the session.
+
+### Remaining `value-report-surface.tsx` polish, after the two correction entries above
+
+- The bordered box first wrapping the payload tokens was added, then removed on the user's own
+  follow-up — tokens and labels stay centred without it (`payloadRow`'s own `justifyContent:
+  'center'` already did the centring; the box was redundant).
+- Gap between tokens doubled (`TOKEN_SPACING * 2`), per direct request.
+- The answer field, previously a bare buffer of text below the payload row with its own `DigitKeypad`
+  underneath, is now its **own labelled column** ("Answer") in the *same* row as the given values,
+  sharing the row's `flex: 1`-per-column division so the row splits evenly across however many
+  columns exist (2 given values + 1 answer for six templates, 1 given value + 1 answer for
+  `C-SF-03`). Shows a `'?'` placeholder before the child types a digit, replacing an empty box that
+  gave no cue which one was theirs to fill in.
+- **Real defect, found by the user, not by a test:** "Taken away" wraps to two lines in its narrow
+  column while "Start"/"Answer" stay on one line, which left that box sitting visibly lower than its
+  neighbours — the three boxes were not level. Fixed by reserving a fixed two-line-tall,
+  bottom-aligned block (`payloadLabelBlock`, height `PAYLOAD_LABEL_LINE_HEIGHT * 2`) for every
+  label regardless of how many lines its own text needs, so a token's top edge no longer depends on
+  whether its label happened to wrap.
+- The single boolean toggle (one button whose text flipped between "YES" and "NO") is now **two
+  separate buttons**, neither shown as selected until the child actually picks one — the old single
+  toggle defaulted to displaying "NO" before any real choice was made, which read as an answer
+  already given. Still driven generically off `valid_action_space`'s declared `bool` keys, same as
+  before; only the rendering changed.
+- `payload-value-labels.ts` (renamed from `value-report-payload-labels.ts`, generalised out of the
+  `value-report`-only framing its first version carried) is now a shared lookup any archetype can
+  reuse for the same "which number is which" disambiguation, since `line-traversal` (next, 10c) needs
+  identical treatment for `start`/`addend_a`/`addend_b`. No behaviour change for `value-report` — the
+  same 13 (now 14, `start` added) keys resolve to the same labels; only the file's name, header, and
+  import path moved. Its test file moved with it, `c-value-report-payload-labels.test.ts` →
+  `c-payload-value-labels.test.ts`.
+
+### Two fixes outside the `value-report` file family, both direct user requests
+
+- **`DigitKeypad` (shared primitive, `primitives/digit-keypad.tsx`) — capped key size.** The user
+  asked for a visibly shorter keypad with keys that stay square. Added `KEYPAD_KEY_MAX_SIZE` (64) to
+  `motor-constants.ts` as a ceiling alongside the pre-existing `KEYPAD_KEY_SIZE` (48) floor; the
+  grid's own width is now capped at `KEYPAD_KEY_MAX_SIZE * 3 + KEYPAD_KEY_SPACING * 2` and
+  centred, so `key`'s existing `aspectRatio: 1` caps height the same way width is capped — no second,
+  independent height rule. Applies everywhere `DigitKeypad` is used, so this also changed 10a's
+  Number Path and Order (card #2), not only `value-report`'s cards — confirmed by the user checking
+  both after the change.
+- **`c-session-screen.tsx` — the X button routed to a "Something went wrong" screen.** Pre-existing
+  behaviour, unrelated to `value-report`'s own code: the exit control's `leaveSession()` awaited
+  `api.abandonSession(...)` and routed to the generic `technical` failure screen (`NeutralMessageScreen`,
+  title "Something went wrong", its own "go to home" button) on any rejection — and the dev fixture's
+  `abandonSession` is documented to throw by design every time, so X reliably produced that screen
+  under the fixture. Fixed: `leaveSession` still attempts `abandonSession` (needed for the real
+  backend) but no longer gates navigation on its result — success or failure, X now always lands on
+  the Play hub (`/(learner)/play`, via the new `goToGameHub`), never home, never the failure screen.
+
+### Full visual pass — all eight approved templates, difficulty 5, confirmed by the user directly
+
+| Template | Card | Result |
+|---|---|---|
+| `C-TC-01` | #6 Take Away and Compare | ✅ (drove the payload-numbers and labelling corrections above) |
+| `C-TC-03` | #6 | ✅ (drove the keypad max-size fix) |
+| `C-TC-04` | #6 | ✅ (drove the YES/NO two-button fix) |
+| `C-JB-01` | #5 Join and Bridge | ✅ |
+| `C-JB-03` | #5 | ✅ |
+| `C-JB-04` | #5 | ✅ |
+| `C-EG-03` | #7 Equal Groups and Arrays | ✅ |
+| `C-SF-03` | #8 Share Fairly | ✅ (single-given-value case: two-column row, "Number"/"Answer") |
+
+`C-TC-02` was not shown at any point in this pass — it stays excluded per the owner ruling, and
+nothing in this entry's changes touches it.
+
+**Verification — measured, current tree.**
+
+- `npx tsc --noEmit` — exit 0.
+- Whole-suite `npm run test:contract`: **659 tests, 659 passed, 0 failed.**
+- `npx expo export --platform ios` — re-run after all of the above (not just after the first
+  registration entry): succeeded, `dist/` removed after.
+- `.env.local`'s dev-fixture override, used throughout this visual pass to point at each template in
+  turn, has been reset to its original default (`C-NP-01` / `C-GF-02`) now that the pass is complete.
+  It is gitignored and was never part of any diff.
+
+**What was NOT verified.** The label wording itself ("Start"/"Taken away"/"First number"/"Second
+number"/"Number"/"Answer") still has no owner content/pedagogy sign-off — flagged twice now, still
+open. No automated test can substitute for that judgment call.
