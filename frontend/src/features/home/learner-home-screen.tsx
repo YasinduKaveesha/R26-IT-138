@@ -25,11 +25,15 @@ import {
   type HomeSessionState,
   type PathNodeState,
 } from '@/src/features/home/session-progress';
+import {
+  LearnerHeaderBar,
+  LEARNER_HEADER_HEIGHT,
+  LEARNER_HEADER_HEIGHT_COMPACT,
+} from '@/src/features/navigation/learner-header-bar';
 import { LearnerTabBar } from '@/src/features/navigation/learner-tab-bar';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
 import { firstNameOf } from '@/src/utils/display-name';
 
-const brandArtwork = require('../../../assets/images/mathmingo-header.png');
 const heroArtwork = require('../../../assets/images/hero-section.png');
 const learningPathArtwork = require('../../../assets/images/learning-path.png');
 const heroAspectRatio = 1672 / 941;
@@ -152,7 +156,7 @@ export function LearnerHomeScreen() {
     outputRange: [1, 0],
   });
   const usableHeight = height - insets.top - insets.bottom;
-  const fixedHeaderHeight = compact ? 63 : 88;
+  const fixedHeaderHeight = compact ? LEARNER_HEADER_HEIGHT_COMPACT : LEARNER_HEADER_HEIGHT;
   const fixedNavHeight = (compact ? 61 : 73) + 11.75;
   const [measuredViewportHeight, setMeasuredViewportHeight] = useState(0);
   const pathViewportHeight =
@@ -311,26 +315,7 @@ export function LearnerHomeScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.mobileCanvas}>
-        <View style={[styles.headerGreetingSection, compact && styles.sectionCompact]}>
-          <View style={styles.header}>
-            <View style={styles.brand}>
-              <Image
-                accessibilityLabel="MathMingo"
-                contentFit="contain"
-                source={brandArtwork}
-                style={[styles.brandArtwork, compact && styles.brandArtworkCompact]}
-              />
-            </View>
-            <View style={styles.greeting}>
-              <AppText style={[styles.greetingTitle, compact && styles.greetingTitleCompact]}>
-                Hi,{' '}
-                <AppText style={[styles.greetingName, compact && styles.greetingNameCompact]}>
-                  {displayName}!
-                </AppText>
-              </AppText>
-            </View>
-          </View>
-        </View>
+        <LearnerHeaderBar compact={compact} displayName={displayName} />
 
         <Animated.ScrollView
           bounces={scrollEnabled}
@@ -427,19 +412,9 @@ export function LearnerHomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  brand: { alignItems: 'center', flexDirection: 'row', flexShrink: 1, gap: 3 },
-  brandArtwork: { aspectRatio: 1916 / 821, height: 68 },
-  brandArtworkCompact: { height: 56 },
   buttonPressed: { borderBottomWidth: 0, transform: [{ translateY: 3 }] },
   dashboardSection: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm, paddingTop: 0, width: '100%' },
   dots: { flexDirection: 'row', gap: 2, marginTop: 2 },
-  greeting: { alignItems: 'flex-end', flexShrink: 1, justifyContent: 'center' },
-  greetingName: { color: '#26A5FD', fontFamily: typography.fonts.heavy, fontSize: 33.75, lineHeight: 40.5 },
-  greetingNameCompact: { fontSize: 28.35, lineHeight: 33.75 },
-  greetingTitle: { fontFamily: typography.fonts.body, fontSize: 25, lineHeight: 30 },
-  greetingTitleCompact: { fontSize: 21, lineHeight: 25 },
-  header: { alignItems: 'center', flexDirection: 'row', gap: 4, justifyContent: 'space-between' },
-  headerGreetingSection: { backgroundColor: colors.background, flexShrink: 0, paddingBottom: spacing.md, paddingHorizontal: spacing.smPlus, paddingTop: 4, zIndex: 10 },
   hero: { aspectRatio: heroAspectRatio, backgroundColor: colors.secondarySoft, borderColor: colors.surface1, borderRadius: radius.lg, borderWidth: heroBorderWidth, elevation: 5, overflow: 'hidden', padding: spacing.smPlus, position: 'relative', shadowColor: colors.foreground, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 7, width: '100%' },
   heroArtwork: { bottom: -heroBorderWidth, left: -heroBorderWidth, position: 'absolute', right: -heroBorderWidth, top: -heroBorderWidth },
   heroAdventure: { color: '#FEC632', fontFamily: typography.fonts.display, fontSize: 34.32, lineHeight: 39.6 },

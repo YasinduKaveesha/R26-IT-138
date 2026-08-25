@@ -150,3 +150,24 @@ This is a stronger fix than the one ruled and described above, not a weaker one:
 **Arithmetic NOT reconciled, and stated as such rather than guessed.** The entry above's own baseline was 514, measured at `85d973f`. This tree also carries several other uncommitted, interleaved changes to the same files (`digit-keypad.tsx`'s calculator-order relayout, `c-session-screen.tsx`'s card-based redesign, `component-c-api.ts`'s dev-fixture family override) whose own individual test-count deltas have not been isolated from this one. A crashed test file's exact contribution to `node --test`'s aggregate `tests`/`fail` counts was also not independently confirmed here. Rather than publish a guessed reconciliation into a permanent record, this is left open: clean arithmetic is only possible from a real before/after diff at the point this work is actually committed, which is when it will be measured.
 
 **What was NOT verified**, restated from the superseded entry's own disclosure and still true of the current code: nothing here can mount a component tree, so the wrapping itself — whether the entry slots genuinely render on-screen at difficulty 5, on a real device — has not been observed. `npx expo export` was not re-run for this correction; no new module import was introduced by switching `ScrollView` to `View`.
+
+---
+
+## 2026-08-25 — fix: game-family-accents.ts no longer reaches react-native through the theme barrel
+
+**Diagnosed while splitting the task-screen redesign (committed `84874ce`) from the concurrent game-hub batch.** Two of the game-hub's own test files (`c-game-hub-catalogue.test.ts`, `c-game-hub-layout.test.ts`) failed with `Transform failed: node_modules/react-native/index.js:27:7: ERROR: Unexpected "typeof"` -- `node --import tsx --test` cannot transform react-native's own Flow-typed entry file.
+
+**The chain:** `game-catalogue.ts` → `game-family-accents.ts` → `@/src/theme/tokens` (barrel) → re-exports `createGlobalStyles` from `@/src/theme/styles` → `styles.ts`'s **value** import `import { StyleSheet } from 'react-native'`. `game-family-accents.ts`'s own header states *"It also imports NOTHING that reaches React Native"* -- that claim was false; the module is careful to inject the surface lookup rather than import `archetype-surfaces.ts` directly, then reached react-native anyway, three hops down a theme barrel nobody had checked.
+
+**A correction to this project's own earlier diagnosis of the same chain, recorded above in `10b-10h-master-work-order.md`:** the first fix considered was importing `colors` from `@/src/theme/colors` instead of the barrel. That module is marked `@deprecated` and re-exports from `@/src/theme/theme.ts` -- which was confirmed, by reading its import line rather than assuming, to carry only `import type { TextStyle, ViewStyle } from 'react-native'`. A type-only import is erased entirely at compile time and never resolves the real react-native package, so that path is safe. `theme/styles.ts`'s import is a genuine value import and is what actually crashes the transform. Both were checked by reading the source, not inferred from a naive substring grep for `"from 'react-native'"`, which cannot distinguish the two.
+
+**Fix.** One line: `game-family-accents.ts` now imports `colors` from `@/src/theme/colors`, never the `tokens` barrel. A comment in the file explains why the deprecated leaf is used deliberately here, so a future edit does not "clean it up" back to the barrel.
+
+**Verification — supervisor's, measured.**
+
+- `npx tsc --noEmit` — exit 0.
+- `c-game-hub-catalogue.test.ts` + `c-game-hub-layout.test.ts` in isolation: **15 tests, 15 passed, 0 failed** (11 + 4, both files now load).
+- Whole suite, immediately before this fix: **512 tests, 510 passed, 2 failed.** Immediately after: **525 tests, 525 passed, 0 failed.** Reconciles cleanly: the two crashed-file placeholders (each counted as exactly one test and one failure by `node --test` when a file's top-level import throws before any `test()` registers) are replaced by their real 15 tests, all passing: `512 + 13 = 525`, and `510 + 15 = 525` with `2 − 2 = 0` failures. This also settles, after the fact, an assumption used but not confirmed in the correction entry immediately above this one -- that a crashed file contributes exactly one to both counts regardless of its real test count -- which this clean before/after now demonstrates directly.
+- No other file was touched. `game-family-accents.ts` is a single-file change on top of an already-committed file (`84874ce`); it is not folded into that commit.
+
+**What was NOT verified.** `npx expo export` was not re-run — the change swaps one import path for another within the existing dependency graph and adds no new module. The backend suite is unaffected; no backend file changed.
