@@ -45,6 +45,7 @@ import {
   planTaskSurface,
 } from '@/src/features/c-session/c-session-logic';
 import { FailClosedFrame } from '@/src/features/c-session/fail-closed-frame';
+import { accentForGameFamily } from '@/src/features/c-session/game-family-accents';
 import { NeutralMessageScreen } from '@/src/features/c-session/neutral-message-screen';
 import { TechnicalBlockScreen } from '@/src/features/c-session/technical-block-screen';
 import {
@@ -73,6 +74,10 @@ type Phase =
   | { kind: 'technical-block'; supportCode: string | null }
   | { kind: 'failure'; supportCode: string | null; copy: { title: string; detail: string } }
   | { kind: 'not-ready' };
+
+/** The panel's warm ground, matching the Play hub's card so a game opens into the same object the
+ *  menu showed. Only the colour BEHIND the card changes per family. */
+const TASK_PANEL_BACKGROUND = '#fffdf6';
 
 const FAILURE_COPY: Record<'authentication' | 'network' | 'technical', { title: string; detail: string }> = {
   authentication: { title: 'Sign-in needed', detail: 'Ask a grown-up to help you sign in again.' },
@@ -307,33 +312,70 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
   // affordance in that contract, which is why the exit control lives in this wrapper rather than
   // being threaded into the surface itself).
   const { Surface, task } = phase;
+  // The ground behind the task panel is the accent of the family this task came from, read from
+  // the shared table by `game_family_id` -- a required wire field, never a literal here, so Number
+  // Path opens on its own blue and every other family on its own colour without this file naming
+  // any of them. An unknown id yields a neutral, which is a background choice and not a
+  // fail-closed condition; see game-family-accents.ts.
+  const accent = accentForGameFamily(task.game_family_id);
   return (
-    <SafeAreaView style={styles.taskSafeArea}>
-      <View style={styles.taskExitRow}>
-        <Pressable
-          accessibilityLabel="Leave session"
-          accessibilityRole="button"
-          hitSlop={HIT_SLOP}
-          onPress={() => void leaveSession()}
-          style={({ pressed }) => [styles.taskExitButton, pressed && styles.pressed]}>
-          <Ionicons color={colors.textSecondary} name="close" size={22} />
-        </Pressable>
-      </View>
-      {/* The `key` is load-bearing, not cosmetic. Every archetype surface holds the child's
-          in-progress answer in its own local state (ordered-value-sequence's `entryValues` and
-          `order`, and whatever 10b...10h add), and none of that state is derived from the task
-          prop. Without a key, React reconciles a new task into the SAME component instance --
-          same type, same position -- so the previous question's already-entered answer survives
-          into the next question and can be submitted against it without ever being re-entered.
-          Keying on the task instance id makes every new task a new instance, which discards that
-          state as a consequence of mounting rather than by any explicit reset.
+    <SafeAreaView style={[styles.taskSafeArea, { backgroundColor: accent }]}>
+      {/* Mirrors the Play hub's own outer shape (game-hub-screen.tsx's `mobileCanvas`): a flex:1,
+          alignSelf-centred, maxWidth-500 canvas, stretched by its SafeAreaView ancestor rather than
+          centred by it. The hub's SafeAreaView sets no alignItems (default 'stretch'); this one
+          previously set `alignItems: 'center'` directly, which on web only shrink-wraps the child's
+          CROSS axis but left the panel visibly short of full height in practice -- matching the
+          hub's exact two-level shape (stretch, then centre-via-alignSelf one level in) is what the
+          hub itself relies on to fill the screen, so the task canvas does the same rather than
+          trying a different way to reach the same box. */}
+      <View style={styles.taskCanvas}>
+        {/* One panel card, the same one the Play hub uses -- radius.lg, 3px surface1 border, the
+            0/3/0.14/6 shadow, warm ground -- now holding the whole task: the exit control, the
+            prompt, the token row, the keypad and SUBMIT. The surface itself is unchanged in what it
+            renders; it simply renders inside the card rather than loose on the screen. */}
+        <View style={styles.taskPanel}>
+            {/* Floats above the flow rather than taking a row of its own, so the 10% top spacer
+                below measures cleanly from the card's own top edge to the question -- not from
+                wherever this button's row happened to end. */}
+            <View style={styles.taskExitRow}>
+              <Pressable
+                accessibilityLabel="Leave session"
+                accessibilityRole="button"
+                hitSlop={HIT_SLOP}
+                onPress={() => void leaveSession()}
+                style={({ pressed }) => [styles.taskExitButton, pressed && styles.pressed]}>
+                <Ionicons color={colors.textSecondary} name="close" size={22} />
+              </Pressable>
+            </View>
+            {/* Fixed shares of the card's own height, not of whatever's left over: 7% above the
+                question, 5% below SUBMIT. The middle wrapper is `flex: 1, justifyContent:
+                'flex-end'` so the surface's content -- title, tokens, keypad, SUBMIT -- is pinned
+                against the bottom spacer rather than top-aligned with a leftover gap drifting in
+                after it; any slack the content doesn't use collects above it instead, since the
+                bottom gap is the one pinned to an exact percentage right now. Distributing that
+                middle space is a separate, later step. */}
+            <View style={styles.taskContentSpacerTop} />
+            <View style={styles.taskContentMiddle}>
+              {/* The `key` is load-bearing, not cosmetic. Every archetype surface holds the child's
+                in-progress answer in its own local state (ordered-value-sequence's `entryValues`
+                and `order`, and whatever 10b...10h add), and none of that state is derived from the
+                task prop. Without a key, React reconciles a new task into the SAME component
+                instance -- same type, same position -- so the previous question's already-entered
+                answer survives into the next question and can be submitted against it without ever
+                being re-entered. Keying on the task instance id makes every new task a new
+                instance, which discards that state as a consequence of mounting rather than by any
+                explicit reset.
 
-          `c_task_instance_id` is the registry's own per-instance identifier and is a required
-          non-null string on CNextTaskResponse. It is used alone and deliberately not combined
-          with `task_index`: a composite would encode a distrust of the contract without
-          detecting its violation, quietly papering over a backend that had issued two tasks
-          under one instance id instead of letting that surface as the defect it would be. */}
-      <Surface key={task.c_task_instance_id} onSubmit={submitFromSurface} task={task} />
+                `c_task_instance_id` is the registry's own per-instance identifier and is a required
+                non-null string on CNextTaskResponse. It is used alone and deliberately not combined
+                with `task_index`: a composite would encode a distrust of the contract without
+                detecting its violation, quietly papering over a backend that had issued two tasks
+                under one instance id instead of letting that surface as the defect it would be. */}
+              <Surface key={task.c_task_instance_id} onSubmit={submitFromSurface} task={task} />
+            </View>
+            <View style={styles.taskContentSpacerBottom} />
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -351,10 +393,52 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: TOUCH_TARGET_MIN_SIZE,
   },
-  taskExitRow: {
-    alignItems: 'flex-end',
-    paddingHorizontal: spacing.smPlus,
-    paddingTop: spacing.sm,
+  taskCanvas: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    maxWidth: 500,
+    width: '100%',
   },
-  taskSafeArea: { backgroundColor: colors.background, flex: 1 },
+  taskExitRow: {
+    left: spacing.smPlus,
+    position: 'absolute',
+    top: spacing.smPlus,
+    zIndex: 1,
+  },
+  // Fixed percentages of the card's own height (not of leftover space): 7% between the card's top
+  // and the question, 5% between SUBMIT and the card's bottom.
+  taskContentSpacerBottom: { height: '5%' },
+  taskContentSpacerTop: { height: '7%' },
+  // Fills whatever height is left between the two spacers. The surface's own root now stretches to
+  // this height and spaces its children `space-between` (ordered-value-sequence-surface.tsx's
+  // `container`), so the question sits right after the 7% top spacer, SUBMIT sits right before the
+  // 5% bottom spacer, and any unused slack shows up as extra white space between them instead of
+  // pushing either one off its fixed gap.
+  taskContentMiddle: { flex: 1 },
+  // The Play hub's panel card, same numbers: radius.lg, a 3px surface1 border, the 0/3/0.14/6
+  // shadow and the same warm ground. The accent the card sits on is applied inline from the task's
+  // own game family, so nothing about a specific family is written down here.
+  //
+  // Sized to 90% of the canvas on both axes and centred by the canvas's own `alignItems` /
+  // `justifyContent`, rather than `flex: 1`, so the card reads as a card sitting on its family's
+  // colour -- matching the hub's own card-on-ground look -- instead of filling the screen edge to
+  // edge.
+  taskPanel: {
+    backgroundColor: TASK_PANEL_BACKGROUND,
+    borderColor: colors.surface1,
+    borderRadius: radius.lg,
+    borderWidth: 3,
+    elevation: 4,
+    height: '90%',
+    padding: spacing.smPlus,
+    position: 'relative',
+    shadowColor: colors.foreground,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.14,
+    shadowRadius: 6,
+    width: '90%',
+  },
+  taskSafeArea: { flex: 1 },
 });

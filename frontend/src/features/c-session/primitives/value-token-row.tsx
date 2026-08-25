@@ -12,9 +12,13 @@
 //
 // Motor constancy: every token's size and spacing is TOKEN_TOUCH_TARGET_SIZE / TOKEN_SPACING
 // (motor-constants.ts) -- module-level constants, never a function of how many tokens this row
-// happens to render. When a row would overflow the available width it scrolls horizontally; it
-// never shrinks a token to fit more of them, mirroring section 5.1's line-archetype ruling and B's
-// prompt-visual registry's own layout-bound doctrine.
+// happens to render. `display-with-entry` renders the shown sequence and the entry slots as ONE
+// row that wraps onto further lines, in that order, rather than scrolling horizontally: the entry
+// slots always end up on screen because there is nowhere for the row to run off to, and they sit on
+// whichever line has room after the shown values rather than always starting a fresh line of their
+// own. `reorder` (NP-04) still scrolls horizontally -- its whole token count is draggable and can
+// run longer than a row -- and never shrinks a token to fit more of them, mirroring section 5.1's
+// line-archetype ruling and B's prompt-visual registry's own layout-bound doctrine.
 
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -103,7 +107,11 @@ function DisplayWithEntryRow({
 
   return (
     <View>
-      <ScrollView contentContainerStyle={styles.row} horizontal showsHorizontalScrollIndicator={false}>
+      {/* One wrapping row, shown values followed by entry slots, in that order -- so the entry
+          slots land right after the last shown value rather than always starting a fresh row of
+          their own. At four tokens per line this is what puts the entry slots on the same row as
+          however many shown values are left over, instead of stranding them below alone. */}
+      <View style={styles.entryTokenRow}>
         {shownSequence.map((value, index) => (
           <View key={`shown-${index}`} style={styles.token}>
             <AppText style={styles.tokenText}>{value}</AppText>
@@ -125,7 +133,7 @@ function DisplayWithEntryRow({
             <AppText style={styles.tokenText}>{buffer.length === 0 ? '' : buffer}</AppText>
           </Pressable>
         ))}
-      </ScrollView>
+      </View>
       <View style={styles.keypadSpacer}>
         <DigitKeypad disabled={disabled} onDelete={handleDelete} onDigit={handleDigit} />
       </View>
@@ -230,6 +238,16 @@ const styles = StyleSheet.create({
   reorderToken: {
     backgroundColor: colors.primarySoft,
     borderColor: colors.primary,
+  },
+  // DisplayWithEntryRow's single row: shown tokens then entry slots, wrapping onto further lines
+  // rather than scrolling. Named apart from `row` below (ReorderRow's ScrollView content style,
+  // which must NOT wrap -- it is a single horizontally-scrolling line) so the two never collide.
+  entryTokenRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: TOKEN_SPACING,
+    paddingVertical: TOKEN_SPACING,
   },
   row: {
     alignItems: 'center',

@@ -33,6 +33,9 @@ Thumbs.db
 !/backend/buildLog.md
 # buildLog.md was closed at FE-0c and rotated; all later batch entries live here.
 !/backend/buildLog1.md
+# buildLog1.md was closed at FE-surface-remount-key (2026-08-25) and rotated; all later batch
+# entries live here.
+!/backend/buildLog2.md
 # Carries the mandatory "delete this directory when FE-1b lands" notice for the dev fixture.
 !/backend/scripts/README.md
 !/backend/packaging/component_b_internal/IMPORT_POLICY.md

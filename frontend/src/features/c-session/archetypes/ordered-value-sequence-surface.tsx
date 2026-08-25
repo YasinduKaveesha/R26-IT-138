@@ -216,12 +216,20 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.smPlus,
   },
+  // `flex: 1` so this fills the task screen's middle wrapper (c-session-screen.tsx's
+  // `taskContentMiddle`) rather than sizing to its own content; `space-between` then pins the
+  // question to the top of that space and SUBMIT to the bottom, with `gap` as the minimum spacing
+  // between the elements in between and any leftover room showing as extra white space rather than
+  // drifting the question or SUBMIT off their fixed card-edge gaps.
   container: {
+    flex: 1,
     gap: spacing.lg,
+    justifyContent: 'space-between',
     padding: spacing.lg,
   },
   pressed: { opacity: 0.72 },
-  promptText: { color: colors.textPrimary },
+  // Half of typography.fontSize.title / lineHeight.title (40/46), per instruction.
+  promptText: { color: colors.textPrimary, fontSize: 20, lineHeight: 23 },
   submitButton: {
     alignItems: 'center',
     backgroundColor: colors.primary,

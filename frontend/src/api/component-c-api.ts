@@ -106,13 +106,18 @@ function createFixtureApi(fixture: string): ComponentCApi {
     //     derived from the template id: no template-id-to-family or -to-skill mapping exists
     //     client-side, and a plausible-looking derived value would manufacture a join the backend
     //     supervisor states is absent (agent1.md §2.3). A fabricated-but-plausible id is worse
-    //     than an honest placeholder.
+    //     than an honest placeholder. EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_FAMILY is the one
+    //     exception, and does not reopen this: it is an explicit, opt-in, developer-typed override
+    //     for previewing a task screen's family accent colour (game-family-accents.ts) while this
+    //     route's real session-creation path is unsigned, never a value this file derives or
+    //     guesses on its own. Unset, the honest placeholder above is what ships, unchanged.
     //   - request_id follows this file's own dev-fixture-id convention (see createSession above).
     async nextTask() {
       const exemplar = loadFixtureTaskExemplar();
+      const familyOverride = process.env.EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_FAMILY?.trim();
       return {
         c_task_instance_id: 'dev-c-task-fixture-only',
-        game_family_id: 'development-fixture-only',
+        game_family_id: familyOverride || 'development-fixture-only',
         game_task_template_id: exemplar.game_task_template_id,
         task_index: 1,
         skill_id: 'development-fixture-only',

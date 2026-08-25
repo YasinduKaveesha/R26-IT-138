@@ -17,13 +17,23 @@
 // One shared keypad drives whichever entry slot currently has focus; it holds no state of its own
 // about which slot that is -- the caller passes `onDigit` / `onDelete` and decides what they mean.
 
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/app-text';
 import { GESTURE_LONG_PRESS_MS, HIT_SLOP, KEYPAD_KEY_SIZE, KEYPAD_KEY_SPACING } from '@/src/features/c-session/motor-constants';
 import { colors, radius, typography } from '@/src/theme/tokens';
 
-const DIGIT_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'] as const;
+// Calculator order (7-8-9 on top, 1-2-3 on the bottom digit row), not phone-dialer order (1-2-3 on
+// top) -- matches what "mobile calculator numbers" means. `null` is a same-size blank so the '0'
+// and delete key land in their calculator seats (bottom row, left column empty) instead of drifting
+// left under a flex-wrap that has no notion of a fixed 3-column grid.
+const KEYPAD_ROWS: readonly (readonly (string | null)[])[] = [
+  ['7', '8', '9'],
+  ['4', '5', '6'],
+  ['1', '2', '3'],
+  [null, '0', 'delete'],
+];
 
 export type DigitKeypadProps = {
   disabled?: boolean;
@@ -34,57 +44,92 @@ export type DigitKeypadProps = {
 export function DigitKeypad({ disabled = false, onDelete, onDigit }: DigitKeypadProps) {
   return (
     <View accessibilityRole="none" style={styles.grid}>
-      {DIGIT_KEYS.map((digit) => (
-        <Pressable
-          accessibilityLabel={`digit ${digit}`}
-          accessibilityRole="button"
-          accessibilityState={{ disabled }}
-          delayLongPress={GESTURE_LONG_PRESS_MS}
-          disabled={disabled}
-          hitSlop={HIT_SLOP}
-          key={digit}
-          onPress={() => onDigit(digit)}
-          style={({ pressed }) => [styles.key, disabled && styles.keyDisabled, pressed && !disabled && styles.pressed]}>
-          <AppText style={styles.keyText}>{digit}</AppText>
-        </Pressable>
+      {KEYPAD_ROWS.map((row, rowIndex) => (
+        <View key={rowIndex} style={styles.row}>
+          {row.map((cell, cellIndex) => {
+            if (cell === null) {
+              return <View key={cellIndex} style={styles.keySpacer} />;
+            }
+            if (cell === 'delete') {
+              return (
+                <Pressable
+                  accessibilityLabel="delete digit"
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled }}
+                  delayLongPress={GESTURE_LONG_PRESS_MS}
+                  disabled={disabled}
+                  hitSlop={HIT_SLOP}
+                  key={cell}
+                  onPress={onDelete}
+                  style={({ pressed }) => [
+                    styles.key,
+                    styles.deleteKey,
+                    disabled && styles.keyDisabled,
+                    pressed && !disabled && styles.pressed,
+                  ]}>
+                  <Ionicons color={colors.textSecondary} name="backspace-outline" size={22} />
+                </Pressable>
+              );
+            }
+            return (
+              <Pressable
+                accessibilityLabel={`digit ${cell}`}
+                accessibilityRole="button"
+                accessibilityState={{ disabled }}
+                delayLongPress={GESTURE_LONG_PRESS_MS}
+                disabled={disabled}
+                hitSlop={HIT_SLOP}
+                key={cell}
+                onPress={() => onDigit(cell)}
+                style={({ pressed }) => [
+                  styles.key,
+                  disabled && styles.keyDisabled,
+                  pressed && !disabled && styles.pressed,
+                ]}>
+                <AppText style={styles.keyText}>{cell}</AppText>
+              </Pressable>
+            );
+          })}
+        </View>
       ))}
-      <Pressable
-        accessibilityLabel="delete digit"
-        accessibilityRole="button"
-        accessibilityState={{ disabled }}
-        delayLongPress={GESTURE_LONG_PRESS_MS}
-        disabled={disabled}
-        hitSlop={HIT_SLOP}
-        onPress={onDelete}
-        style={({ pressed }) => [styles.key, disabled && styles.keyDisabled, pressed && !disabled && styles.pressed]}>
-        <AppText style={styles.keyText}>{'⌫'}</AppText>
-      </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  deleteKey: { backgroundColor: colors.surface2 },
   grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: KEYPAD_KEY_SPACING,
   },
+  // Width is flexible (fills the row, which now fills the card's own width); `aspectRatio: 1` keeps
+  // height matched to whatever that width ends up being, so the key stays square instead of a fixed
+  // height fighting a flexible width into a rectangle. The touch-target constancy rule
+  // (motor-constants.ts) is about the key staying the same size across difficulty levels, not about
+  // matching the screen's width -- KEYPAD_KEY_SIZE still sets the floor via `minHeight`/`minWidth`,
+  // so a key is never smaller than that minimum, only ever equal or larger.
   key: {
     alignItems: 'center',
+    aspectRatio: 1,
     backgroundColor: colors.surface1,
     borderBottomColor: colors.borderStrong,
     borderBottomWidth: 3,
     borderColor: colors.border,
     borderRadius: radius.md,
     borderWidth: 2,
-    height: KEYPAD_KEY_SIZE,
+    flex: 1,
     justifyContent: 'center',
-    width: KEYPAD_KEY_SIZE,
+    minHeight: KEYPAD_KEY_SIZE,
+    minWidth: KEYPAD_KEY_SIZE,
   },
   keyDisabled: { opacity: 0.55 },
+  keySpacer: { aspectRatio: 1, flex: 1, minHeight: KEYPAD_KEY_SIZE, minWidth: KEYPAD_KEY_SIZE },
   keyText: {
     fontFamily: typography.fonts.bold,
     fontSize: typography.fontSize.lg,
   },
   pressed: { opacity: 0.72 },
+  row: {
+    flexDirection: 'row',
+    gap: KEYPAD_KEY_SPACING,
+  },
 });
