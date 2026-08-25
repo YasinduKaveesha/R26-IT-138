@@ -62,3 +62,52 @@ test('fails closed on an entirely unknown template shape too (no template-id spe
   task.valid_action_space = { some_key: 'unbound' };
   assert.equal(resolveValueReportSpec(task), null);
 });
+
+// C-TC-02 exclusion (2026-08-26 fix): registry.ts's ARCHETYPE_TABLE already routes
+// 'C-TC-02' -> 'value-report', and this resolver is otherwise purely type-based, so without an
+// explicit refusal C-TC-02 would silently resolve to a live, mounted surface -- see
+// value-report-logic.ts's own comment at the check for the full reason (its `directed` payload
+// flag may need a signed answer DigitKeypad cannot produce).
+//
+// A real C-TC-02 exemplar's payload happens to contain a boolean `directed` key at every
+// difficulty level (measured: false at L1-4, true at L5), which the pre-existing "prompt_payload
+// contains a non-numeric value" guard above would ALSO reject -- coincidentally, not by design.
+// That coincidence is fragile: if a future payload revision ever dropped `directed`, C-TC-02 would
+// silently start resolving with no review. The two tests below isolate the new, explicit,
+// id-based refusal from that coincidence, so this guard's own correctness does not depend on
+// C-TC-02's payload shape staying accidentally hostile forever.
+
+test('C-TC-02 fails closed even with an otherwise fully valid, all-numeric payload and action space (isolates the id-check from the coincidental boolean-payload guard above)', () => {
+  const task = validTask();
+  task.game_task_template_id = 'C-TC-02';
+  // Deliberately NOT using C-TC-02's real payload shape here -- it stays C-TC-01's numeric-only
+  // { initial_count, removed_count } on purpose, so nothing about this task's payload could
+  // independently trigger the non-numeric-value guard. Only the template id changed.
+  assert.equal(resolveValueReportSpec(task), null);
+});
+
+test('a task otherwise identical to C-TC-02 but with a covered template id resolves normally (proves the refusal is keyed on the id, not accidentally on something else about this shape)', () => {
+  const task = validTask();
+  task.game_task_template_id = 'C-TC-01';
+  assert.notEqual(resolveValueReportSpec(task), null);
+});
+
+test('the real C-TC-02 exemplar shape fails closed at difficulty 1 (directed: false) and difficulty 5 (directed: true) alike', () => {
+  const base = validTask();
+  base.game_task_template_id = 'C-TC-02';
+  base.valid_action_space = { submitted_difference: 'int' };
+  base.prompt_text = 'Compare the two numbers. Write how many more or how many fewer.';
+
+  const atL1: CNextTaskResponse = {
+    ...base,
+    difficulty_level: 1,
+    prompt_payload: { directed: false, value_a: 1, value_b: 2 },
+  };
+  const atL5: CNextTaskResponse = {
+    ...base,
+    difficulty_level: 5,
+    prompt_payload: { directed: true, value_a: 5, value_b: 9 },
+  };
+  assert.equal(resolveValueReportSpec(atL1), null);
+  assert.equal(resolveValueReportSpec(atL5), null);
+});

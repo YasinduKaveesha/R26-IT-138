@@ -68,15 +68,26 @@ export type ValueReportSpec = {
  * here is what drives `FailClosedFrame` in the surface -- never a guessed rendering, never a
  * partial one.
  *
- * Fails closed for: `prompt_text` absent or empty; `prompt_payload` absent, not an object, empty,
- * or containing any value that is not a finite number; `valid_action_space` declaring no key; a
- * declared type this codebase does not bind (field-kinds.ts); a declared-type count of
- * `integer-field` keys other than exactly one (zero, or two-or-more, both mean this is not a
- * single-answer `value-report` scene); any extra declared key whose bound kind is not
+ * Fails closed for: `game_task_template_id === 'C-TC-02'` (an explicit, temporary refusal -- see
+ * the check itself for the full reason); `prompt_text` absent or empty; `prompt_payload` absent,
+ * not an object, empty, or containing any value that is not a finite number; `valid_action_space`
+ * declaring no key; a declared type this codebase does not bind (field-kinds.ts); a declared-type
+ * count of `integer-field` keys other than exactly one (zero, or two-or-more, both mean this is
+ * not a single-answer `value-report` scene); any extra declared key whose bound kind is not
  * `boolean-control` (this batch's real data never produces one, but the resolver does not assume
  * that); `task.blanks` not exactly `null`.
  */
 export function resolveValueReportSpec(task: CNextTaskResponse): ValueReportSpec | null {
+  // C-TC-02 is excluded here, not merely absent from real data: registry.ts's ARCHETYPE_TABLE
+  // already routed 'C-TC-02' -> 'value-report' before this batch existed, and this resolver is
+  // otherwise purely type-based (never branches on template id) -- so without this explicit
+  // refusal, C-TC-02 would silently resolve to a live, mounted surface despite never having been
+  // built for. Its `directed` payload flag may require a signed answer at difficulty 5;
+  // DigitKeypad has no minus key (10b-10h-master-work-order.md §2.1). Remove this line, and only
+  // this line, the moment that question is answered -- it is a refusal, not a rule about
+  // C-TC-02's shape, and every other check in this function stays template-id-blind.
+  if (task.game_task_template_id === 'C-TC-02') return null;
+
   if (typeof task.prompt_text !== 'string' || task.prompt_text.length === 0) return null;
 
   const promptPayload = task.prompt_payload;

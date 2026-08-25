@@ -10,6 +10,12 @@
 // per the approved design's "a future extra key needs no structural change here." No NP template
 // declares one today -- `extraFields` is always empty against the real registry -- so this renders
 // nothing in practice; it exists so the promise is real rather than aspirational.
+//
+// Its `boolean-control` branch uses the shared `BooleanToggle` (`primitives/boolean-toggle.tsx`,
+// 2026-08-26) rather than a local single-switch control. The original local version defaulted to
+// showing "NO" before the child had touched it at all, which read as an answer already given
+// rather than an open question, even though SUBMIT correctly stayed disabled until a value was
+// actually set -- see that file's own header for the full reasoning.
 
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -22,6 +28,7 @@ import {
 } from '@/src/features/c-session/archetypes/ordered-value-sequence-logic';
 import { FailClosedFrame } from '@/src/features/c-session/fail-closed-frame';
 import { HIT_SLOP } from '@/src/features/c-session/motor-constants';
+import { BooleanToggle } from '@/src/features/c-session/primitives/boolean-toggle';
 import { DigitKeypad } from '@/src/features/c-session/primitives/digit-keypad';
 import { ValueTokenRow } from '@/src/features/c-session/primitives/value-token-row';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
@@ -161,18 +168,7 @@ function GenericExtraField({
   onChange: (value: unknown) => void;
 }) {
   if (field.binding.kind === 'boolean-control') {
-    const current = value === true;
-    return (
-      <Pressable
-        accessibilityLabel={field.key}
-        accessibilityRole="switch"
-        accessibilityState={{ checked: current }}
-        hitSlop={HIT_SLOP}
-        onPress={() => onChange(!current)}
-        style={[styles.toggle, current && styles.toggleOn]}>
-        <AppText style={styles.toggleText}>{current ? 'YES' : 'NO'}</AppText>
-      </Pressable>
-    );
+    return <BooleanToggle fieldKey={field.key} onChange={onChange} value={value} />;
   }
 
   if (field.binding.kind === 'exact-choice-control') {

@@ -646,3 +646,97 @@ difficulty levels) — only at an artificially large count from tapping past the
 as a gap in 10c's own scope, since the mechanism (`unit-stepper.tsx`'s `useEffect` on
 `forwardSteps`) is identical to the one already exercised in that same test, just not separately
 confirmed by eye at the larger end.
+
+---
+
+## 2026-08-26 — fix: C-TC-02 live-resolution leak closed; boolean toggle unified into one shared primitive
+
+Two gaps found while catching up on 10b (`ead55a9`) and 10c (`681415c`), both closed here, neither
+touching 10c's own content.
+
+**C-TC-02 was silently resolving to a live, mounted surface.** `registry.ts`'s `ARCHETYPE_TABLE`
+mapped `'C-TC-02': 'value-report'` from before 10b existed, and `value-report`'s resolver
+(`resolveValueReportSpec`) is purely type-based -- it never branched on template id. 10b's own real
+scope explicitly excluded C-TC-02 (its `directed` payload flag may need a signed answer at
+difficulty 5, and `DigitKeypad` has no minus key -- `10b-10h-master-work-order.md` §2.1), but nothing
+in the shipped code actually enforced that exclusion. Production refuses all real sessions today, so
+there was no live-child risk -- but the gap was real and would have compounded silently under 10d/10e.
+
+**A coincidence was doing the job by accident, and it was fragile.** C-TC-02's real payload happens
+to contain a boolean `directed` key at every difficulty level (measured: `false` at L1-4, `true` at
+L5), which the resolver's pre-existing "prompt_payload contains a non-numeric value" guard also
+rejects -- so C-TC-02 was already failing closed today, for a reason that had nothing to do with the
+actual policy question. If a future payload revision ever dropped `directed`, C-TC-02 would have
+started resolving with no review at all.
+
+**Two options considered, one chosen.** (A) an explicit `game_task_template_id === 'C-TC-02'` early
+return inside `resolveValueReportSpec`; (B) removing the `registry.ts` mapping entirely, which fails
+it closed via the existing "unresolvable template" path with zero template-id branching inside any
+archetype's own logic. (B) keeps `value-report-logic.ts` completely free of template-id branching,
+but `registry.ts`'s table is a **shape classification**, not an authorization list -- its own header
+states this explicitly, and `archetype-surfaces.ts`'s `SURFACE_TABLE` is what separately owns
+readiness. Removing a factually-true shape mapping to encode a policy refusal would blur that
+separation, and would report the wrong fail-closed reason (`unresolvable-template`, when C-TC-02 is
+in fact resolvable -- it is specifically withheld). It would also require changing the 30-entry
+coverage test (`c-archetype-resolution.test.ts`) that hard-asserts the table's size against the
+frozen registry, for a guard meant to be temporary. **Chose (A)**: smaller, easier to delete later --
+and the same file that gains the line is exactly the file that will need to change again once the
+`directed` question is answered, so nothing else has to change back.
+
+**What changed:** `value-report-logic.ts:81-89` -- one explicit early return, heavily commented with
+the reason and the removal condition, placed before every other (template-id-blind) check in the
+function; the docstring's "fails closed for" list updated to name it first.
+
+**The boolean toggle now exists in exactly one place.** Before this fix: `ordered-value-sequence-
+surface.tsx`'s `GenericExtraField` had a single-switch version (flips between "YES"/"NO" text,
+defaulting to showing "NO" before the child had touched it at all -- a real defect, not a style
+difference: `SubmitButton`'s disabled check correctly required the key to be explicitly set, but the
+toggle *looked* answered when it wasn't); `value-report-surface.tsx`'s `BooleanExtraField` had a
+two-button version (neither button selected until `onChange` fires once -- the correct behaviour for
+an unanswered field in an assessment). Extracted the two-button version into
+`primitives/boolean-toggle.tsx` as `BooleanToggle`, decoupled from any single archetype's extra-field
+type (matches `digit-keypad.tsx`'s own callback-only precedent). Both surfaces now import and render
+it; neither reproduces it locally. `line-traversal-surface.tsx` (10c) was checked and declares no
+boolean-control key today, so nothing there needed changing.
+
+**Files:**
+- new: `frontend/src/features/c-session/primitives/boolean-toggle.tsx`
+- edit: `frontend/src/features/c-session/archetypes/value-report-logic.ts` (the C-TC-02 refusal)
+- edit: `frontend/src/features/c-session/archetypes/value-report-surface.tsx` (toggle now imported,
+  local `BooleanExtraField` and its now-unused styles removed)
+- edit: `frontend/src/features/c-session/archetypes/ordered-value-sequence-surface.tsx` (toggle now
+  imported; its `boolean-control` branch is dead code against real NP templates today, so this is a
+  precautionary correctness fix, not a behaviour change any current template exercises)
+- edit: `frontend/src/api/__tests__/c-value-report-fail-closed.test.ts` (three new tests: the id-check
+  isolated from the payload coincidence; a covered-id positive control on the same shape; the real
+  C-TC-02 exemplar shape at L1 and L5 both)
+
+**A related, disclosed, but out-of-scope observation.** `line-traversal-surface.tsx` also reproduces
+`SubmitButton` as its own local copy (a third instance, after `ordered-value-sequence-surface.tsx`'s
+and `value-report-surface.tsx`'s). Not touched here -- this fix was scoped to the boolean toggle
+specifically, and 10c's in-flight/committed content was explicitly out of scope. Worth a similar
+extraction in a future small batch, following the exact precedent this entry just set.
+
+**Verification -- supervisor's, measured.**
+
+- `npx tsc --noEmit` -- exit 0.
+- `npm run test:contract` -- **748 tests, 748 passed, 0 failed.** Baseline immediately before this
+  fix, measured fresh: **744 / 744 / 0.** Reconciles: three new tests in
+  `c-value-report-fail-closed.test.ts`, plus one more from `no-node-builtins-outside-tests-and-
+  scripts.test.ts`'s own whole-tree source scan picking up the one new source file
+  (`primitives/boolean-toggle.tsx`) automatically -- `744 + 3 + 1 = 748`.
+- The C-TC-02 guard was proven to fire in both directions: with the exclusion line temporarily
+  commented out, the isolated-payload test (the one that changes only the template id, keeping an
+  otherwise fully valid numeric payload) failed exactly as expected, resolving to a real spec instead
+  of `null`; restored from a backup taken before the edit, and the full 17-test file confirmed green
+  again immediately after.
+- `ordered-value-sequence`'s own test suite (`c-ordered-value-sequence-*.test.ts`, 67 tests) run in
+  isolation after the toggle extraction: 67/67 pass, unchanged -- confirms the retrofit did not
+  regress the archetype whose real templates never exercise this branch.
+- `npx expo export --platform ios` -- succeeded, `entry-2dfd91d2e02951c6812405e2a3054120.hbc`,
+  5.11 MB; `dist/` removed after.
+
+**What was NOT verified.** Nothing here can mount a component tree, so the toggle's new visual
+appearance in `value-report`'s own surface (already shipped in 10b) is unchanged and was not
+re-observed; only `ordered-value-sequence`'s branch is new, and it renders no real template today, so
+there is nothing to look at yet. The backend suite was not re-run -- no backend file changed.

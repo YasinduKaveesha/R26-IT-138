@@ -12,10 +12,12 @@
 // `handleSubmit`.
 //
 // Visual design is reused, not reinvented (10b work order, 5A): the screen chrome, question
-// rendering, SUBMIT button and the boolean-toggle/digit-keypad field shapes below are reproduced
-// from `ordered-value-sequence-surface.tsx`'s own `styles`/`SubmitButton`/`GenericExtraField`
-// (neither is exported from that file, so this file reproduces their exact shape rather than
-// importing a private symbol) -- not a redesign. The read-only payload tokens reuse
+// rendering and SUBMIT button shapes below are reproduced from `ordered-value-sequence-surface.tsx`'s
+// own `styles`/`SubmitButton` (neither is exported from that file, so this file reproduces their
+// exact shape rather than importing a private symbol) -- not a redesign. The boolean extra field
+// uses the shared `BooleanToggle` (`primitives/boolean-toggle.tsx`, extracted 2026-08-26) rather
+// than a third local reproduction -- see that file's own header for why its two-button shape
+// replaced 10a's original single-switch one everywhere. The read-only payload tokens reuse
 // `value-token-row.tsx`'s own `token`/`tokenText` style and `TOKEN_TOUCH_TARGET_SIZE`/
 // `TOKEN_SPACING` constants (motor-constants.ts) rather than a new size -- `ValueTokenRow` itself
 // is not reused directly because its only display mode (`display-with-entry`) always couples shown
@@ -27,13 +29,11 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/app-text';
 import type { ArchetypeSurfaceProps } from '@/src/features/c-session/archetype-surfaces';
-import {
-  resolveValueReportSpec,
-  type ValueReportExtraField,
-} from '@/src/features/c-session/archetypes/value-report-logic';
+import { resolveValueReportSpec } from '@/src/features/c-session/archetypes/value-report-logic';
 import { FailClosedFrame } from '@/src/features/c-session/fail-closed-frame';
 import { accentForGameFamily } from '@/src/features/c-session/game-family-accents';
 import { HIT_SLOP, TOKEN_SPACING, TOKEN_TOUCH_TARGET_SIZE } from '@/src/features/c-session/motor-constants';
+import { BooleanToggle } from '@/src/features/c-session/primitives/boolean-toggle';
 import { DigitKeypad } from '@/src/features/c-session/primitives/digit-keypad';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
 
@@ -138,8 +138,8 @@ function ValueReportScene({ accent, onSubmit, spec }: ValueReportSceneProps) {
         />
       </View>
       {spec.extraFields.map((field) => (
-        <BooleanExtraField
-          field={field}
+        <BooleanToggle
+          fieldKey={field.key}
           key={field.key}
           onChange={(value) => setExtraValues((prev) => ({ ...prev, [field.key]: value }))}
           value={extraValues[field.key]}
@@ -168,52 +168,7 @@ function SubmitButton({ disabled, onPress }: { disabled: boolean; onPress: () =>
   );
 }
 
-function BooleanExtraField({
-  field,
-  onChange,
-  value,
-}: {
-  field: ValueReportExtraField;
-  value: unknown;
-  onChange: (value: unknown) => void;
-}) {
-  // Two explicit buttons, not one toggle that flips between "YES" and "NO" text (2026-08-26
-  // request) -- a single toggle defaults to showing "NO" before the child has picked anything at
-  // all, which reads as an answer already given rather than an open question. `isYes`/`isNo` are
-  // independently false until `onChange` is called once, so neither button appears selected until
-  // the child actually picks one.
-  const isYes = value === true;
-  const isNo = value === false;
-  return (
-    <View style={styles.booleanRow}>
-      <Pressable
-        accessibilityLabel={`${field.key} yes`}
-        accessibilityRole="button"
-        accessibilityState={{ selected: isYes }}
-        hitSlop={HIT_SLOP}
-        onPress={() => onChange(true)}
-        style={[styles.toggle, styles.booleanChoice, isYes && styles.toggleOn]}>
-        <AppText style={styles.toggleText}>YES</AppText>
-      </Pressable>
-      <Pressable
-        accessibilityLabel={`${field.key} no`}
-        accessibilityRole="button"
-        accessibilityState={{ selected: isNo }}
-        hitSlop={HIT_SLOP}
-        onPress={() => onChange(false)}
-        style={[styles.toggle, styles.booleanChoice, isNo && styles.toggleOn]}>
-        <AppText style={styles.toggleText}>NO</AppText>
-      </Pressable>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  booleanChoice: { flex: 1 },
-  booleanRow: {
-    flexDirection: 'row',
-    gap: spacing.smPlus,
-  },
   // `flex: 1` so this fills the task screen's middle wrapper (c-session-screen.tsx's
   // `taskContentMiddle`) rather than sizing to its own content; `space-between` then pins the
   // question to the top of that space and SUBMIT to the bottom, matching
@@ -279,22 +234,5 @@ const styles = StyleSheet.create({
     color: colors.surface1,
     fontFamily: typography.fonts.bold,
     fontSize: typography.fontSize.lg,
-  },
-  toggle: {
-    alignItems: 'center',
-    backgroundColor: colors.surface1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: 2,
-    justifyContent: 'center',
-    minHeight: 48,
-    paddingHorizontal: spacing.md,
-  },
-  toggleOn: {
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primary,
-  },
-  toggleText: {
-    fontFamily: typography.fonts.bold,
   },
 });
