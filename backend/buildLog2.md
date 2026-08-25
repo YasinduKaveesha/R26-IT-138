@@ -740,3 +740,121 @@ extraction in a future small batch, following the exact precedent this entry jus
 appearance in `value-report`'s own surface (already shipped in 10b) is unchanged and was not
 re-observed; only `ordered-value-sequence`'s branch is new, and it renders no real template today, so
 there is nothing to look at yet. The backend suite was not re-run -- no backend file changed.
+
+## 2026-08-26 — feat: `option-select` archetype registered (10d, partial) — C-MCL-02/C-MCL-03 only;
+three findings escalated, none resolved here
+
+**Scope actually shipped.** The `exact-choice-control` (pipe-string) option source only:
+`C-MCL-02` (`left|right|equal`) and `C-MCL-03` (`<|>|=`). The `integer-field` option source
+(`C-MCL-01`, and `C-CC-03` -- registry.ts routes both to this same archetype id, pre-dating this
+batch) is a documented STRUCTURAL REFUSAL in `option-select-logic.ts`, keyed on declared type alone,
+naming no template id. `C-MCL-04` (`line-position`) stays entirely unregistered, per its own
+STOP-AND-REPORT (below) -- no surface, no logic file, no test, `unit-stepper.tsx` untouched.
+
+**Finding 1 -- C-MCL-01 / C-CC-03: the payload number IS the answer, and no quantity-as-objects
+renderer exists to show it safely.** Owner ruling overturned the original plan's design (which would
+have rendered `target_representation_value` / `set_size` as a read-only numeral token, exactly like
+`value-report`'s own operand tokens). Re-verified directly against every real exemplar, all five
+difficulty levels, both templates: `target_representation_value` (C-MCL-01) and `set_size` (C-CC-03)
+are always present, unmodified, inside their own `numeral_options` array --
+`{[3,5,9], target=9}` ... `{[21,35,46,47,66], target=66}` for C-MCL-01;
+`{[1,3], set_size=3}` ... `{[16,17,18,19], set_size=16}` for C-CC-03. Rendering that number as a
+token reduces "choose the number that matches the amount shown" / "count the objects" to "find the
+matching digit" -- the same class of defect `line-traversal-logic.ts`'s header exists to prevent.
+It cannot be omitted either: every `prompt_text` on this path is deictic and `interactive_assets` is
+`{}` at every level, so the quantity can only be shown honestly as a QUANTITY OF OBJECTS, and no such
+primitive exists in this codebase. **Not decided here:** what that primitive looks like, whether it
+overlaps with 10e's `object-pool` (which needs the same thing for `C-CC-01`/`C-CC-02`), or when it
+gets built. The refusal self-deletes the day it is approved and built -- no template-id list to
+maintain or grow in the meantime.
+
+**Finding 2 -- `C-MCL-04` (`line-position`) interaction-cost confound, independently re-derived:**
+
+| `difficulty_level` | `interval_max` | `target_position` | taps (origin 0, `UnitStepper`'s +1 only) |
+|---|---|---|---|
+| 1 | 10 | 2 | 2 |
+| 2 | 20 | 7 | 7 |
+| 3 | 50 | 26 | 26 |
+| 4 | 100 | 36 | 36 |
+| 5 | 200 | 34 | 34 |
+
+17x difficulty-5-vs-1 effort. Ruling 6.3's own justification ("mathematical demand grows with step
+count") holds for `line-traversal` (each unit jump IS the counting-on act scored) but not for
+`line-position` (locating 34 on a 0-200 line is a magnitude-estimation act made ONCE; the 34 taps
+that follow are pure transit cost, assessing nothing). Options seen, none chosen: coarse+fine
+stepping (±10/±1, ~7 taps at L5, plausibly still "discrete" under 6.3 but its own confound-freeness
+is unverified); direct placement (reopens the already-closed size confound); an unexplored
+log/paginated control. The layout-bound reasoning originally drafted for a `numeral_options` ceiling
+(10, i.e. 2x the observed max of 5) is recorded here for the next builder, though moot while the
+`integer-field` path stays refused (Finding 1). **Not decided here:** which fix, or whether this is
+a ship-blocking population-level concern. `line-position` stays unregistered.
+
+**Finding 3 -- `C-MCL-02` renders as numeral comparison, same act as `C-MCL-03`, not flagged
+before.** `left_count`/`right_count` render as plain numeral tokens under this design -- no answer
+leak (the child still has to compare), but "Choose which side has more, or say if they are equal"
+and "Compare the two numbers" (`C-MCL-03`) now resolve to the identical child-facing act: comparing
+two numerals. Two templates collapsing to one act suggests `C-MCL-02` was meant as *non-symbolic*
+quantity comparison (a picture of dots per side, not digits) -- symbolic vs. non-symbolic magnitude
+comparison are distinct constructs in the literature this tool is built against. Built as numerals
+for now, per explicit owner ruling to ship it that way and flag the question rather than resolve it.
+**Not decided here:** whether `C-MCL-02` needs a non-symbolic rendering, and if so whether it shares
+the same still-nonexistent quantity-as-objects primitive Finding 1 names.
+
+**`trial_type` note (C-CC-04).** `C-CC-04`'s pipe-string path (`judgment: "same|changed"`) is held
+shut entirely by the generic "every non-option `prompt_payload` value must be a finite number, or
+fail closed" guard -- `trial_type` (`rearrange_only` / `add_remove`) is itself answer-bearing for the
+same/changed judgment, so rendering it would leak that answer too. This guard must never be relaxed
+to skip or tolerate a non-numeric value on the strength of `trial_type` being the only one seen in
+real data; doing so would silently unlock `C-CC-04` with no review. Proven load-bearing by breaking
+it directly (see Verification).
+
+**Files:**
+- new: `frontend/src/features/c-session/archetypes/option-select-logic.ts`
+- new: `frontend/src/features/c-session/archetypes/option-select-surface.tsx`
+- new: `frontend/src/features/c-session/primitives/option-choice-row.tsx` (generalizes
+  `GenericExtraField`'s `exact-choice-control` branch from an extra field into the primary scene;
+  geometry from `TOKEN_TOUCH_TARGET_SIZE`/`TOKEN_SPACING`, motor-constants.ts, never a bare literal)
+- edit: `frontend/src/features/c-session/archetype-surfaces.ts` (one import, one `SURFACE_TABLE`
+  entry -- this single entry also lights up `C-CC-03`/`C-CC-04` at the plan level, since
+  `resolveArchetypeSurface` keys on archetype id, not template id; see Finding 1/the `trial_type`
+  note for why neither renders anything unsafe as a result)
+- new tests, flat in `frontend/src/api/__tests__/`: `c-option-select-logic.test.ts`,
+  `c-option-select-fail-closed.test.ts`, `c-option-select-key-set-proof.test.ts`,
+  `c-option-select-prompt-text.test.ts`, `c-option-select-no-representation-mode.test.ts`,
+  `c-option-select-carries-interactive-assets.test.ts`, `c-option-select-motor-constancy.test.ts`,
+  `c-mcl-family-surface-registration.test.ts` (source-scan against `archetype-surfaces.ts` plus
+  `resolveArchetype` cross-checks -- does NOT import `archetype-surfaces.ts` as a value; that module
+  transitively imports every real RN surface, and `node --import tsx --test` cannot transform
+  `react-native/index.js`'s own Flow syntax, the same class of defect `ffe543d` fixed for the theme
+  barrel, just with no RN-free leaf available here)
+
+**Verification -- measured.**
+
+- `npx tsc --noEmit` -- exit 0.
+- `npm run test:contract` -- **832 tests, 832 passed, 0 failed.** Baseline immediately before this
+  batch, measured fresh: **748 / 748 / 0.** Reconciles: 84 new tests added across the 8 new test
+  files above; 0 removed; no existing test file edited.
+- `line-traversal`'s and `value-report`'s own test files: untouched, unchanged in count (no file
+  belonging to either was opened for edit this batch).
+- Every guard in `option-select-logic.ts` proven to fire by disabling it in place, confirming the
+  targeted negative control(s) went red, then restoring and confirming the full two-file suite (37
+  tests) green again: `prompt_text` empty/absent; `prompt_payload` null or non-object; empty
+  `prompt_payload`; a non-numeric `prompt_payload` value (this is the one holding `C-CC-04` shut --
+  disabling it turned exactly the `C-CC-04` test and three synthetic ones red, nothing else); the
+  `integer-field` structural refusal (disabling it, by letting that branch succeed instead of
+  refusing, turned the `C-MCL-01`/`C-CC-03` refusal tests red); a duplicate `exact-choice-control`
+  key; a non-boolean extra field; `blanks` not null. One guard (`valid_action_space` declares no
+  key) was found to be redundant-but-harmless: disabling it alone did not turn any test red, because
+  the later `scoreKey === null` check independently catches the same empty-payload-space case --
+  behavior is correct either way, but that particular line is not independently load-bearing, unlike
+  every other guard listed above. Recorded rather than silently left as an unverified claim.
+- `npx expo export --platform ios` -- succeeded, `entry-2ea928b0e6abe626da010aa3c970b709.hbc`,
+  5.12 MB; `dist/` removed after.
+
+**What was NOT verified.** Nothing here can mount a component tree -- `OptionChoiceRow`'s and
+`option-select-surface.tsx`'s actual on-screen appearance and touch behaviour were never observed,
+only their source and the pure resolver's decisions. `C-MCL-01`/`C-CC-03` were confirmed to reach
+the archetype table (`resolveArchetype` still returns `'option-select'` for both) and to refuse at
+the `resolveOptionSelectSpec` layer, but the actual `FailClosedFrame` render path for either was not
+observed rendering, for the same reason. The backend suite was not re-run -- no backend file changed
+except this entry.

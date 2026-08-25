@@ -13,6 +13,7 @@ import type { ComponentType } from 'react';
 import type { CNextTaskResponse } from '@/src/api/generated/openapi-types';
 import type { ArchetypeId } from '@/src/features/c-session/archetypes/registry';
 import { LineTraversalSurface } from '@/src/features/c-session/archetypes/line-traversal-surface';
+import { OptionSelectSurface } from '@/src/features/c-session/archetypes/option-select-surface';
 import { OrderedValueSequenceSurface } from '@/src/features/c-session/archetypes/ordered-value-sequence-surface';
 import { ValueReportSurface } from '@/src/features/c-session/archetypes/value-report-surface';
 
@@ -25,6 +26,12 @@ const SURFACE_TABLE: Partial<Record<ArchetypeId, ComponentType<ArchetypeSurfaceP
   'ordered-value-sequence': OrderedValueSequenceSurface,
   'value-report': ValueReportSurface,
   'line-traversal': LineTraversalSurface,
+  // Registered by archetype id, not template id: this one entry also lights up C-CC-03/C-CC-04
+  // (C-GF-01, already routed here by registry.ts before this batch existed) alongside this batch's
+  // own C-MCL-02/C-MCL-03 (C-GF-03) -- see option-select-logic.ts's header for why C-MCL-01/C-CC-03
+  // structurally refuse rather than mount a partial or answer-leaking surface, and 10d's own
+  // build-log entry for the finding this was raised against before this line was added.
+  'option-select': OptionSelectSurface,
 };
 
 /**
