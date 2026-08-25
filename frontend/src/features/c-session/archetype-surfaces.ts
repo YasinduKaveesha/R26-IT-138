@@ -12,6 +12,7 @@ import type { ComponentType } from 'react';
 
 import type { CNextTaskResponse } from '@/src/api/generated/openapi-types';
 import type { ArchetypeId } from '@/src/features/c-session/archetypes/registry';
+import { LineTraversalSurface } from '@/src/features/c-session/archetypes/line-traversal-surface';
 import { OrderedValueSequenceSurface } from '@/src/features/c-session/archetypes/ordered-value-sequence-surface';
 import { ValueReportSurface } from '@/src/features/c-session/archetypes/value-report-surface';
 
@@ -23,6 +24,7 @@ export type ArchetypeSurfaceProps = {
 const SURFACE_TABLE: Partial<Record<ArchetypeId, ComponentType<ArchetypeSurfaceProps>>> = {
   'ordered-value-sequence': OrderedValueSequenceSurface,
   'value-report': ValueReportSurface,
+  'line-traversal': LineTraversalSurface,
 };
 
 /**

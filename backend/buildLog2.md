@@ -430,3 +430,219 @@ nothing in this entry's changes touches it.
 **What was NOT verified.** The label wording itself ("Start"/"Taken away"/"First number"/"Second
 number"/"Number"/"Answer") still has no owner content/pedagogy sign-off — flagged twice now, still
 open. No automated test can substitute for that judgment call.
+
+---
+
+## 2026-08-26 — feat: `line-traversal` archetype registered (10c), C-JB-02 only
+
+Component C frontend, sub-phase 10c. Registers `line-traversal` for `C-JB-02` ("Count On from an
+Addend") — the only template that archetype covers. Baseline: HEAD `ead55a9`, `npx tsc --noEmit`
+exit 0, `npm run test:contract` 659/659/0.
+
+**A stale work-order finding, reported rather than silently worked around.** `10b-10h-master-work-
+order.md`'s §2.3 names `C-JB-04` as 10c's own "first two-layer falsification test" (a second,
+boolean declared key added to an already-built archetype). That already happened, inside 10b:
+`C-JB-04` was one of the eight templates 10b registered under `value-report`, and its
+`exchange_performed` key was rendered generically off `valid_action_space` with no per-template
+branch — proven by `c-value-report-boolean-control.test.ts`, which source-scans the logic file to
+assert it never contains the literal strings `C-JB-04` or `exchange_performed`. 10c's real scope is
+`C-JB-02` alone; `C-JB-01`/`C-JB-03`/`C-JB-04` are untouched and unrebuilt here. A regression check
+(`c-line-traversal-logic.test.ts`) confirms all three still resolve to `value-report`.
+
+**The backend evaluator resolved what the docs left ambiguous.** Read directly from
+`backend/packaging/component_c_internal/component_c_generator/tasks/join_and_bridge.py`
+(`_generate_jb02`/`_evaluate_jb02`): `start` = `max(addend_a, addend_b)`; the jump unit is fixed at
+1; `expected_jump_count` = `min(addend_a, addend_b)`; the server checks `final_position == sum`,
+`len(jumps) == expected_jump_count`, every jump equals 1, and `start + sum(jumps) == sum`. So the
+child makes unit +1 jumps only, never chooses a jump size — confirming the sequence doc's
+`unit-stepper` primitive and ruling out a free-form jump-value entry, which would only ever produce
+lists the server rejects by construction. The client checks none of this itself (no jump-count
+validation, no consistency check) — it relays what the child did.
+
+**An answer-leak hazard not named in any doc.** The task's answer is `addend_a + addend_b`. A
+number line whose extent were derived from that sum would display the answer as its own endpoint
+before the child did anything. `MAX_LINE_FORWARD_STEPS` (`unit-stepper.tsx`) is therefore a fixed
+layout constant (30, comfortably above the generator's theoretical ceiling of `min(addend_a,
+addend_b) ≤ 18` at difficulty 5), never computed from the payload — guarded by a dedicated new test
+file, `c-line-traversal-no-answer-derivation.test.ts`, source-scanning every new file for the literal
+shapes an addend-sum would take.
+
+**`final_position` is a separate keypad field, not auto-derived from the marker's position** — a
+direct decision, confirmed with the user before building: auto-deriving it would make the client
+guarantee `start + sum(jumps) == final_position`, which is literally one of the server's four
+correctness conditions. The client relaying two independent pieces of what the child did (the jumps
+made, and where they say they landed) keeps the authority boundary intact; the server is the one
+that checks they agree.
+
+**Growing jump count across difficulty is accepted, per sequence doc §5.1**, also confirmed with the
+user before building: per-step touch target and spacing are constant at every level
+(`STEP_TOUCH_TARGET_SIZE`/`STEP_SPACING`, motor-constants.ts, previously reserved but unused);
+only the *number* of steps varies, which §5.1 classifies as mathematical demand, not motor demand —
+counting on N times is the assessed skill for this template. The real frozen exemplar fixture's
+jump counts across L1–L5 are `[2, 2, 1, 1, 3]` (measured, not assumed — a random draw can put the
+larger addend on either side, so this stays well under the generator's theoretical ceiling); the
+motor-constancy test states this measurement rather than a guessed "grows to N" claim.
+
+**New files:**
+- `frontend/src/features/c-session/archetypes/line-traversal-logic.ts` — pure resolution, no
+  React/RN import. Classifies `valid_action_space` by declared TYPE (exactly one `integer-field` +
+  exactly one `ordered-integer-collection`, any other declared kind or count fails closed), never
+  by key name. Reads the `start` payload key by name as the line's origin — the same "reading the
+  wire's own scene vocabulary" precedent `ordered-value-sequence-logic.ts` already set for
+  `entered_values`/`arranged_values` — and excludes it from the rendered payload-token row (it
+  duplicates the larger addend's value; the line itself shows it instead).
+- `frontend/src/features/c-session/archetypes/line-traversal-surface.tsx` — reuses the screen
+  chrome, `SubmitButton`, and payload-token shapes `value-report-surface.tsx` established, at the
+  plain `TOKEN_TOUCH_TARGET_SIZE`/`TOKEN_SPACING` (not that file's own 1.6x/1.5x enlargement, which
+  was a request scoped to that one screen, not a standing rule).
+- `frontend/src/features/c-session/primitives/unit-stepper.tsx` — the shared discrete stepping
+  primitive (ruling 6.3: discrete integer stepping, never continuous drag; constant per-step touch
+  target; the line scrolls, never compresses), built generic enough for 10d's `line-position` to
+  compose over unmodified, per the master work order's own instruction. Auto-scrolls to keep the
+  marker on screen as it advances — a direct application of the A2 finding (10a's entry slots
+  rendering off-screen at difficulty 5).
+- `frontend/src/features/c-session/primitives/jump-accumulator.tsx` — the read-only record of jumps
+  made. Deliberately not `value-token-row.tsx`: sequence doc §3.2 states the archetype chooses which
+  of two primitives a `list[int]` key renders through, because the scene decides whether the list is
+  entered or accumulated, and `jumps` is accumulated.
+- Eight test files under `frontend/src/api/__tests__/` (`c-line-traversal-*.test.ts`) covering
+  resolution across all 5 difficulty levels, the key-set-equality proof, fail-closed paths, prompt-
+  text identity, motor constancy (including the jump-count-vs-step-size distinction), the
+  `representation_mode` guard, `interactive_assets` carry-through, and the answer-leak guard.
+
+**Edited:** `frontend/src/features/c-session/archetype-surfaces.ts` — one import and one
+`SURFACE_TABLE` entry (`'line-traversal': LineTraversalSurface`). No other file touched;
+`game-catalogue.ts`/`game-hub/` untouched — card #5 "Join and Bridge" flips from *Partly ready* to
+*Ready to play* on its own, the same self-updating wiring 10b relied on.
+
+**Verification — measured.**
+
+- `npx tsc --noEmit` — exit 0.
+- The eight new test files in isolation
+  (`node --import tsx --test src/api/__tests__/c-line-traversal-*.test.ts`): **80 tests, 80 passed,
+  0 failed.**
+- Whole-suite `npm run test:contract`, immediately before this batch: **663 tests, 663 passed, 0
+  failed** (up from 10b's 659 — the 4 extra came from pre-existing `SURFACE_TABLE`-driven tests
+  picking up nothing new yet at that point; unrelated to this entry). Immediately after: **743
+  tests, 743 passed, 0 failed.** Reconciles: `663 + 80 = 743`.
+- `npx expo export --platform ios` — succeeded. `dist/` removed after.
+- `.env.local` (gitignored, not part of this diff) repointed at
+  `EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_TEMPLATE=C-JB-02` /
+  `EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_FAMILY=C-GF-05`, difficulty 5, so the user can check card #5
+  in a browser at difficulty 1 and 5 next — the standing, non-optional step before any further
+  sub-phase, per the sequence this project has followed since A2.
+
+**What was NOT verified.** Nothing in this repository can mount a React Native tree, so no test
+here proves the stepper renders correctly on a real screen, that the marker's auto-scroll actually
+keeps it visible at 18 jumps, or that the line never compresses — that is the standing browser-check
+step, not yet done as of this entry. The backend suite is unaffected; no backend file changed.
+
+---
+
+## 2026-08-26 — fix: `line-traversal` no longer asks the child to re-type a visible number (10c correction)
+
+**Found by the user looking at the running surface**, same standing practice that has caught every
+real defect in this project so far. The marker on `UnitStepper`'s line already shows the landed
+position (circled, at the current tick) — the surface's first draft then asked the child to
+separately type that same number into a keypad field labelled "Where you landed", which was pure
+redundancy: nothing new was being assessed by re-typing a value already on screen.
+
+**Fix.** `line-traversal-surface.tsx` no longer renders a position keypad field. `final_position` is
+now derived as `spec.startValue + jumps.length` and submitted alongside `jumps` when SUBMIT is
+pressed; SUBMIT is gated on `jumps.length > 0` instead of a typed value being present.
+
+**Re-checked against the authority boundary before making this change**, not assumed safe: this is
+not the client computing an answer it shouldn't. `startValue` and `jumps.length` are never the
+forbidden `addend_a + addend_b` sum — they read off exactly what the child's own jumps already
+produced and made visible (the identical `originValue + forwardSteps` arithmetic `UnitStepper`
+already uses for its own marker), not the task's unseen answer. `c-line-traversal-no-answer-
+derivation.test.ts` gained a test pinning this distinction explicitly: the surface's own derivation
+matches `spec.startValue + jumps.length` and is confirmed to never match the addend-sum guard.
+
+**Also in this pass, both direct user requests, confirmed against the theme's real palette:**
+- `UnitStepper`'s jump/back controls are now stacked vertically (jump forward above, back below,
+  each with an up/down arrow) instead of side-by-side, filled with `colors.accentGreen` (the theme's
+  own green, also C-GF-03's family accent — not a colour invented for this file), with white
+  (`colors.surface1`) text matching `SubmitButton`'s own text colour exactly.
+
+**Verification — measured.**
+
+- `npx tsc --noEmit` — exit 0.
+- The eight `c-line-traversal-*.test.ts` files in isolation: **81 tests, 81 passed, 0 failed** (up
+  from 80 — one new test pinning the position-derivation distinction).
+- Whole-suite `npm run test:contract`, immediately before this fix: **743 tests, 743 passed, 0
+  failed.** Immediately after: **744 tests, 744 passed, 0 failed.** Reconciles: `743 + 1 = 744`.
+- `npx expo export --platform ios` — re-run after these UI changes: succeeded, `dist/` removed after.
+- Scope unchanged from the entry above — same file family, nothing outside it touched.
+
+**What was NOT verified.** Same limitation as the entry above: nothing here can mount a React Native
+tree, so the vertical stacking, the green fill, and the auto-derived position have not been
+independently re-confirmed by a screenshot on this side — the user is checking directly in their own
+browser via the dev fixture already pointed at `C-JB-02`/`C-GF-05`.
+
+---
+
+## 2026-08-26 — fix: `JumpAccumulator` no longer pushes SUBMIT off-screen at a high jump count (10c correction 2)
+
+**Found by the user hand-testing at difficulty 1 after making many jumps** (a screenshot showed 32
+jump chips wrapped across six rows, SUBMIT clipped near the bottom edge). The chip list had no
+height bound, so every jump added grew the whole screen's layout — the exact "control grows past the
+visible area" failure this project already hit once, in 10a's entry slots at difficulty 5.
+
+**Fix.** `jump-accumulator.tsx`: the chip row is now inside a `ScrollView` capped at
+`JUMP_LIST_MAX_HEIGHT` (two chip-rows tall, derived from the same `TOKEN_TOUCH_TARGET_SIZE`/
+`TOKEN_SPACING` constants the chips themselves already used — not a new bare literal), so SUBMIT's
+screen position no longer depends on jump count at all. The list auto-scrolls to keep the most
+recent jump visible as it grows, mirroring `unit-stepper.tsx`'s own marker auto-scroll. Renders
+`null` when there are no jumps yet (nothing to scroll to).
+
+**Verification — measured.**
+
+- `npx tsc --noEmit` — exit 0.
+- The eight `c-line-traversal-*.test.ts` files in isolation: **81 tests, 81 passed, 0 failed**
+  (unchanged count — a layout fix with no new assertions written against it).
+- Whole-suite `npm run test:contract`: **744 tests, 744 passed, 0 failed** (unchanged).
+- `npx expo export --platform ios` — re-run after this fix and after an unrelated full
+  `node_modules` reinstall (see note below): succeeded, `dist/` removed after.
+- User confirmed in their own browser, at difficulty 1: SUBMIT stays fixed as jumps accumulate.
+
+**Unrelated note for the record:** between the previous entry and this one, `frontend/node_modules`
+was found empty (0 packages) mid-session, cause undetermined — neither the user nor this session's
+own actions were confirmed to have caused it. `npm install` (937 packages) restored it before this
+fix's own verification ran; the restore is not part of this diff (dependencies only, no
+`package.json`/lockfile change made here).
+
+**What was NOT independently verified.** SUBMIT's own press behaviour (whether the dev fixture
+completes and advances to a next task) has not been confirmed by the user as of this entry — asked,
+not yet answered. Marker auto-scroll at very high jump counts (e.g. difficulty 5's real maximum of
+18) has also not been specifically exercised; the difficulty-1 check that surfaced this fix only
+reached 32 jumps because difficulty 1's real jump count is small (2) and the child pressed jump +1
+many times past the mathematically required count, which the client does not gate.
+
+---
+
+## 2026-08-26 — 10c CLOSED: SUBMIT confirmed working, user satisfied with the full visual pass
+
+The user confirmed SUBMIT works correctly under the dev fixture (advances as expected) and that
+everything checked across difficulty 1 and 5 works properly. This closes 10c.
+
+**Final state:** `line-traversal` registered for `C-JB-02`; `C-JB-01`/`C-JB-03`/`C-JB-04` untouched,
+still `value-report` from 10b. `npx tsc --noEmit` clean, `npm run test:contract` 744/744/0,
+`npx expo export --platform ios` verified. `.env.local` (gitignored) currently points at
+`C-JB-02`/`C-GF-05`, difficulty 1 — left as-is, the user's call whether to reset it before the next
+sub-phase.
+
+**Full change list this sub-phase:** `line-traversal-logic.ts`, `line-traversal-surface.tsx`,
+`primitives/unit-stepper.tsx`, `primitives/jump-accumulator.tsx` (all new), one import + one
+`SURFACE_TABLE` entry in `archetype-surfaces.ts`, eight new test files. Three corrections landed
+during the user's own hand-testing pass, each logged above in its own entry: the redundant typed
+position field removed (auto-derived from the child's own jumps instead), the stepper controls
+restyled (vertical, green, white text) per direct request, and the jump-chip list capped with
+internal scroll so SUBMIT's position never depends on jump count.
+
+**Still open, not blocking:** marker auto-scroll has not been specifically exercised at a large
+*required* jump count (the frozen exemplar fixture's real maximums stay small, 1–3, across all five
+difficulty levels) — only at an artificially large count from tapping past the answer. Not treated
+as a gap in 10c's own scope, since the mechanism (`unit-stepper.tsx`'s `useEffect` on
+`forwardSteps`) is identical to the one already exercised in that same test, just not separately
+confirmed by eye at the larger end.
