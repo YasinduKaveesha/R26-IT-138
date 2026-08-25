@@ -420,7 +420,7 @@ export function LearnerHomeScreen() {
             <View style={styles.scrollContinuationFade7} />
           </Animated.View>
         )}
-        <LearnerTabBar activeTab="home" />
+        <LearnerTabBar activeTab="home" playEnabled />
       </View>
     </SafeAreaView>
   );

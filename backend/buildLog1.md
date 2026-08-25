@@ -10106,3 +10106,74 @@ looks right. The surface has still never been seen running by anything in this r
 backend suite was not re-run; this batch changes no backend file. Note that the standing 651 / 76 / 0
 figure is measured at `5d2c1ab` and does **not** account for the uncommitted `auth.py` clock-skew
 change sitting in the tree — measuring that is the backend batch's own job, not this one's.
+
+---
+
+## 2026-08-25 — FE-play-tab: the Play tab points at the Component C session screen, so a surface can finally be looked at
+
+**Provenance of this entry.** No builder ran for this batch. The four files were written in an
+earlier session, accepted by the owner, and left uncommitted in the working tree while two later
+batches (`2e986f0`, `facccb0`) landed around them. This entry and its verification are the
+supervisor's, written on taking over supervision at `facccb0`.
+
+**Why it exists, and why it is not cosmetic.** Ten batches into Phase 10, **nothing in this
+repository has ever rendered a Component C surface.** Every claim about the UI — the fail-closed
+frame, the technical-block screen, the digit keypad, the token row, motor constancy — rests on pure
+tests, source-text scans and a successful bundle. `expo export` proves a bundle builds; it does not
+prove a screen looks like anything. This batch is what makes looking possible.
+
+**What changed.** Four files, 15 insertions, 5 deletions, no design decisions.
+`app/(learner)/play.tsx` mounts `<CSessionScreen grade={2} sessionMode="c_only" />` where it
+previously mounted `LearnerEmptyTabScreen`. Three one-line companions add `playEnabled` to
+`<LearnerTabBar>` at its three call sites (`learner-home-screen.tsx`,
+`learner-empty-tab-screen.tsx`, `session-preparation-screen.tsx`), making the tab tappable
+everywhere.
+
+**The literals are marked temporary in the code, and that marking is load-bearing.** `play.tsx`
+carries a seven-line header comment stating that real grade and session-mode selection belongs to a
+future Component C batch, would come from the learner's actual classroom membership rather than a
+literal, and that `grade={2}` / `sessionMode="c_only"` exist to exercise archetype surfaces against
+the dev fixture. This is the caller `c-session-logic.ts`'s `decideSessionBootstrap` already
+anticipated in its own comment — that function deliberately never invents either value, and this
+route is exactly the kind of supplier it names. **10.0b-ii's open question "whatever supplies `grade`
+and `session_mode` in a running app" is answered temporarily and honestly, not silently.**
+
+**What this batch does NOT do.** It does not select a grade from real data. It does not touch the C
+session screen, the archetype layer, any surface, or any backend file. It adds no test — there is
+nothing here a test could assert that the existing suite does not already cover, and inventing one
+would be ceremony.
+
+**A measurement artefact found in this batch's own verification, recorded because it nearly produced
+a false defect.** The supervisor's first reading of the frontend suite was **477 tests, 476 pass, 1
+fail** — a different *collected count* and a failure, against a register that recorded 487/487/0.
+Re-measured three times with the runner's output redirected to a file rather than piped into a
+filtering `grep`: **487/487/0, stable.** The first reading was an artefact of the pipe — `grep`
+closing the pipe can SIGPIPE the test runner mid-flight, truncating the collected count and
+manufacturing a failure that no code caused. This project already documents "differing failures in
+differing positions across runs of identical code is a state signal, not a code signal"; this is a
+narrower instance with a specific cause, and the mitigation is mechanical: **redirect the runner to
+a file, then read the file.** Acting on the first reading would have sent a builder after a phantom.
+
+
+**Verification — supervisor's, measured.** Frontend contract suite: **487 tests, 487 passed, 0
+failed**, measured three times with the runner redirected to a file rather than piped. Unchanged
+from the `facccb0` baseline — this batch adds no test and removes none, so `487 + 0 = 487`
+reconciles trivially and the *absence* of movement is itself the signal. `npx tsc --noEmit` exit 0.
+`npx expo export --platform ios` exit 0 with the Play route in the graph; `dist/` removed after.
+
+Scope verified: `git diff --stat -- backend/` empty. Four files, 15 insertions, 5 deletions, all
+under `frontend/`. No archetype file, no C session screen, no generated module, no frozen artefact
+touched.
+
+**NOT verified, and this is the whole point of the batch.** No screen has been rendered. `expo
+export` builds a bundle; it does not run one. **The next action is `expo start` and looking at it** —
+`.env.local` is already `EXPO_PUBLIC_APP_ENV=development`,
+`EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE=active`, and
+`EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_TEMPLATE=C-NP-01`, so the Play tab will serve a real Number
+Path task through 10a's `ordered-value-sequence` surface. Whatever that reveals is a finding for a
+fix batch **before 10b**, on the reasoning that whatever 10a got wrong visually, the seven remaining
+family sub-phases will copy.
+
+The backend suite was not re-run: no backend file is touched. It stands at **651 / 76 / 0**,
+measured at `5d2c1ab`, and remains stale with respect to the uncommitted `auth.py` change that
+batch A4 owns.

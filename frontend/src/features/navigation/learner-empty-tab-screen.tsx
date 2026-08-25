@@ -9,7 +9,7 @@ export function LearnerEmptyTabScreen({ activeTab }: { activeTab: 'play' | 'prof
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.mobileCanvas}>
         <View style={styles.emptyContent} />
-        <LearnerTabBar activeTab={activeTab} />
+        <LearnerTabBar activeTab={activeTab} playEnabled />
       </View>
     </SafeAreaView>
   );
