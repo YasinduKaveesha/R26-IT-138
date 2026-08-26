@@ -24,12 +24,26 @@
 // THE FIXED/VARIABLE DISCRIMINANT IS TYPE-LEVEL, NEVER A TEMPLATE ID. `C-SF-02` also declares a
 // `list[int]` collection (`groups`) but ADDITIONALLY declares `submitted_group_count: int` -- the
 // child chooses the bin count there, which is a materially different scene this file does not
-// build (10h's own §2.3 falsification test: "a sub-phase whose scope says it introduces *nothing
-// new*" -- pre-building that path now would spoil the test). The presence of any `integer-field` key
-// alongside the collection is what routes to `null` here, following `value-report-logic.ts`'s own
-// sanctioned `C-TC-02` refusal pattern: a genuine, documented "route exists, surface not ready yet"
-// refusal, not a rule about C-SF-02's shape -- remove only this file's own said guard the moment
-// 10h answers the question, never change what the rest of this resolver checks.
+// build. The presence of any `integer-field` key alongside the collection is what routes to `null`
+// here, following `value-report-logic.ts`'s own sanctioned `C-TC-02` refusal pattern.
+//
+// 10H RULED ON THIS (§2.3's falsification test, owner decision, 2026-08-26): THE REFUSAL STAYS.
+// C-SF-02's `prompt_payload` is only `{group_size, total}` -- unlike `C-EG-01`/`C-SF-01`, it
+// declares NO bin-count key in `BIN_COUNT_KEY_VOCABULARY` at all. The bin count is the answer
+// (`total / group_size`, exact at every real difficulty level) and a declared `valid_action_space`
+// key. Deriving it client-side would compute an answer key and render exactly that many slots --
+// the same leak class `C-EG-02`'s `rows`/`cols` and `C-MCL-01`'s numeral-options path were built to
+// avoid, not the "one extra field, scene unchanged" shape §2.3 tested for. The only non-leaking
+// shape is a two-stage interaction (child enters the count, THEN fills that many bins), which
+// `DisplayWithEntryRow` cannot do at all -- `blanks` is read once in a `useState` lazy initializer,
+// never re-synced, with no add/remove affordance, and that primitive's own header commits to
+// UNMODIFIED reuse. That is a new interaction, not configuration -- C-18's claim ("a new template
+// within an existing archetype is configuration, not a new screen") is FALSIFIED by this one key,
+// even though it HELD for `submitted_group_count` itself (a genuine one-field extension, no
+// different from `C-JB-04`'s boolean in 10c). The full finding, with the specific configuration
+// points a variable-bin-count scene would need, is written to `backend/buildLog2.md`'s 10h entry --
+// this comment states the ruling, that entry states the reasoning. This guard is therefore
+// permanent, not provisional: do NOT remove it without a fresh owner ruling superseding this one.
 //
 // THE BIN COUNT IS READ FROM THE PAYLOAD BY NAME -- `number_of_groups` or `recipient_count` -- the
 // same by-name precedent `line-position-logic.ts` sets for `interval_max`/`target_position`.

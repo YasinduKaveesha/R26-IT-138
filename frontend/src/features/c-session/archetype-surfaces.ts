@@ -53,9 +53,13 @@ const SURFACE_TABLE: Partial<Record<ArchetypeId, ComponentType<ArchetypeSurfaceP
   'named-integer-fields': NamedIntegerFieldsSurface,
   // C-EG-01 (C-GF-07) alongside C-SF-01 (C-GF-08, registry.ts's own pre-existing mapping) -- one
   // resolver, no template branch, see partition-allocation-logic.ts's header. C-SF-02 also resolves
-  // to this archetype id but structurally fails closed (its `submitted_group_count: int` action key
-  // marks the variable-bin-count shape 10h, not this batch, builds) -- same class of refusal as
-  // named-integer-fields-logic.ts's own C-EG-02 refusal was, before this batch closed that one.
+  // to this archetype id but structurally fails closed on its extra `integer-field` action key.
+  // That refusal is PERMANENT as of 10h's ruling (2026-08-26), not the pending-a-later-batch kind
+  // named-integer-fields-logic.ts's C-EG-02 refusal turned out to be: C-SF-02 declares no bin-count
+  // payload key at all, so its bin count IS its answer, and no fixed-slot scene can render it
+  // without leaking that answer. C-18's "configuration, not a new screen" claim is falsified by this
+  // one template -- full finding, and the configuration points a future variable-bin-count scene
+  // would need, in backend/buildLog2.md's 10h entry.
   'partition-allocation': PartitionAllocationSurface,
 };
 

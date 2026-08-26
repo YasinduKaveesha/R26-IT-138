@@ -1,10 +1,20 @@
-// C-SF-02 also resolves to `partition-allocation` (registry.ts maps it there for 10h's own future
-// use), so registering this surface makes SF-02 reachable before 10h has designed for it. This file
-// pins down that it fails closed anyway -- structurally, on its own declared shape (an extra
-// `integer-field` key alongside the collection), never on a template-id refusal -- and pins WHY, so
-// the guard is not later "tidied away" as apparently redundant. See partition-allocation-logic.ts's
-// header, "THE FIXED/VARIABLE DISCRIMINANT IS TYPE-LEVEL, NEVER A TEMPLATE ID". Mirrors
-// c-named-integer-fields-eg02-fails-closed.test.ts's own convention for 10f's analogous case.
+// C-SF-02 resolves to `partition-allocation` (registry.ts maps it there), so registering that
+// surface makes SF-02 reachable. This file pins down that it fails closed anyway -- structurally, on
+// its own declared shape (an extra `integer-field` key alongside the collection), never on a
+// template-id refusal -- and pins WHY, so the guard is not later "tidied away" as apparently
+// redundant. See partition-allocation-logic.ts's header, "THE FIXED/VARIABLE DISCRIMINANT IS
+// TYPE-LEVEL, NEVER A TEMPLATE ID".
+//
+// 10H RULED THIS REFUSAL PERMANENT (2026-08-26). This file was originally written under 10f's
+// convention (c-named-integer-fields-eg02-fails-closed.test.ts), where the analogous C-EG-02 refusal
+// was provisional and a later batch duly closed it. C-SF-02's is NOT that kind: unlike C-EG-01 and
+// C-SF-01, it declares no bin-count key in `prompt_payload` at all, so the number of bins IS the
+// answer (and is itself a declared `valid_action_space` key). Rendering the right number of slots
+// would render the answer; deriving it from `total`/`group_size` would compute an answer key
+// client-side. That falsifies C-18's "a new template within an existing archetype is configuration,
+// not a new screen" -- the §2.3 falsification test finding, in backend/buildLog2.md's 10h entry.
+// These four tests are therefore a permanent guard, not a placeholder awaiting inversion: do not
+// delete or invert them without a fresh owner ruling superseding 10h's.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

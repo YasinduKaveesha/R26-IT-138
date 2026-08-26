@@ -1576,3 +1576,217 @@ rendering substitutes the shorter text.
 **What was NOT independently re-verified.** NP-02/NP-03 (10a's other two entry-scene templates) --
 they share `value-token-row.tsx`'s `display-with-entry` mode with NP-01, which WAS re-verified, but
 were not separately opened in the browser this session.
+
+## 2026-08-26 — 10h Share Fairly: C-18 FALSIFIED. The final sub-phase builds no screen and ships
+four findings instead.
+
+**What 10h delivers.** No new archetype, no new surface, no behaviour change of any kind. Source
+edits are comment-only. This was always the plan's shape -- 10h is the second falsification test of
+the two-layer rule (master work order §2.3) -- but the result is the one the sequence doc hoped to
+avoid and deliberately positioned to catch cheaply: **C-18's claim does not hold for `C-SF-02`.**
+
+**Already complete before this batch started, verified not re-derived.** `C-SF-01` shipped in 10g
+(browser-verified there). `C-SF-03` has resolved through `value-report` since 10b (registry.ts:46;
+five existing test files cover it: `c-value-report-{logic,key-set-proof,prompt-text,carries-
+interactive-assets}.test.ts` plus `c-payload-value-labels.test.ts`). **The registry-coverage test
+the work order assigns to 10h (§4, "the archetype registry's 30 entries must equal the id set in
+`c-template-registry.json`, written to fail loudly if the artefact is absent") already exists and
+passes** -- `c-archetype-resolution.test.ts:68-81`, asserting exact set equality with two negative
+controls (an added id and a removed id both break it), reading the artefact at module scope via
+`readFileSync` so an absent artefact throws rather than skipping. 10h verifies and cites it; writing
+a second one would have been duplication, not coverage. `C-SF-02` was therefore the entire remaining
+question.
+
+### FINDING 1 (headline) -- C-18 held for the key §2.3 named, and is FALSIFIED by a key no document anticipated
+
+C-18's claim (Master Build Plan v3.0:959-966): *"A new template within an existing archetype is
+configuration, not a new screen."* Sequence doc §3.5 predicted `C-SF-02` would confirm it, reasoning
+that `submitted_group_count` is *"a second report about that same partition, not a second
+interaction."*
+
+**That prediction is correct about the key it named, and wrong about the one it did not.**
+
+**Where C-18 HELD.** `submitted_group_count: int` really is trivial -- one additional declared key
+becomes one additional `DigitKeypad`-backed field, archetype scene untouched. This is structurally
+identical to `C-JB-04`'s `exchange_performed: bool` in 10c, which passed the same test. The
+two-layer rule itself is intact and is not what failed here.
+
+**Where C-18 is FALSIFIED -- the absent key.** Every other `partition-allocation` template declares
+its bin count in `prompt_payload`; `C-SF-02` does not declare one at all:
+
+| Template | `prompt_payload` | bin count |
+|---|---|---|
+| `C-EG-01` | `number_of_groups`, `group_size` | **given** (`number_of_groups`) |
+| `C-SF-01` | `recipient_count`, `total` | **given** (`recipient_count`) |
+| `C-SF-02` | `group_size`, `total` | **ABSENT** |
+
+Re-verified directly against all five difficulty levels of each: `C-SF-02`'s payload is exactly
+`{group_size, total}` at L1-L5 (`{2,4} {2,6} {3,9} {3,12} {4,20}`), matching neither name in
+`partition-allocation-logic.ts`'s own `BIN_COUNT_KEY_VOCABULARY` (`['number_of_groups',
+'recipient_count']`, line 63).
+
+**Why the absence is decisive rather than merely awkward.** `C-SF-02`'s `prompt_text` is *"Split the
+total into equal groups of the size shown. Write the groups you made."* Each bin's value is
+`group_size`, which IS given -- so **the number of bins is the answer**, and it is simultaneously a
+declared `valid_action_space` key (`submitted_group_count`). That produces a closed trap:
+
+- **Rendering the correct number of bins IS rendering the answer.** A fixed-slot scene that draws
+  the right count has already told the child what `submitted_group_count` is.
+- **Deriving it computes a declared answer key client-side.** `total / group_size` is exact at every
+  real level (4/2=2, 6/2=3, 9/3=3, 12/3=4, 20/4=5). Doing that arithmetic and rendering exactly that
+  many slots is the same leak class this codebase has already ruled against twice: `C-EG-02`'s
+  `rows`/`cols` (consumed as `ArrayGrid` dimensions rather than printed, precisely because they
+  double as answer keys) and `C-MCL-01`'s numeral-options path (10e-0). It is also flatly barred by
+  the archetype's own disclaimer -- master work order §3: *"No validation that groups are equal,
+  that a partition is exhaustive, or that a product is right. The client submits; the server
+  evaluates."*
+- **The only non-leaking shape is a two-stage interaction** -- the child enters the count first,
+  then fills that many bins -- **and `DisplayWithEntryRow` structurally cannot do it.** `blanks` is
+  read exactly once, in a `useState` lazy initializer (`value-token-row.tsx`: `useState<string[]>(()
+  => Array.from({ length: blanks }, () => ''))`), never re-synced on a prop change, with no
+  add-bin/remove-bin affordance anywhere in the component. That primitive's own header additionally
+  commits to being reused *unmodified* by `partition-allocation`.
+
+**A two-stage interaction is a new interaction, not configuration.** That is the falsification.
+
+**The specific configuration points a variable-bin-count scene would need** (recorded per the
+sequence doc's requirement that these be listed "either way", so a future batch starts from a spec
+rather than rediscovering this):
+
+1. A `value-token-row` mode -- or a new sibling primitive -- whose slot count is a controlled prop
+   re-synced on change, not a lazy-initialized constant. Whichever it is, `DisplayWithEntryRow`'s
+   unmodified-reuse commitment has to be renegotiated or explicitly narrowed.
+2. A two-stage submit gate: the count field must be answered before the bin row exists at all, so
+   the scene never renders a slot count the child did not choose.
+3. A resolver variant on `partition-allocation-logic.ts` that treats "collection key + integer-field
+   key, and NO payload bin-count key" as a distinct, buildable shape rather than the refusal it is
+   today -- keyed structurally on that key combination, never on a template id.
+4. A motor-constancy answer for a child-chosen bin count: `MAX_BINS = 12` today is a layout bound
+   over payload-supplied counts; a child-driven count needs its own bound and its own cost argument,
+   since adding bins one at a time is an interaction cost that scales with the answer's magnitude --
+   the same confound class as `C-MCL-04`'s tap count.
+5. An answer-leak guard equivalent to the ones `C-EG-02` and `C-MCL-01` already carry, asserting no
+   code path derives the bin count from `total`/`group_size`.
+
+**Correcting the record.** §3.5 grouped `C-SF-02`'s extra scalar with `C-CC-01`'s extra
+`submitted_total` and `C-JB-04`'s extra boolean and called all three "the identical case." They are
+not identical: the other two sit in scenes whose shape is fully determined by the payload, while
+`C-SF-02`'s scene shape is determined by its own answer. The risk was never the extra key §3.5
+named; it was the missing one it did not.
+
+**Ruling applied (owner, 2026-08-26): the refusal STAYS. No screen is built this batch.** Per §2.3,
+this is an owner finding, not a builder's to resolve. `partition-allocation-logic.ts`'s guard is now
+recorded as permanent rather than provisional-pending-10h.
+
+### FINDING 2 -- hub readiness overclaims: a family reads "Ready to play" while a template inside it fails closed
+
+`readinessOf` (`game-catalogue.ts`) computes readiness per ARCHETYPE, not per template: it maps the
+family's template ids to their archetype ids, then returns `'playable'` when
+`registered === archetypeIds.length`. A family therefore reads "Ready to play" as soon as every
+archetype it touches has a registered surface -- regardless of whether a specific template behind
+one of those archetypes fails closed on its own declared shape.
+
+**This is pre-existing and systemic, not introduced by 10g or 10h.** Two live instances, both
+confirmed by reading the code (`SURFACE_TABLE` now holds all 8 archetype ids):
+
+- **Card #6 "Take Away and Compare" (C-GF-06), since 10b.** All four templates map to
+  `value-report`, which is registered -- yet `C-TC-02` is explicitly refused inside
+  `value-report-logic.ts` pending the unresolved `directed`-flag question. The card has claimed
+  playable for one refused template for five sub-phases.
+- **Card #8 "Share Fairly" (C-GF-08), as of 10g.** Its templates span `partition-allocation` +
+  `value-report`; 10g registered the former and the latter has been registered since 10b, so both
+  are present and the card computes `'playable'` -- while `C-SF-02` fails closed, permanently as of
+  this batch's own Finding 1.
+
+**Recorded, deliberately not fixed** (owner ruling, 2026-08-26). Making the hub template-granular
+would require it to resolve each template's spec, which `game-catalogue.ts`'s own header argues
+against on separation grounds, and it interacts with Finding 1's still-open question about what
+`C-SF-02` should eventually become. **Not decided here:** whether the hub should show a partial
+state for these families, whether the affected templates should be delisted from their family's
+`templateIds` until buildable, or whether the overclaim is acceptable while Component C stays inert
+and no real child can reach it.
+
+### FINDING 3 -- correction to this register's own 10g entry
+
+The 10g entry states: *"Card #7 confirmed reading **Ready to play**; card #8 confirmed still
+not-ready."* **The second half is wrong.** By `readinessOf`'s archetype-granular logic (Finding 2),
+C-GF-08's two archetypes were both registered the moment 10g landed `partition-allocation`, so card
+#8 became `'playable'` in that same batch. The error came from a compound question whose "ok" was
+read as confirming both halves. Corrected here rather than by editing the 10g entry, since this
+register is append-only.
+
+### FINDING 4 -- the §7.1 standing obligation, discharged
+
+`Component_C_Frontend_Build_Steps.md` §7.1 (added 2026-08-26) carries the finding *"the server's
+verdict is computed, relayed, validated -- and thrown away"* and instructs: **"This finding must
+also be appended to `backend/buildLog2.md` at the next batch -- the documents in this folder are not
+in git, and the register is the only record that survives."** It was not present here. 10h is the
+last sub-phase, so this is the last chance to discharge it. Recorded now, in full substance:
+
+`CSubmitActionResult` carries `response_matched: boolean` (the server's correct/incorrect verdict)
+and `scaffold_level: string`. The client validates both -- `isCSubmitActionResult`
+(`src/api/runtime-validation.ts`), whose own comment reads *"the server's verdict, read and relayed,
+never computed"* -- and then **does nothing with either**: `handleSubmit`
+(`c-session-screen.tsx`) awaits `api.submitAction(...)` without assigning the result and calls
+`loadNextTask` immediately. No correct/incorrect display, no score, no "try again", no pause.
+Submitting a question fetches the next one.
+
+**This is unassigned, not deferred.** No sub-phase in 10a-10h scopes it; the sequence doc and master
+work order define every sub-phase in terms of archetypes and surfaces, and none mentions rendering
+the verdict. Component B's live-session screen DOES show outcomes, so C's silence is a divergence
+from this codebase's own pattern, not a house style. It stayed invisible because the development
+fixture returns a canned `response_matched: true` and re-serves the same task forever
+(`component-c-api.ts`, its own comment: *"a canned fixture value, not a computed verdict"*) -- every
+browser check to date ran against a loop that could not have shown a verdict even if the screen were
+wired for one.
+
+**Two rulings are needed, from two different owners.** (1) *Pedagogical/scientific:* whether a tool
+for children with dyscalculia should show immediate correct/incorrect at all -- immediate negative
+feedback to a child already struggling with number sense is exactly the class of decision this
+project escalates rather than settles in a builder's judgment; the question is not which colour the
+wrong answer is, but whether the wrong answer is named to the child at all. (2) *Backend contract:*
+**"try again" is not expressible as the contract stands** -- `CSubmitActionRequest` carries only
+`action_payload`, with no attempt number and no retry flag, and the exact-key-set rule forbids
+adding one. Since BKT conventionally scores on the FIRST attempt, a retry would either silently
+contaminate the model or require a contract change. A frontend "try again" built on today's contract
+would be a scientific defect wearing a UI.
+
+**Standing instruction, unchanged:** do not implement feedback, retry, scoring, or any persistence
+of `response_matched`. Do not delete the validator -- it is correct and will be needed. 10h did not
+touch `handleSubmit`.
+
+**Files (comment-only, no behaviour change):**
+- edit: `frontend/src/features/c-session/archetypes/partition-allocation-logic.ts` -- the refusal's
+  header comment now records the 10h ruling (permanent, not provisional) and its reasoning, replacing
+  the "remove only this file's own said guard the moment 10h answers the question" instruction that
+  a future builder would otherwise have followed into the leak.
+- edit: `frontend/src/features/c-session/archetype-surfaces.ts` -- the `partition-allocation` entry's
+  comment no longer describes C-SF-02's refusal as "the variable-bin-count shape 10h, not this batch,
+  builds".
+- edit: `frontend/src/api/__tests__/c-partition-allocation-sf02-fails-closed.test.ts` -- header
+  updated to record that this file now pins a RULED, permanent refusal rather than a
+  pending-10h one. No assertion changed; the file's four tests are exactly the right permanent guard
+  for the ruling and needed no edit.
+- edit: `backend/buildLog2.md` -- this entry.
+- edit (not in git): `Component_C_Frontend/INDEX.md`, `Component_C_Frontend_Build_Steps.md` -- state
+  sections refreshed; both still claimed "10e-10h are not started" and "4 of 8 entries populated"
+  when the real state is 8 of 8 registered and 10b-10g all landed.
+
+**Verification -- measured.**
+- `npx tsc --noEmit` -- exit 0.
+- `npm run test:contract` -- **1298 tests, 1298 passed, 0 failed**, identical to the pre-batch
+  baseline measured at `c52c1e9`. Unchanged is the correct outcome and the point: every edit this
+  batch is a comment, and a changed count would have meant an accidental behaviour change.
+- `C-SF-02`'s refusal re-confirmed still firing at all five difficulty levels by its own existing
+  test file, unmodified.
+- `npx expo export --platform ios` -- succeeded; `dist/` removed after.
+- No git command run; the owner commits.
+
+**What was NOT verified.** No browser check this batch -- nothing renders differently, since no
+executable line changed. Findings 2 and 3 were settled from the code path (`readinessOf`'s
+`registered === archetypeIds.length` branch, against a `SURFACE_TABLE` now holding all eight
+archetype ids) rather than by opening the hub, on an explicit owner ruling that the code evidence
+was sufficient. Finding 1's claim that a two-stage interaction is the ONLY non-leaking shape is a
+reasoned argument from the payload and the primitive's structure, not an exhaustively enumerated
+proof -- if someone finds a leak-free single-stage scene, that would overturn the falsification and
+should be recorded as such.
