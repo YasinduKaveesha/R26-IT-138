@@ -1,23 +1,18 @@
-// C-EG-02 also resolves to `named-integer-fields` (registry.ts maps it there for 10g's own future
-// use), so registering `named-integer-fields-surface.tsx` in SURFACE_TABLE this batch makes EG-02
-// reachable before 10g has designed for it. This file pins down that it fails closed anyway --
-// structurally, on its own wire shape, never on a template-id refusal -- and pins WHY, so the guard
-// is not later "tidied away" as apparently redundant. See named-integer-fields-logic.ts's header,
-// "C-EG-02 REACHES THIS ARCHETYPE AND FAILS CLOSED HERE, STRUCTURALLY".
+// NAMED EXCEPTION (10g): this file previously asserted C-EG-02 fails closed at every difficulty
+// level. That fact is exactly what this batch changes -- C-EG-02 is now a supported, second scene
+// of `named-integer-fields`, reading `rows`/`cols` structurally as the array grid's dimensions and
+// admitting `direction` as a single named string exception (see named-integer-fields-logic.ts's own
+// header, "C-EG-02 IS SUPPORTED HERE"). The file is inverted here rather than deleted, following
+// 10d's own `c-mcl-family-surface-registration.test.ts` precedent for the identical situation: the
+// tests below now assert C-EG-02 RESOLVES, with the corrected reasoning documented alongside each.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import type { CNextTaskResponse } from '@/src/api/generated/openapi-types';
 import { EXEMPLAR_ENTRIES } from '@/src/api/generated/c-prompt-exemplars';
 import { resolveArchetype } from '@/src/features/c-session/archetypes/registry';
 import { resolveNamedIntegerFieldsSpec } from '@/src/features/c-session/archetypes/named-integer-fields-logic';
-
-const here = dirname(fileURLToPath(import.meta.url));
 
 const EG02_ENTRIES = EXEMPLAR_ENTRIES.filter((entry) => entry.game_task_template_id === 'C-EG-02');
 
@@ -47,35 +42,64 @@ test('C-EG-02 has 5 exemplar rows and resolves to the named-integer-fields arche
   assert.equal(resolveArchetype('C-EG-02', entry.valid_action_space), 'named-integer-fields');
 });
 
-// A surface IS registered for named-integer-fields by this batch -- EG-02 therefore genuinely
-// reaches this resolver, not a missing-surface fail-closed. Checked by reading archetype-surfaces.ts
-// as text rather than importing it: that module pulls in real React Native surface components, which
-// esbuild/node --test cannot transform (react-native's own index.js uses Flow syntax), so every pure
-// resolver test file in this project avoids importing it directly -- the same constraint
-// game-catalogue.ts's own header documents for readinessOf.
-test('archetype-surfaces.ts registers a SURFACE_TABLE entry for named-integer-fields (source check, not a runtime import)', () => {
-  const source = readFileSync(
-    resolve(here, '..', '..', 'features', 'c-session', 'archetype-surfaces.ts'),
-    'utf-8',
-  );
-  assert.match(source, /'named-integer-fields':\s*NamedIntegerFieldsSurface/);
-});
-
-test('C-EG-02 nonetheless fails closed at every difficulty level, because its prompt_payload carries a non-number value (direction)', () => {
+test('C-EG-02 resolves at every difficulty level (10g reverses 10f\'s own deliberate refusal, having built the grid the payload/action-key overlap required)', () => {
   for (const entry of EG02_ENTRIES) {
-    const payload = entry.prompt_payload as Record<string, unknown>;
-    assert.equal(typeof payload.direction, 'string', `level ${entry.difficulty_level}: expected direction to be a string in the real data`);
     const spec = resolveNamedIntegerFieldsSpec(makeTask(entry));
-    assert.equal(spec, null, `C-EG-02 level ${entry.difficulty_level} should fail closed`);
+    if (spec === null) {
+      assert.fail(`C-EG-02 level ${entry.difficulty_level} should resolve now`);
+      continue;
+    }
+    const payload = entry.prompt_payload as { rows: number; cols: number; direction: string };
+    assert.deepEqual(spec.grid, { rows: payload.rows, cols: payload.cols }, `level ${entry.difficulty_level}`);
+    assert.equal(spec.direction, payload.direction, `level ${entry.difficulty_level}`);
+    assert.equal(spec.promptText, entry.prompt_text);
   }
 });
 
-test("the refusal is structural (the numbers-only payload guard), not a game_task_template_id === 'C-EG-02' branch", () => {
-  const task = makeTask(EG02_ENTRIES[0]!);
-  // Strip the offending non-number key and confirm resolution would otherwise SUCCEED -- proving
-  // the refusal traces to that one guard, not to template-id special-casing anywhere in the file.
-  const { direction: _direction, ...numbersOnlyPayload } = task.prompt_payload as Record<string, unknown>;
-  task.prompt_payload = numbersOnlyPayload;
-  const spec = resolveNamedIntegerFieldsSpec(task);
-  assert.notEqual(spec, null, 'with the non-number key removed, the same C-EG-02 task resolves fine -- proving no template-id refusal exists');
+test('difficulty 1-4 carry direction "read"; difficulty 5 alone carries "build", matching the real data\'s own asymmetry', () => {
+  const directions = EG02_ENTRIES.map((entry) => (entry.prompt_payload as { direction: string }).direction);
+  assert.deepEqual(directions, ['read', 'read', 'read', 'read', 'build']);
+});
+
+test('difficulty 5\'s prompt_text differs from L1-4\'s ("Build the array shown." vs the "Tell how many..." copy) and both survive resolution unchanged', () => {
+  const l4 = EG02_ENTRIES[3]!;
+  const l5 = EG02_ENTRIES[4]!;
+  assert.notEqual(l4.prompt_text, l5.prompt_text);
+  assert.equal(l5.prompt_text, 'Build the array shown.');
+  const specL4 = resolveNamedIntegerFieldsSpec(makeTask(l4));
+  const specL5 = resolveNamedIntegerFieldsSpec(makeTask(l5));
+  assert.notEqual(specL4, null);
+  assert.notEqual(specL5, null);
+  assert.equal(specL4!.promptText, l4.prompt_text);
+  assert.equal(specL5!.promptText, l5.prompt_text);
+});
+
+test('rows and cols never appear in payloadValues for C-EG-02 (consumed structurally by spec.grid instead)', () => {
+  for (const entry of EG02_ENTRIES) {
+    const spec = resolveNamedIntegerFieldsSpec(makeTask(entry));
+    assert.notEqual(spec, null);
+    const payloadKeys = spec!.payloadValues.map((v) => v.key);
+    assert.equal(payloadKeys.includes('rows'), false);
+    assert.equal(payloadKeys.includes('cols'), false);
+    assert.deepEqual(spec!.payloadValues, [], `level ${entry.difficulty_level}: C-EG-02 has no payload key outside rows/cols/direction`);
+  }
+});
+
+test('C-EG-02 still resolves exactly 3 integer fields (rows, cols, submitted_product), same two-layer rule as every other named-integer-fields template', () => {
+  for (const entry of EG02_ENTRIES) {
+    const spec = resolveNamedIntegerFieldsSpec(makeTask(entry));
+    assert.notEqual(spec, null);
+    assert.equal(spec!.fields.length, 3, `level ${entry.difficulty_level}`);
+    assert.deepEqual(spec!.fields.map((f) => f.key).sort(), ['cols', 'rows', 'submitted_product']);
+  }
+});
+
+test('C-BT-01..04 are unaffected: grid and direction are both null for them', () => {
+  const btEntries = EXEMPLAR_ENTRIES.filter((entry) => ['C-BT-01', 'C-BT-02', 'C-BT-03', 'C-BT-04'].includes(entry.game_task_template_id));
+  for (const entry of btEntries) {
+    const spec = resolveNamedIntegerFieldsSpec(makeTask(entry));
+    assert.notEqual(spec, null);
+    assert.equal(spec!.grid, null, `${entry.game_task_template_id} level ${entry.difficulty_level}`);
+    assert.equal(spec!.direction, null, `${entry.game_task_template_id} level ${entry.difficulty_level}`);
+  }
 });

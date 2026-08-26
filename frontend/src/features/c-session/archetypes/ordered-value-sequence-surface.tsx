@@ -120,11 +120,15 @@ function ArrangeSceneSurface({ onSubmit, spec }: ArrangeSceneSurfaceProps) {
   };
 
   return (
-    <View style={styles.container}>
-      <AppText style={styles.promptText} variant="title">
-        {spec.promptText}
-      </AppText>
-      <ValueTokenRow mode="reorder" onChangeOrder={setOrder} values={order} />
+    <View style={styles.arrangeContainer}>
+      <View style={styles.arrangeTopBlock}>
+        <AppText style={styles.promptText} variant="title">
+          {spec.promptText}
+        </AppText>
+        <View style={styles.arrangeRowWrapper}>
+          <ValueTokenRow mode="reorder" onChangeOrder={setOrder} values={order} />
+        </View>
+      </View>
       {spec.extraFields.map((field) => (
         <GenericExtraField
           field={field}
@@ -222,6 +226,31 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     justifyContent: 'space-between',
     padding: spacing.lg,
+  },
+  // The arrange (NP-04) scene's own layout, scoped apart from `container`/`promptText` above
+  // (still used unchanged by the entry scene, NP-01..03) -- 2026-08-26 correction, found by the
+  // owner testing NP-04 in the browser. `container`'s `flex: 1` + `justifyContent: 'space-between'`
+  // distributes ALL leftover vertical space into the ONE gap between the prompt and the token row
+  // (there being only one middle child), which is what produced the large empty bands above and
+  // below the row the owner flagged. This scene instead packs its content from the top with small,
+  // fixed gaps (`arrangeContainer`'s own `gap`, `arrangeTopBlock`'s own `gap` and `marginTop`) and
+  // leaves any true leftover height at the BOTTOM of the screen, below SUBMIT, rather than
+  // distributing it as floating whitespace between the question and the cards.
+  arrangeContainer: {
+    flex: 1,
+    gap: spacing.lg / 2,
+    padding: spacing.lg,
+  },
+  // Groups the prompt and the token row at a small, fixed gap, with a small top margin so the
+  // prompt sits slightly lower than the very top edge (2026-08-26 request).
+  arrangeTopBlock: {
+    gap: spacing.lg / 2,
+    marginTop: spacing.lg / 2,
+  },
+  // Centers the (horizontally-scrolling) token row within the card's own width (2026-08-26
+  // request) -- `ValueTokenRow`'s own `reorder` mode content otherwise left-aligns.
+  arrangeRowWrapper: {
+    alignItems: 'center',
   },
   pressed: { opacity: 0.72 },
   // Half of typography.fontSize.title / lineHeight.title (40/46), per instruction.

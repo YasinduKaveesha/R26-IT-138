@@ -74,3 +74,16 @@ export const OBJECT_TOKEN_SPACING = 6;
 // the keys stay square either way -- the same `aspectRatio: 1` that guarantees squareness at the
 // small end guarantees it at this end too.
 export const KEYPAD_KEY_MAX_SIZE = 64;
+
+// `array-grid.tsx`'s own per-cell size (10g, C-EG-02). A PASSIVE, READ-ONLY display -- never
+// pressed -- so SPEC section 10's 48px interactive-touch-target floor does not govern it, matching
+// `object-quantity-display.tsx`'s own stated precedent ("SPEC section 10 governs interactive
+// geometry... it says nothing about a label a child never presses"). Kept as its own constant pair
+// rather than reused from `OBJECT_TOKEN_SIZE` (a different, already-distinct passive primitive),
+// for the same reason `OBJECT_TOKEN_SIZE` itself is kept apart from `TOKEN_TOUCH_TARGET_SIZE` /
+// `STEP_TOUCH_TARGET_SIZE`: a third conceptually distinct primitive gets a third pair. Sized so a
+// real grid up to 5x5 (the observed maximum) renders as a small, legible square block rather than
+// spanning the card's own width.
+export const GRID_CELL_SIZE = 32;
+
+export const GRID_CELL_SPACING = 4;

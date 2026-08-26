@@ -51,6 +51,12 @@ const FRIENDLY_LABELS: Record<string, string> = {
   // enters the AFTER state, and two unqualified "Tens" labels on one screen would be ambiguous.
   pre_tens: 'Tens to start',
   pre_ones: 'Ones to start',
+  // `partition-allocation` (10g, C-EG-01/C-SF-01). The bin-COUNT payload keys
+  // (`number_of_groups`/`recipient_count`) are excluded from `payloadValues` entirely, consumed
+  // structurally by partition-allocation-logic.ts -- see that file's header. `group_size` and
+  // `total` are the only payload keys that ever reach this table for these two templates.
+  group_size: 'Size of each group',
+  total: 'Total',
 };
 
 function humanizeKey(key: string): string {

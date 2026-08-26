@@ -89,8 +89,12 @@ test("C-BT-02's target_number grows across difficulty 1-5, yet the field COUNT s
 
   const source = readFileSync(resolve(featureDir, 'archetypes', 'named-integer-fields-surface.tsx'), 'utf-8');
   assert.match(source, /from '@\/src\/features\/c-session\/primitives\/named-field-row'/);
+  // Two legitimate call sites (10g): the generic wrapped row (mapped over orderedFields, used by
+  // C-BT-01..04) and C-EG-02's own equation row (`EquationFieldsRow`'s `renderBox` helper, called
+  // three times at runtime for cols/rows/submitted_product but written once in source) -- neither is
+  // one-per-field hardcoded.
   const boxJsxCount = (source.match(/<NamedFieldBox\b/g) ?? []).length;
-  assert.equal(boxJsxCount, 1, 'exactly one NamedFieldBox JSX call site, mapped over orderedFields -- not one per field hardcoded');
+  assert.equal(boxJsxCount, 2, 'exactly two NamedFieldBox JSX call sites: the generic row and the equation row\'s shared renderBox helper');
 });
 
 test('named-integer-fields-logic.ts MAX_FIELDS comfortably exceeds the real maximum field count observed across all four C-BT-* templates', () => {

@@ -43,6 +43,14 @@
 // computed from another's; and SUBMIT is NOT gated on the fields decomposing `target_number` or
 // correctly effecting the trade. `c-named-integer-fields-no-client-arithmetic.test.ts` holds that
 // line.
+//
+// C-EG-02 (10g) RENDERS `ArrayGrid` IN PLACE OF THE GIVEN-VALUE ROW, WHEN `spec.grid !== null`.
+// `spec.grid.rows`/`.cols` reach exactly one place in this file -- `ArrayGrid`'s own props -- and
+// are never rendered as text: see named-integer-fields-logic.ts's own header for why printing either
+// would leak 2 of the 3 answers (both are simultaneously GIVEN and declared `valid_action_space`
+// keys here). `spec.direction` is likewise carried through resolution but rendered NOWHERE in this
+// file and branched on NOWHERE -- 10a's own standing ruling for `C-NP-04.direction`, applied
+// unchanged. `c-named-integer-fields-no-dimension-leak.test.ts` holds both lines.
 
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -53,6 +61,7 @@ import { resolveNamedIntegerFieldsSpec } from '@/src/features/c-session/archetyp
 import { FailClosedFrame } from '@/src/features/c-session/fail-closed-frame';
 import { accentForGameFamily } from '@/src/features/c-session/game-family-accents';
 import { TOKEN_SPACING, TOKEN_TOUCH_TARGET_SIZE, HIT_SLOP } from '@/src/features/c-session/motor-constants';
+import { ArrayGrid } from '@/src/features/c-session/primitives/array-grid';
 import { DigitKeypad } from '@/src/features/c-session/primitives/digit-keypad';
 import {
   NamedFieldBox,
@@ -153,40 +162,114 @@ function NamedIntegerFieldsScene({ accent, onSubmit, spec }: NamedIntegerFieldsS
           <AppText style={styles.promptText} variant="title">
             {spec.promptText}
           </AppText>
-          <View style={styles.payloadRow}>
-            {orderedPayloadValues.map((payloadValue, index) => (
-              <View key={`${payloadValue.key}-${index}`} style={styles.payloadColumn}>
-                <View style={styles.payloadLabelBlock}>
-                  <AppText style={[styles.payloadLabel, { color: accent }]}>{payloadValue.label}</AppText>
+          {spec.grid !== null ? (
+            // C-EG-02 only. `spec.grid.rows`/`.cols` reach exactly this one place -- ArrayGrid's own
+            // props -- and are never rendered as text anywhere in this file; see the header's
+            // "C-EG-02 IS SUPPORTED HERE" paragraph and c-named-integer-fields-no-dimension-leak.test.ts.
+            <View style={styles.gridWrapper}>
+              <ArrayGrid accent={accent} cols={spec.grid.cols} rows={spec.grid.rows} />
+            </View>
+          ) : (
+            <View style={styles.payloadRow}>
+              {orderedPayloadValues.map((payloadValue, index) => (
+                <View key={`${payloadValue.key}-${index}`} style={styles.payloadColumn}>
+                  <View style={styles.payloadLabelBlock}>
+                    <AppText style={[styles.payloadLabel, { color: accent }]}>{payloadValue.label}</AppText>
+                  </View>
+                  <View style={styles.payloadToken}>
+                    <AppText style={styles.payloadTokenText}>{payloadValue.value}</AppText>
+                  </View>
                 </View>
-                <View style={styles.payloadToken}>
-                  <AppText style={styles.payloadTokenText}>{payloadValue.value}</AppText>
+              ))}
+            </View>
+          )}
+        </View>
+        {spec.grid !== null ? (
+          <EquationFieldsRow accent={accent} entry={entry} fields={spec.fields} />
+        ) : (
+          <View style={styles.fieldsRow}>
+            {orderedFields.map((field) => (
+              <View key={field.key} style={styles.payloadColumn}>
+                <NamedFieldBox
+                  accent={accent}
+                  field={field}
+                  focused={entry.focusedKey === field.key}
+                  onPress={() => entry.setFocusedKey(field.key)}
+                  value={entry.buffers[field.key] ?? ''}
+                />
+                <View style={styles.payloadLabelBlockBelow}>
+                  <AppText style={[styles.payloadLabel, { color: accent }]}>{field.label}</AppText>
                 </View>
               </View>
             ))}
           </View>
-        </View>
-        <View style={styles.fieldsRow}>
-          {orderedFields.map((field) => (
-            <View key={field.key} style={styles.payloadColumn}>
-              <NamedFieldBox
-                accent={accent}
-                field={field}
-                focused={entry.focusedKey === field.key}
-                onPress={() => entry.setFocusedKey(field.key)}
-                value={entry.buffers[field.key] ?? ''}
-              />
-              <View style={styles.payloadLabelBlockBelow}>
-                <AppText style={[styles.payloadLabel, { color: accent }]}>{field.label}</AppText>
-              </View>
-            </View>
-          ))}
-        </View>
+        )}
       </View>
       <View style={styles.keypadWrapper}>
         <DigitKeypad onDelete={entry.handleDelete} onDigit={entry.handleDigit} />
       </View>
       <SubmitButton disabled={!canSubmit} onPress={handleSubmitPress} />
+    </View>
+  );
+}
+
+// A DISPLAY-ONLY override, scoped to this one component, for this one key -- the resolver's own
+// `spec.fields` label for `submitted_product` stays "Submitted Product" (humanizeActionKey's
+// mechanical output, unchanged, still what every other consumer of `spec.fields` sees); this row
+// alone shows the shorter "Product" so the equation reads "Cols x Rows = Product" without the long
+// label forcing this row to wrap (2026-08-26 request, found by the owner testing C-EG-02: the
+// unabbreviated label was wide enough to push a 3rd column onto its own line). A narrow, named
+// exception over a single real key, the same shape as `displayOrder`'s own PLACE_VALUE_RANK
+// override above -- cosmetic only, never touching what is submitted or what `spec.fields` itself
+// reports.
+const EQUATION_FIELD_LABEL_OVERRIDE: Record<string, string> = {
+  submitted_product: 'Product',
+};
+
+type EquationFieldsRowProps = {
+  accent: string;
+  fields: readonly NamedField[];
+  entry: ReturnType<typeof useNamedFieldEntry>;
+};
+
+// C-EG-02's own field layout: "Cols x Rows = Product", one row, three same-size boxes, never
+// wrapping -- see the header's own "C-EG-02 IS SUPPORTED HERE" paragraph for why this scene renders
+// differently from the generic wrapped `fieldsRow` every other named-integer-fields template uses.
+function EquationFieldsRow({ accent, entry, fields }: EquationFieldsRowProps) {
+  const colsField = fields.find((field) => field.key === 'cols');
+  const rowsField = fields.find((field) => field.key === 'rows');
+  const productField = fields.find((field) => field.key === 'submitted_product');
+
+  // Every real C-EG-02 exemplar declares exactly these three keys (see
+  // c-named-integer-fields-eg02-fails-closed.test.ts); a task that reaches this branch
+  // (`spec.grid !== null`) but is missing one is a corrupted shape this component cannot render --
+  // fail closed rather than guess at a partial equation.
+  if (colsField === undefined || rowsField === undefined || productField === undefined) {
+    return null;
+  }
+
+  const renderBox = (field: NamedField, labelOverride?: string) => (
+    <View style={styles.equationColumn}>
+      <NamedFieldBox
+        accent={accent}
+        field={field}
+        focused={entry.focusedKey === field.key}
+        onPress={() => entry.setFocusedKey(field.key)}
+        value={entry.buffers[field.key] ?? ''}
+      />
+      <View style={styles.payloadLabelBlockBelow}>
+        <AppText style={[styles.payloadLabel, { color: accent }]}>{labelOverride ?? field.label}</AppText>
+      </View>
+    </View>
+  );
+
+  return (
+    <View style={styles.equationRow}>
+      {renderBox(colsField)}
+      <AppText style={[styles.equationOperator, { color: accent }]}>x</AppText>
+      {renderBox(rowsField)}
+      <AppText style={[styles.equationOperator, { color: accent }]}>=</AppText>
+      {renderBox(productField, EQUATION_FIELD_LABEL_OVERRIDE.submitted_product)}
     </View>
   );
 }
@@ -225,6 +308,26 @@ const styles = StyleSheet.create({
     gap: TOKEN_SPACING,
     justifyContent: 'center',
     rowGap: TOKEN_SPACING * 1.5,
+  },
+  // C-EG-02 only. Deliberately NOT `flexWrap: 'wrap'`: three same-size boxes plus two operator
+  // glyphs comfortably fit one line once `EQUATION_FIELD_LABEL_OVERRIDE` shortens the widest label
+  // ("Submitted Product" -> "Product") -- the wrap this row would otherwise need was the actual bug
+  // the owner flagged, not a case §5.1's "wrap rather than compress" doctrine should cover.
+  equationRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: TOKEN_SPACING / 2,
+    justifyContent: 'center',
+  },
+  // No `minWidth` (unlike `payloadColumn`): all three boxes are the same fixed size regardless
+  // (NamedFieldBox's own FIELD_BOX_SIZE), so nothing here needs to resist shrinking.
+  equationColumn: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  equationOperator: {
+    fontFamily: typography.fonts.bold,
+    fontSize: typography.fontSize.lg,
   },
   // Groups the prompt block and the fields row at half the container's own gap (2026-08-26
   // request), so the fields sit close under the given number rather than at the container's normal
@@ -277,6 +380,10 @@ const styles = StyleSheet.create({
     gap: TOKEN_SPACING,
     justifyContent: 'center',
     rowGap: TOKEN_SPACING * 1.5,
+  },
+  // C-EG-02 only: centers ArrayGrid in place of the (otherwise-empty) payload-token row.
+  gridWrapper: {
+    alignItems: 'center',
   },
   // Groups the prompt and the GIVEN value(s) alone, at half the container's own gap (2026-08-26
   // request), separate from the entry-fields row below -- see the header's "TWO ROWS" note.

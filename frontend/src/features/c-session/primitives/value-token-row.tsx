@@ -38,10 +38,28 @@ import {
   HIT_SLOP,
   TOKEN_SPACING,
   TOKEN_TOUCH_TARGET_SIZE,
+  TOUCH_TARGET_MIN_SIZE,
 } from '@/src/features/c-session/motor-constants';
 import { colors, radius, typography } from '@/src/theme/tokens';
 
-const TOKEN_STRIDE = TOKEN_TOUCH_TARGET_SIZE + TOKEN_SPACING;
+// TWO DIFFERENT TOKEN SIZES, SPLIT DELIBERATELY (2026-08-26). `display-with-entry`'s shown/entry
+// tokens (NP-01..03, and `partition-allocation`'s reuse of this mode -- 10g) are pinned to
+// TOUCH_TARGET_MIN_SIZE (48, SPEC section 10's own accessibility floor): the owner found
+// `partition-allocation`'s C-EG-01 at difficulty 5 needed all 5 entry slots to fit one row on a
+// typical phone width, and this is the smallest a touch-pressed token is allowed to shrink to.
+// `reorder`'s draggable tokens (NP-04 only) stay at the ORIGINAL, larger TOKEN_TOUCH_TARGET_SIZE
+// (56): the owner separately asked for NP-04's own cards to be "a bit bigger" once shown at 48px,
+// and NP-04 typically renders only 3-4 tokens with comfortable room, unlike partition-allocation's
+// worst case. These are genuinely different scenes with different fit constraints, not one style a
+// single constant should serve -- forcing them to share a number is what caused this back-and-forth
+// in the first place. `TOKEN_STRIDE` (driving the reorder-mode drag gesture's slot-movement math)
+// is derived from `TOKEN_TOUCH_TARGET_SIZE` specifically, matching the size the DRAGGED token
+// actually renders at -- an latent bug from this file's brief single-constant period, where
+// `TOKEN_STRIDE` would have silently used the wrong token's size the moment the two sizes diverged.
+const ENTRY_TOKEN_SIZE = TOUCH_TARGET_MIN_SIZE;
+const REORDER_TOKEN_SIZE = TOKEN_TOUCH_TARGET_SIZE;
+
+const TOKEN_STRIDE = REORDER_TOKEN_SIZE + TOKEN_SPACING;
 
 type DisplayWithEntryProps = {
   mode: 'display-with-entry';
@@ -113,7 +131,7 @@ function DisplayWithEntryRow({
           however many shown values are left over, instead of stranding them below alone. */}
       <View style={styles.entryTokenRow}>
         {shownSequence.map((value, index) => (
-          <View key={`shown-${index}`} style={styles.token}>
+          <View key={`shown-${index}`} style={[styles.token, styles.entryTokenSize]}>
             <AppText style={styles.tokenText}>{value}</AppText>
           </View>
         ))}
@@ -127,6 +145,7 @@ function DisplayWithEntryRow({
             onPress={() => setFocusedSlot(slotIndex)}
             style={[
               styles.token,
+              styles.entryTokenSize,
               styles.entrySlot,
               focusedSlot === slotIndex && styles.entrySlotFocused,
             ]}>
@@ -215,7 +234,7 @@ function DraggableToken({ disabled, index, onDrop, total, value }: DraggableToke
       <Animated.View
         accessibilityLabel={`value ${value}, position ${index + 1} of ${total}`}
         accessibilityRole="adjustable"
-        style={[styles.token, styles.reorderToken, animatedStyle]}>
+        style={[styles.token, styles.reorderTokenSize, styles.reorderToken, animatedStyle]}>
         <AppText style={styles.tokenText}>{value}</AppText>
       </Animated.View>
     </GestureDetector>
@@ -242,11 +261,24 @@ const styles = StyleSheet.create({
   // DisplayWithEntryRow's single row: shown tokens then entry slots, wrapping onto further lines
   // rather than scrolling. Named apart from `row` below (ReorderRow's ScrollView content style,
   // which must NOT wrap -- it is a single horizontally-scrolling line) so the two never collide.
+  //
+  // Gap halved from TOKEN_SPACING (2026-08-26 request, found by the owner testing
+  // `partition-allocation`'s C-EG-01 at difficulty 5 -- 5 entry slots at the full gap wrapped to
+  // 4+1 on a typical phone width). A SHARED style: this also governs NP-01..04's own entry slots
+  // (10a), re-verified in the browser as part of this change per the owner's own explicit choice,
+  // rather than forked into a second, archetype-scoped constant -- one primitive, one look, per
+  // master work order §5A. Still a constant, never a function of token count or `difficulty_level`.
   entryTokenRow: {
     alignItems: 'center',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: TOKEN_SPACING,
+    gap: TOKEN_SPACING / 2,
+    // Centers the row horizontally (2026-08-26 request, found by the owner testing C-SF-01: a
+    // short row -- 2 entry slots, no shown values -- otherwise left-aligns against the card's own
+    // edge rather than sitting under the centered prompt/payload token above it). A SHARED style:
+    // this also governs NP-01..03's own entry rows (10a), re-verified in the browser as part of
+    // this change.
+    justifyContent: 'center',
     paddingVertical: TOKEN_SPACING,
   },
   row: {
@@ -255,13 +287,21 @@ const styles = StyleSheet.create({
     gap: TOKEN_SPACING,
     paddingVertical: TOKEN_SPACING,
   },
+  // Size-less base shape, shared by both modes. Size itself comes from `entryTokenSize` or
+  // `reorderTokenSize` below -- see this file's header for why the two are deliberately different.
   token: {
     alignItems: 'center',
     borderRadius: radius.md,
     borderWidth: 2,
-    height: TOKEN_TOUCH_TARGET_SIZE,
     justifyContent: 'center',
-    width: TOKEN_TOUCH_TARGET_SIZE,
+  },
+  entryTokenSize: {
+    height: ENTRY_TOKEN_SIZE,
+    width: ENTRY_TOKEN_SIZE,
+  },
+  reorderTokenSize: {
+    height: REORDER_TOKEN_SIZE,
+    width: REORDER_TOKEN_SIZE,
   },
   tokenText: {
     fontFamily: typography.fonts.bold,

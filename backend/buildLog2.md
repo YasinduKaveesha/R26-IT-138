@@ -1340,3 +1340,239 @@ box size; only the row's own WIDTH grows with column count, never any one target
 every file this batch touches or introduces is new or owned solely by this archetype
 (`archetype-surfaces.ts` and `payload-value-labels.ts` were edited additively, one entry each, with
 no existing entry altered). The backend suite was not re-run -- no backend file changed.
+
+---
+
+## 2026-08-26 — FE-B-session-ui: Component B's live session screen restyled, home navigation/layout fixes, and a new profile screen
+
+**Scope note.** This batch is Component B frontend work only, driven entirely by the owner iterating
+live against the running app in the browser (screenshots, arrows, corrections) rather than a written
+work-order spec -- closer in shape to 10f's own "UI iteration" log than to a template-registration
+batch. No Component C file was touched; a concurrent agent was working in `c-session/` at the same
+time (`archetype-surfaces.ts`, `payload-value-labels.ts`, the `partition-allocation` archetype) and
+none of its files are included in this entry or its commit.
+
+**What shipped, `live-session-screen.tsx` (the `/session/:id` game screen):**
+- Card layout matching c-session's own task panel shape: a cream card on a neutral ground, edged in
+  a per-skill accent colour (`session-skill-accents.ts`, new -- B's own `skill_id`-keyed
+  border/soft/text triple, mirroring `game-family-accents.ts`'s pattern without depending on it).
+  The skill pill is centred on the card's own x-axis, in the same fixed header row as the exit (X)
+  control, and now tints to the skill's own colours instead of a fixed coral.
+- Hint control moved from an inline "I NEED A HINT" pill to a top-right circle matching the exit
+  button's size and corner, showing only the MOST RECENT hint (a deliberate change from every
+  received level staying visible, at the owner's request) in a fixed-`minHeight` box.
+- The answer pad centres in the leftover space between the prompt card and the footer (`answerCenter`,
+  `flex: 1` inside a `flexGrow: 1` scroll container).
+- The correct/incorrect/timeout outcome is now a floating popup (50% width/height of the card's own
+  working area, `expo-blur` behind it, no background fill -- just a full-opacity colour-matched glow
+  as its edge) instead of an inline banner; the `outcome==='timeout'` case was found mid-batch to
+  fall through both style branches (`&&` instead of a ternary) leaving RN's default black shadow --
+  fixed to a ternary matching the icon/text logic already in place.
+  `outcomeView`'s `incorrect` copy had its second sentence ("...you can try as many times as you
+  like") removed at the owner's request; `canTryAgain: true` alone still drives TRY AGAIN.
+- CHECK MY ANSWER / NEXT QUESTION / TRY AGAIN restyled to match c-session's flat `SubmitButton`
+  (no border, no 3D press effect, `opacity: 0.72` on press) and moved into a fixed footer box below
+  the ScrollView, whose gap to the card's own bottom edge is measured live via `onLayout` (three
+  `onLayout` calls -- the skill pill, the scroll wrapper, and the prompt card -- combined in one
+  shared coordinate space) to exactly equal the pill-bottom-to-prompt-card-top gap, per the owner's
+  request that the two match, rather than a static guessed constant.
+- Background: a two-colour gradient (`expo-linear-gradient`), the two colours drawn at random each
+  question from the same five "game-type" colours `learner-home-screen.tsx`'s own path uses,
+  excluding the current skill's own accent so the background can never coincide with the card's
+  border, rotating continuously clockwise around the screen's own centre (`react-native-reanimated`,
+  45s/revolution). The rotating gradient's own bounding box is sized to the screen's measured
+  diagonal (`sqrt(w²+h²)`, via `onLayout`), not a flat `200%` guess -- the flat guess under-covered a
+  tall, narrow phone screen's width and showed up as a hard-edged crop in two opposite corners at
+  certain rotation angles; found and fixed from an owner screenshot mid-batch.
+- Progress bar restyled to a filled pill track (was plain "3 of 8" text); its gap to the prompt card
+  specifically doubled at the owner's request (`promptCardAfterProgress`, additive to the scroll's
+  own uniform `gap`, applied only when a progress bar is actually rendered).
+- `live-session-logic.ts`'s `SessionPlan` gained a `skillId` field alongside the existing formatted
+  `skillLabel`, since the accent/pill colouring needs the raw wire id, not the display string.
+
+**What shipped, `learner-home-screen.tsx` (two rounds of navigation/layout bugs, both owner-reported
+from the running app):**
+1. `openBLearning` (the hero button) was changed to always route through `/prepare`, even when a
+   session is already active (previously it skipped straight to `/session/:id` when one was open) --
+   restoring the prepare-first flow the owner said used to exist. The "Your Session" card's own
+   current-question node then got a SEPARATE handler, `resumeCurrentQuestion`, that DOES skip
+   straight to the session: it is reached only when `sessionState.kind === 'in-progress'` already
+   (this screen has already confirmed via a live `GET .../summary` read exactly which session and
+   question is open), so routing that back through `/prepare`'s own readiness check would be
+   redundant on every tap.
+2. "Buttons glitch on returning to home" -- root cause: this screen fully remounts on every return
+   (`router.replace`, not a stack pop), and `measuredViewportHeight` starts at 0 for one frame, so
+   the percentage-positioned path-stage buttons render once at a rough fallback position/size before
+   snapping to the real one the instant `onLayout` reports the true height. Fixed with a
+   `layoutReady` flag that keeps the ScrollView at `opacity: 0` (still laid out and measured, not
+   `display: none`) until the first real layout has landed.
+3. "Can't scroll up to see the hero again" -- root cause: `scrollEnabled` was set to `false`
+   permanently the first time the hero was scrolled past, as a `handleGestureSettle` side effect.
+   Removed entirely; scrolling now stays enabled always. Decoupled from that: `startScrolledToPath`
+   (a `useRef`, read once per mount from the module-level `heroDismissedThisAppSession` flag) still
+   decides whether THIS mount opens pre-scrolled past the hero, applied exactly once via a new
+   `initialScrollAppliedRef` guard so it can never re-fire and yank the child back down after a
+   deliberate manual scroll-up.
+4. The hero's own CTA button press now also sets `heroDismissedThisAppSession = true` (previously
+   only a scroll-past did), and a new cleanup-only `useEffect` sets the same flag on ANY unmount of
+   this screen -- covering the Play tab's own `router.replace('/(learner)/play')`, which had no other
+   hook into this screen's dismiss logic and was the specific gap the owner reported last.
+
+**What shipped, new profile screen (`/profile`, previously `LearnerEmptyTabScreen` -- deleted, now
+unreferenced anywhere).** `learner-profile-screen.tsx`: name (first name, via the header greeting),
+classroom and grade (only rendered once an APPROVED `classroomMembership` exists -- the identical
+derivation the prep screen already uses, so the two screens can never disagree about whether a
+classroom is showing), gender, and a LOG OUT button (`useAuth().signOut()`, same pattern as the two
+existing sign-out call sites). Gender required a new field, `profileGender`, added to
+`auth-context.tsx`: the backend's `LearnerProfileResponse` carries no gender field at all -- it is
+captured once at sign-up into Supabase's own `user_metadata` (alongside `display_name`) and read back
+the same way `readDisplayName` already reads the name, via a new `readGender`. Wired into every place
+`profileName` was already being set or cleared (sign-in, sign-up, sign-out, session-expiry, the
+`SIGNED_OUT` auth-state listener) so the two can never drift out of sync.
+
+**`firstNameOf` (`src/utils/display-name.ts`) now capitalises the first letter** of the returned
+token (`"yass"` -> `"Yass"`), leaving the rest exactly as typed (so a name with its own internal
+capitalisation, e.g. `"McKay"`, is not fought). All five call sites (home, game hub, profile x2, the
+prep screen) share this one helper, so the fix applies everywhere at once with no per-screen change.
+Two new test cases added to the existing `display-name.test.ts`.
+
+**Verification -- measured.**
+- `npx tsc --noEmit` -- exit 0 after every edit in this batch (checked incrementally, not just at the
+  end), filtering only pre-existing, unrelated errors in the concurrently-edited `c-session/` tree
+  (`unit-stepper.tsx`'s `targetDot` property, not this batch's file, not fixed here).
+- This project's own `node --import tsx --test` suite (Component B has no equivalent of C's
+  `npm run test:contract` battery): `live-session-logic.test.ts`, `session-advance.test.ts`,
+  `session-hints.test.ts`, `session-results.test.ts`, `session-timeout.test.ts` -- 78/78 passed,
+  re-run after every source change touching `live-session-screen.tsx` or `live-session-logic.ts`.
+  `home-session-progress.test.ts` -- 20/20, then 24/24 with `resume-decision.test.ts` added to the
+  same run, then 27/27 once `display-name.test.ts` gained its two new cases -- re-run after every
+  `learner-home-screen.tsx` / `auth-context.tsx` / `display-name.ts` change.
+- `npx expo install expo-blur` / `expo-linear-gradient` -- both resolved to SDK 54-compatible
+  versions by the Expo CLI itself, not hand-pinned.
+- No RNTL/browser rendering was performed by the agent (this environment has no display); every
+  visual claim in this entry (crop location, glitch, gradient look, popup shadow visibility) was
+  confirmed by the owner directly from the running app, screenshot by screenshot, in the same
+  iterative loop 10f's own "UI iteration" section documents -- several stated fixes (the corner crop,
+  the black timeout shadow, the glitch, the scroll lock) were themselves owner-reported defects found
+  exactly that way, not anticipated by the agent in advance.
+
+**What was NOT independently re-verified.** The backend suite was not re-run -- no backend file
+changed. Component C's own `c-session/` files, concurrently modified by a separate agent in the same
+working tree, were deliberately left out of this batch's diff and its commit entirely -- confirmed via
+`git status`/`git diff --stat` immediately before staging, matching FE-surface-remount-key's own
+precedent for excluding concurrent, unrelated in-flight work from a commit.
+
+**Provenance.** Commit `2de9da9`, "Component B: game-styled session UI, home nav fixes, and profile
+screen" -- 12 files changed (`app/(learner)/profile.tsx`, `package.json`/`package-lock.json`,
+`display-name.test.ts`, `auth-context.tsx`, `learner-home-screen.tsx`,
+`learner-empty-tab-screen.tsx` deleted, `live-session-logic.ts`, `live-session-screen.tsx`,
+`session-skill-accents.ts` new, `profile/learner-profile-screen.tsx` new, `display-name.ts`).
+
+---
+
+## 10g -- `partition-allocation` archetype + the C-EG-02 array grid, completing C-GF-07 Equal Groups and Arrays
+
+**What shipped.** The seventh of eight archetypes. Two parts:
+
+- **`partition-allocation`** (new): C-EG-01 (`number_of_groups`/`group_size` -> `groups: list[int]`)
+  and C-SF-01 (`recipient_count`/`total` -> `allocations: list[int]`), one resolver, no template
+  branch. `ValueTokenRow`'s own `display-with-entry` mode is reused UNMODIFIED, exactly as its own
+  header and master work order §5A already committed to -- no new label prop, no
+  `partition-allocation`-specific behaviour added to that file. `C-SF-02` also resolves to this
+  archetype id (its own `groups: list[int]` collection) but fails closed structurally on a
+  type-level discriminant: the presence of `submitted_group_count: int` alongside the collection
+  marks the variable-bin-count shape §2.3 names as 10h's own falsification test, and pre-building
+  that path now would spoil it.
+- **The C-EG-02 array grid** (extends 10f's `named-integer-fields`, reversing its own deliberate
+  refusal): a new `array-grid.tsx` primitive renders a read-only r x c grid; `rows`/`cols` are read
+  by name from `prompt_payload` and consumed STRUCTURALLY as grid dimensions rather than rendered as
+  numeral tokens, because both are simultaneously GIVEN and declared `valid_action_space` keys --
+  printing either would leak 2 of the 3 answers. `direction` (`"read"` L1-4, `"build"` L5, driving
+  different `prompt_text`) is admitted through a single narrow, named string exception and carried
+  in the spec, rendered nowhere, branched on nowhere -- 10a's own standing ruling for
+  `C-NP-04.direction`, applied unchanged.
+
+**Files.** New: `archetypes/partition-allocation-logic.ts`, `archetypes/partition-allocation-surface.tsx`,
+`primitives/array-grid.tsx`. Modified: `archetype-surfaces.ts` (two entries),
+`payload-value-labels.ts` (`group_size`, `total`), `archetypes/named-integer-fields-logic.ts` (the
+`rows`/`cols`/`direction` extension), `archetypes/named-integer-fields-surface.tsx` (the grid render
+branch and the equation-row layout below), `motor-constants.ts` (`GRID_CELL_SIZE`/
+`GRID_CELL_SPACING`).
+
+**Named-exception test edit.** `c-named-integer-fields-eg02-fails-closed.test.ts` previously asserted
+C-EG-02 fails closed at every level -- that fact is exactly what this batch changes. Inverted in
+place (kept its name, following 10d's own `c-mcl-family-surface-registration.test.ts` precedent for
+the identical situation) to assert resolution instead, with the corrected reasoning documented in
+its own header.
+
+**Shared-primitive consequences, all owner-directed, all re-verified in the browser.** Testing
+C-EG-01 at difficulty 5 (5 entry slots) surfaced three issues in `value-token-row.tsx` -- the SAME
+primitive NP-01..04 (10a) already ships on:
+
+1. **A latent RN Web flex-shrink wrap bug**, the same class `object-pool.tsx`'s own header already
+   documents: `flex: 1` columns inside a `flexWrap: 'wrap'` row compress to fit one line instead of
+   wrapping. Fixed by halving `entryTokenRow`'s gap (`TOKEN_SPACING` -> `TOKEN_SPACING / 2`).
+2. **The entry-slot token size itself needed splitting in two.** `display-with-entry`'s tokens
+   (NP-01..03, and this batch's own `partition-allocation` reuse) are now pinned to
+   `TOUCH_TARGET_MIN_SIZE` (48, SPEC §10's own accessibility floor -- the smallest a real touch
+   target may shrink to) so 5 entry slots fit one row; `reorder`'s draggable tokens (NP-04 only) stay
+   at the original, larger `TOKEN_TOUCH_TARGET_SIZE` (56), per the owner's own separate request that
+   NP-04's cards read "a bit bigger." Splitting this surfaced a **latent bug from the size's brief
+   single-constant period**: `TOKEN_STRIDE` (driving the reorder-mode drag gesture's slot-movement
+   math) would have silently used the entry token's size rather than the dragged token's own the
+   moment the two diverged -- caught and fixed (`TOKEN_STRIDE` now derives from
+   `TOKEN_TOUCH_TARGET_SIZE` specifically) before it ever shipped as a real bug.
+3. **`entryTokenRow` was missing `justifyContent: 'center'`** -- found testing C-SF-01's own
+   2-slot row, which left-aligned rather than centering under the prompt/payload token above it.
+
+**A genuinely pre-existing gap, found and fixed in the same pass.** The owner reported NP-04's
+drag-to-reorder simply did not respond in the browser. Root cause: `app/_layout.tsx` never wrapped
+the app root in `GestureHandlerRootView`, which `react-native-gesture-handler` requires on every
+platform including web for gestures to register touches at all -- missing since 10a shipped the
+primitive, invisible until someone actually tried to drag in a real browser (nothing in this
+repository can mount a tree to catch it structurally). Fixed with one wrapper in the root layout.
+Separately, `DraggableToken`'s `.activateAfterLongPress(GESTURE_LONG_PRESS_MS)` (400ms) is by design,
+not a bug -- a deliberate discoverability gap with a mouse rather than a touchscreen, documented
+here in case it resurfaces.
+
+**A second shared-surface layout fix.** NP-04's own `ArrangeSceneSurface` used the same `container`/
+`justifyContent: 'space-between'` shape the entry scene (NP-01..03) uses, which -- with only ONE
+middle child (the token row) -- concentrated ALL leftover vertical space into a single gap above and
+below it, producing large empty bands the owner flagged. Fixed with scene-scoped styles
+(`arrangeContainer`/`arrangeTopBlock`/`arrangeRowWrapper`), left `container`/`promptText` (still used
+by the entry scene) completely untouched.
+
+**The C-EG-02 equation row, `named-integer-fields-surface.tsx`'s own addition.** The generic wrapped
+`fieldsRow` every other named-integer-fields template uses put C-EG-02's "Submitted Product" field on
+its own line -- that label's own unabbreviated width, not a wrapping bug in the general sense, was
+wider than the row's remaining space once "Cols"/"Rows" took their share. A dedicated
+`EquationFieldsRow` renders "Cols x Rows = Product" as one non-wrapping row instead, using a
+DISPLAY-ONLY label override (`EQUATION_FIELD_LABEL_OVERRIDE`, scoped to this one component) that
+shortens "Submitted Product" to "Product" -- `spec.fields`' own resolver-produced label stays
+"Submitted Product", unchanged, exactly as `humanizeActionKey` produces it; only this one row's own
+rendering substitutes the shorter text.
+
+**Verification.**
+- `npx tsc --noEmit` -- exit 0 throughout every UI iteration.
+- `npm run test:contract` -- green at 1298/1298 (was 1187 before this batch's ~17 new test files
+  across both parts, net +111 tests after several existing files were revised mid-batch: the eg02
+  inversion, the fail-closed table's new grid/direction controls, and the motor-constancy file's
+  updated `NamedFieldBox` call-site count).
+- Every new guard proven load-bearing by disabling it in place (partition-allocation's
+  fixed/variable-shape discriminant, its bin-count-validity and collection-vocabulary guards; the
+  grid-dimension-validity, direction-string, and rows/cols-symmetry guards), confirming the targeted
+  negative controls went red, restoring from a `$TEMP`-directory backup, confirming an exact diff and
+  green tests again.
+- `npx expo export --platform ios` -- succeeded across all three UI-iteration rounds; `dist/` removed
+  each time.
+- **Every difficulty level looked at in a browser by the owner directly, in two passes as planned**:
+  C-EG-01 at L1 and L5 (2 groups of 2, 5 groups of 4 -- the 5-slots-on-one-row case), C-SF-01 at L1,
+  C-EG-02 at L1 and **L5** (the only `"build"` row, confirming its own different `prompt_text` and a
+  5x5 grid), C-EG-03 spot-checked unchanged. Re-verification of the shared-primitive changes: NP-01
+  (twice, after the size split and again after the centering fix), NP-04 (after the gesture-root fix,
+  the token-size split, and the layout restructure -- drag-to-reorder confirmed working end to end).
+  Card #7 confirmed reading **Ready to play**; card #8 confirmed still not-ready.
+
+**What was NOT independently re-verified.** NP-02/NP-03 (10a's other two entry-scene templates) --
+they share `value-token-row.tsx`'s `display-with-entry` mode with NP-01, which WAS re-verified, but
+were not separately opened in the browser this session.

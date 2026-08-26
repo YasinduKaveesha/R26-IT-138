@@ -16,6 +16,7 @@ import { LinePositionSurface } from '@/src/features/c-session/archetypes/line-po
 import { LineTraversalSurface } from '@/src/features/c-session/archetypes/line-traversal-surface';
 import { NamedIntegerFieldsSurface } from '@/src/features/c-session/archetypes/named-integer-fields-surface';
 import { ObjectSetActionSurface } from '@/src/features/c-session/archetypes/object-set-action-surface';
+import { PartitionAllocationSurface } from '@/src/features/c-session/archetypes/partition-allocation-surface';
 import { OptionSelectSurface } from '@/src/features/c-session/archetypes/option-select-surface';
 import { OrderedValueSequenceSurface } from '@/src/features/c-session/archetypes/ordered-value-sequence-surface';
 import { ValueReportSurface } from '@/src/features/c-session/archetypes/value-report-surface';
@@ -44,10 +45,18 @@ const SURFACE_TABLE: Partial<Record<ArchetypeId, ComponentType<ArchetypeSurfaceP
   // from line-traversal, and unit-stepper.tsx's own coarse-step addition for the interaction-cost
   // fix this template needed before it could ship (master work order §2.2).
   'line-position': LinePositionSurface,
-  // C-BT-01..04 (C-GF-04). C-EG-02 also resolves to `named-integer-fields` (registry.ts, 10g's own
-  // future template), but structurally fails closed here rather than mounting -- see
-  // named-integer-fields-logic.ts's header for why that refusal needs no template-id branch.
+  // C-BT-01..04 (C-GF-04) alongside C-EG-02 (C-GF-07, registry.ts's own pre-existing mapping) --
+  // one resolver, no template branch. C-EG-02's `rows`/`cols` are consumed structurally as an
+  // `ArrayGrid`'s dimensions rather than rendered as payload numerals (they double as
+  // `valid_action_space` keys, so printing them would leak 2 of 3 answers) -- see
+  // named-integer-fields-logic.ts's own header, "C-EG-02 IS SUPPORTED HERE".
   'named-integer-fields': NamedIntegerFieldsSurface,
+  // C-EG-01 (C-GF-07) alongside C-SF-01 (C-GF-08, registry.ts's own pre-existing mapping) -- one
+  // resolver, no template branch, see partition-allocation-logic.ts's header. C-SF-02 also resolves
+  // to this archetype id but structurally fails closed (its `submitted_group_count: int` action key
+  // marks the variable-bin-count shape 10h, not this batch, builds) -- same class of refusal as
+  // named-integer-fields-logic.ts's own C-EG-02 refusal was, before this batch closed that one.
+  'partition-allocation': PartitionAllocationSurface,
 };
 
 /**

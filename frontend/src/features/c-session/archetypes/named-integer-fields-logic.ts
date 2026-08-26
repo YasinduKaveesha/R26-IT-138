@@ -40,16 +40,32 @@
 // surface has nothing to pre-fill from and nothing to auto-complete with, because none of it is
 // resolved here. `c-named-integer-fields-no-client-arithmetic.test.ts` holds that line.
 //
-// C-EG-02 REACHES THIS ARCHETYPE AND FAILS CLOSED HERE, STRUCTURALLY. `registry.ts` already maps
-// `C-EG-02` -> `named-integer-fields` (it is 10g's, per the work order's own sequence table:
-// "10g ... Reuses `named-integer-fields` (EG-02)"), so registering this surface makes EG-02 mount
-// before 10g has designed for it. It fails closed on its own wire shape rather than on a
-// template-id refusal: its `prompt_payload` carries `direction: "read"`, a STRING, and the
-// numbers-only payload guard below rejects it -- the same guard every archetype since 10b has
-// carried, for the same reason. That is a genuine structural refusal, NOT the explicit
-// `game_task_template_id === 'C-TC-02'` line `value-report-logic.ts` had to carry, and this file
-// stays entirely template-id-blind as a result. `c-named-integer-fields-eg02-fails-closed.test.ts`
-// pins both the outcome and this reason, so the guard is not later "tidied" away as redundant.
+// C-EG-02 IS SUPPORTED HERE, AS A NAMED, NARROW EXTENSION TO THE OTHERWISE-GENERIC PAYLOAD GUARD
+// (10g). `registry.ts` maps `C-EG-02` -> `named-integer-fields` (per the work order's own sequence
+// table: "10g ... Reuses `named-integer-fields` (EG-02)"). Its `prompt_payload` carries `rows` and
+// `cols` -- also the names of TWO of its THREE `valid_action_space` keys -- and `direction`, a
+// STRING (`"read"` at difficulty 1-4, `"build"` at difficulty 5; both prompts are deictic about
+// "the array", and `interactive_assets` is `{}` on every real exemplar, so the client owes a
+// visual). Two consequences, both handled explicitly rather than by relaxing the general guard:
+//
+//   1. `rows`/`cols` are consumed STRUCTURALLY, as grid dimensions for `ArrayGrid`
+//      (primitives/array-grid.tsx), and excluded from `payloadValues` -- the identical treatment
+//      `line-position-logic.ts` gives `target_position` and `partition-allocation-logic.ts` gives
+//      its bin-count key. Rendering them as payload numeral tokens (what this file did for BT-01..04
+//      before this batch) would print 2 of the 3 answers on screen, since they are simultaneously
+//      GIVEN and part of the answer here -- unlike BT-01..04's payload, which never overlaps its own
+//      action space.
+//   2. `direction` is admitted as a STRING through a narrow, NAMED vocabulary exception (just this
+//      one key), carried in the spec, and rendered nowhere and branched on nowhere -- 10a's own
+//      standing ruling for `C-NP-04.direction` ("the direction reaches the child through
+//      `prompt_text`"), applied unchanged. EVERY OTHER payload value still fails closed if it is
+//      not a finite number: this is not a relaxation of the guard, only a single recognised name
+//      admitted alongside it. `c-named-integer-fields-array-grid.test.ts` and
+//      `c-named-integer-fields-eg02-fails-closed.test.ts` (renamed from its own prior, now-inverted
+//      assertion -- see that file's own header) hold this line.
+//
+// C-BT-01..04 declare neither `rows`, `cols` nor `direction`, so `grid`/`direction` are `null` for
+// them and their behaviour is byte-for-byte unchanged from 10f.
 //
 // All `prompt_payload` / `valid_action_space` access goes through
 // `Object.prototype.hasOwnProperty.call(...)` / `Object.keys(...)`, never bare property access:
@@ -72,10 +88,22 @@ const MIN_FIELDS = 2;
 // to render an unbounded number of keypad-backed fields.
 const MAX_FIELDS = 6;
 
+// A CORRUPTION-SAFETY CEILING on the array grid's own dimensions, not a considered judgement about
+// how large a grid a child can handle -- literal, never derived from anything, mirroring
+// `MAX_FIELDS`'s own doctrine. The real observed maximum is 5x5 (C-EG-02 L5); 10 is comfortably
+// above that while still catching a materially corrupted `rows`/`cols` pair before it asks
+// `ArrayGrid` to render an unbounded number of cells.
+const MAX_GRID_DIMENSION = 10;
+
 export type NamedIntegerFieldsPayloadValue = {
   key: string;
   label: string;
   value: number;
+};
+
+export type NamedIntegerFieldsGrid = {
+  rows: number;
+  cols: number;
 };
 
 export type NamedIntegerFieldsField = {
@@ -91,6 +119,12 @@ export type NamedIntegerFieldsSpec = {
   payloadValues: readonly NamedIntegerFieldsPayloadValue[];
   /** The `integer-field` keys, in the wire's own key order. Always at least `MIN_FIELDS` long. */
   fields: readonly NamedIntegerFieldsField[];
+  /** Present only for C-EG-02: `rows`/`cols` consumed structurally as grid dimensions, `null` for
+   *  every other template. See the header's "C-EG-02 IS SUPPORTED HERE" paragraph. */
+  grid: NamedIntegerFieldsGrid | null;
+  /** Present only for C-EG-02: relayed verbatim, rendered nowhere, branched on nowhere -- `null`
+   *  for every other template. See the header. */
+  direction: string | null;
   interactiveAssets: Record<string, unknown>;
 };
 
@@ -113,15 +147,17 @@ export function humanizeActionKey(key: string): string {
  * partial one.
  *
  * Fails closed for: `prompt_text` absent or empty; `prompt_payload` absent, not an object, empty, or
- * containing any value that is not a finite number (this is what refuses C-EG-02 -- see the header);
- * `valid_action_space` declaring no key; a declared type this codebase does not bind
- * (field-kinds.ts); any declared key whose bound kind is not `integer-field` (this scene has nowhere
- * to put one); fewer than `MIN_FIELDS` or more than `MAX_FIELDS` integer fields; `task.blanks` not
- * exactly `null`.
+ * containing any value that is neither a finite number nor the single named `direction` string
+ * exception (see the header); `rows`/`cols` present but not both, not a positive integer, or
+ * exceeding `MAX_GRID_DIMENSION`; `direction` present but empty; `valid_action_space` declaring no
+ * key; a declared type this codebase does not bind (field-kinds.ts); any declared key whose bound
+ * kind is not `integer-field` (this scene has nowhere to put one); fewer than `MIN_FIELDS` or more
+ * than `MAX_FIELDS` integer fields; `task.blanks` not exactly `null`.
  *
  * Note what is NOT checked, deliberately: whether the fields the child will enter decompose
- * `target_number`, or correctly effect the trade from `pre_tens`/`pre_ones`. That is the server's
- * judgement, and computing it here would be the auto-carry the work order forbids.
+ * `target_number`, correctly effect the trade from `pre_tens`/`pre_ones`, or match the grid's own
+ * `rows`/`cols`/product. That is the server's judgement, and computing it here would be the
+ * auto-carry the work order forbids.
  */
 export function resolveNamedIntegerFieldsSpec(task: CNextTaskResponse): NamedIntegerFieldsSpec | null {
   if (typeof task.prompt_text !== 'string' || task.prompt_text.length === 0) return null;
@@ -134,12 +170,37 @@ export function resolveNamedIntegerFieldsSpec(task: CNextTaskResponse): NamedInt
   if (payloadKeys.length === 0) return null;
 
   const payloadValues: NamedIntegerFieldsPayloadValue[] = [];
+  let gridRows: number | null = null;
+  let gridCols: number | null = null;
+  let direction: string | null = null;
+
   for (const key of payloadKeys) {
     const value = (promptPayload as Record<string, unknown>)[key];
-    // The numbers-only guard. C-EG-02's `direction: "read"` is refused right here.
+
+    // The single named string exception -- see the header's "C-EG-02 IS SUPPORTED HERE" paragraph.
+    // No other key may ever be a string; this branch is keyed on the name `direction` alone.
+    if (key === 'direction') {
+      if (typeof value !== 'string' || value.length === 0) return null;
+      direction = value;
+      continue;
+    }
+
+    // The numbers-only guard, unchanged for every other key.
     if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+
+    if (key === 'rows' || key === 'cols') {
+      if (!Number.isInteger(value) || value <= 0 || value > MAX_GRID_DIMENSION) return null;
+      if (key === 'rows') gridRows = value;
+      else gridCols = value;
+      continue;
+    }
+
     payloadValues.push({ key, label: labelForPayloadKey(key), value });
   }
+
+  // Both or neither -- a lone `rows` or `cols` is a malformed grid, not a partial one to render.
+  if ((gridRows === null) !== (gridCols === null)) return null;
+  const grid: NamedIntegerFieldsGrid | null = gridRows !== null && gridCols !== null ? { rows: gridRows, cols: gridCols } : null;
 
   const validActionSpace = task.valid_action_space;
   const actionKeys = Object.keys(validActionSpace);
@@ -160,6 +221,8 @@ export function resolveNamedIntegerFieldsSpec(task: CNextTaskResponse): NamedInt
     promptText: task.prompt_text,
     payloadValues,
     fields,
+    grid,
+    direction,
     interactiveAssets: task.interactive_assets,
   };
 }
