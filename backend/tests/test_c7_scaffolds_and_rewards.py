@@ -28,8 +28,8 @@ from app.application.live_engine_c.reward_service import decide_child_facing_rew
 from app.application.live_engine_c.scaffold_service import decide_and_persist_scaffold_level
 from app.application.live_engine_c.session_lifecycle import create_session
 from app.application.live_engine_c.task_service import (
-    PRODUCTION_GENERATION_CONFIG_PROBE,
-    PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+    PRODUCTION_GENERATION_CONFIG,
+    PRODUCTION_SCAFFOLD_CONFIG,
     TaskService,
 )
 from app.domain.live_engine_c.types import RewardOutcomeContext, ScaffoldDecisionContext
@@ -40,7 +40,7 @@ from app.domain.runtime_bundle_c.types import (
 )
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import CScaffoldEventRecord, CTaskInstanceRecord, CTaskOpportunityRecord
-from app.infrastructure.repositories import CScaffoldEventRecordRepository
+from app.infrastructure.repositories import CGameplayEventRecordRepository, CScaffoldEventRecordRepository
 from tests.test_c4_session_lifecycle import (
     all_usable_field_statuses,
     isolated_database,
@@ -158,8 +158,8 @@ def test_z5d_ordinary_escalation_reaches_c4_wired_through_submit_action() -> Non
                 result = await TaskService().submit_action(
                     session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                     c_session_id=c_session_id, c_task_instance_id=instance_id,
-                    action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
-                    scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                    action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG,
+                    scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
                 )
                 assert result.response_matched is False
                 levels.append(result.scaffold_level)
@@ -179,13 +179,83 @@ def test_z5d_ordinary_escalation_reaches_c4_wired_through_submit_action() -> Non
     asyncio.run(exercise())
 
 
+# =====================================================================================
+# CONNECT Step 5 (Family 3, ESCALATIONS.md §2, CLOSED): attempt_number, made real. Placed in
+# THIS file, not test_c5_task_serve_and_evaluate.py or test_c6a_summary_derivation.py, because
+# this is the file that already has a working repeated-wrong-answer-on-one-instance fixture
+# (test_z5d_ordinary_escalation_reaches_c4_wired_through_submit_action, immediately above) --
+# picked by which fixture already exists and works, not by which file's name best matches the
+# feature under test (supervisor ruling: "pick by fixture, not taxonomy").
+# =====================================================================================
+
+
+def test_z6_attempt_number_increments_across_repeated_wrong_answers_on_one_instance() -> None:
+    """Positive control for CONNECT Step 5. Three wrong-answer submissions on the SAME task
+    instance -- same fixture and wrong-value construction as
+    test_z5d_ordinary_escalation_reaches_c4_wired_through_submit_action above -- persist
+    attempt_number 1, 2, 3 on their answer_submitted events, in event_index order. Additionally
+    (supervisor's own addition to this control): for each submission, its answer_submitted and
+    answer_evaluated events carry the SAME attempt_number as each other, and consecutive
+    event_index values -- proving the shared-value derivation stayed synchronized with the
+    event_index derivation the c_gameplay_events triggers themselves own, not just that the
+    attempt_number sequence looks right in isolation."""
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
+        async with factory() as session:
+            _, c_session_id, instance_id, subject = await _create_real_instance_via_smoke_mode(session)
+            instance = await session.get(CTaskInstanceRecord, instance_id)
+
+            def wrong_value(declared_type: str):
+                if "|" in declared_type:
+                    options = declared_type.split("|")
+                    return options[-1] if len(options) > 1 else options[0] + "_wrong"
+                if declared_type in ("int", "number"):
+                    return -999999
+                if declared_type == "bool":
+                    return True
+                if declared_type.startswith("list["):
+                    return []
+                raise AssertionError(declared_type)
+
+            payload = {key: wrong_value(t) for key, t in instance.valid_action_space.items()}
+            if payload == dict(instance.correct_answer_payload):
+                await database_engine.dispose()
+                return
+
+            for _ in range(3):
+                result = await TaskService().submit_action(
+                    session, principal_user_id=subject, request_id=f"req-{uuid4()}",
+                    c_session_id=c_session_id, c_task_instance_id=instance_id,
+                    action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG,
+                    scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
+                )
+                assert result.response_matched is False
+
+            events = await CGameplayEventRecordRepository(session).list_ordered_for_instance(instance_id)
+            submitted = [e for e in events if e.event_type == "answer_submitted"]
+            evaluated = [e for e in events if e.event_type == "answer_evaluated"]
+            assert [e.attempt_number for e in submitted] == [1, 2, 3]
+
+            # Each submission's own pair shares one attempt_number and has consecutive event_index
+            # -- the shared-derivation proof, not just the sequence-looks-right proof above.
+            assert len(evaluated) == 3
+            for submitted_event, evaluated_event in zip(submitted, evaluated):
+                assert submitted_event.attempt_number == evaluated_event.attempt_number
+                assert evaluated_event.event_index == submitted_event.event_index + 1
+        await database_engine.dispose()
+
+    asyncio.run(exercise())
+
+
 def test_z5d_safety_forced_c4_reachable_directly() -> None:
     """The safety-forced path, proven directly against decide_scaffold_level (test-side
     construction, T4-d's own discipline) -- unconditionally C4 regardless of the escalation
     count, per SPEC §15 "safety may force C4"."""
     adapter = LiveEngineCAdapter()
     context = ScaffoldDecisionContext(consecutive_incorrect_current_task=0, safety_forces_recovery=True)
-    level = adapter.decide_scaffold_level(context, PRODUCTION_SCAFFOLD_CONFIG_PROBE)
+    level = adapter.decide_scaffold_level(context, PRODUCTION_SCAFFOLD_CONFIG)
     assert level == "C4"
 
 
