@@ -54,6 +54,6 @@ test("C-MCL-04: resolveArchetype still yields 'line-position' -- an id with no S
   assert.equal(resolveArchetype('C-MCL-04', entryFor('C-MCL-04').valid_action_space), 'line-position');
 });
 
-test("C-MCL-01: resolveArchetype still yields 'option-select' too -- it reaches a REGISTERED surface at the plan level (option-select-logic.ts is what refuses it at render time, not the plan), distinct from C-MCL-04's case", () => {
+test("C-MCL-01: resolveArchetype still yields 'option-select' too -- it reaches a REGISTERED surface at the plan level, distinct from C-MCL-04's case (as of 10e-0, option-select-logic.ts resolves it for real rather than refusing it at render time -- see c-option-select-numeral-options-resolution.test.ts)", () => {
   assert.equal(resolveArchetype('C-MCL-01', entryFor('C-MCL-01').valid_action_space), 'option-select');
 });

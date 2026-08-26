@@ -858,3 +858,144 @@ the archetype table (`resolveArchetype` still returns `'option-select'` for both
 the `resolveOptionSelectSpec` layer, but the actual `FailClosedFrame` render path for either was not
 observed rendering, for the same reason. The backend suite was not re-run -- no backend file changed
 except this entry.
+
+## 2026-08-26 — feat: `option-select`'s numeral-options path unblocked (10e-0) — C-MCL-01, C-CC-03
+now ship; two findings escalated, both unresolved
+
+**Scope shipped.** The `integer-field` refusal in `option-select-logic.ts` (10d) is replaced by
+real resolution. Both templates on this path resolve and mount at every difficulty level: `C-MCL-01`
+(quantity range 2-66) and `C-CC-03` (quantity range 3-16). A magnitude-only structural bound cannot
+cleanly ship one and refuse the other -- see Finding 1 -- so both ship together, per explicit ruling.
+A new shared primitive, `object-quantity-display.tsx`, renders the quantity as a wrapped block of
+uniform objects, never as a numeral.
+
+**A correction to the 10e-0 work order itself, caught before any code was written.** The prompt
+proposed "ship C-CC-03 only, refuse C-MCL-01 on a bound" as a live possibility. It isn't: `C-MCL-01`'s
+quantity range is {2, 9, 13, 32, 66} and `C-CC-03`'s is {3, 5, 8, 12, 16} -- `C-MCL-01`'s own low
+levels (2, 9, 13) sit *inside* `C-CC-03`'s full range. No single magnitude threshold separates "every
+C-MCL-01 value" from "every C-CC-03 value" without either (a) partially breaking `C-MCL-01` --
+resolving at low difficulty, fail-closed at high difficulty, a new defect in its own right (a child
+hits a wall specifically at a game's harder levels) -- or (b) also excluding some of `C-CC-03`'s own
+legitimate values. The one other candidate (a `C-TC-02`-style named template-id exclusion) was
+foreclosed by this same batch's own no-template-id-branching requirement. Ruling: ship both, bound at
+100 as pure corruption-safety, and stop proposing a value-based split for these two templates --
+record it here so nobody re-derives this from scratch. Third such correction in this sub-phase
+sequence (after the `line-position` tap-count finding and the `C-CC-03`/`C-CC-04` spillover finding).
+
+**Finding 1 (escalated, unresolved) -- can a flat, ungrouped, wrapped display of a large quantity
+honestly represent it at all, independent of the grouping question?** Two distinct concerns, not
+one:
+- **Whole-set apprehension.** If `C-MCL-01`'s "amount shown" is meant to be estimated at a glance
+  (plausible: at L5 the correct answer, 66, sits far from every distractor -- 21/35/46/47 -- reading
+  like coarse discrimination), a display requiring the child to scroll or scan across many wrapped
+  rows to take in the whole quantity may make that single-glance act impossible, not merely costlier.
+- **Exact counting.** If instead exact counting is intended (plausible for `C-CC-03`: "Count the
+  objects. Then choose the number that matches."), counting dozens of identical, unlabeled, ungrouped
+  objects accurately is a demanding ask for the target population independent of layout.
+Wrapping (ruling 2, this batch) is the best available layout without resolving either question --
+direct precedent, `84874ce`'s fix of 10a's off-screen entry slots by wrapping rather than scrolling.
+It is measurably better than a single scrolling row (the worst case for both concerns above) but does
+not resolve either. **Not decided here:** whether either concern makes the current design invalid for
+`C-MCL-01` at its higher difficulty levels, and whether grouping (Finding 2) is the fix or a
+different, deeper redesign is.
+
+**Finding 2 (escalated, unresolved, carried from 10d, restated with corrected framing) -- should the
+quantity be grouped (base-ten, subitizing blocks) rather than shown flat?** A scientific
+representation choice, not a builder's or a layout question, per this project's repeated ruling on
+exactly this class of decision (`C-MCL-04`'s tap-count confound, `C-MCL-02`'s symbolic-comparison
+question). The wrap-not-scroll layout (ruling 2) was deliberately implemented to never fall out at a
+fixed per-row count (10 = a ten-frame; 5 = subitizing groups) for exactly this reason -- row length
+is purely a function of container width and fixed object size, asserted by a dedicated test
+(`c-object-quantity-display.test.ts`) that fails if a future edit hardcodes one. **Not decided
+here:** whether grouping is needed at all, and if so, which.
+
+**The 100-quantity bound is corruption-safety only**, deliberately set (100) above every real
+quantity either template produces (66, `C-MCL-01`'s own hardest level) so it never fires against real
+data at any level of either template -- not a considered judgement about how many objects a child can
+count, and not chosen to separate the two templates (see the correction above). The `numeral_options`
+array-length bound (10) is 10d's own already-reasoned, previously-unapplied value, now live.
+
+**Files:**
+- new: `frontend/src/features/c-session/primitives/object-quantity-display.tsx` -- read-only,
+  wraps (never scrolls), geometry from new `motor-constants.ts` constants, accessibility label
+  carries no digit and individual objects are hidden from the accessibility tree entirely (the
+  screen-reader leak vector a plain per-object accessible list would have opened).
+- edit: `frontend/src/features/c-session/motor-constants.ts` -- new `OBJECT_TOKEN_SIZE` (28) /
+  `OBJECT_TOKEN_SPACING` (6), half of `TOKEN_TOUCH_TARGET_SIZE`/`TOKEN_SPACING`, justified as a
+  passive-display exemption from SPEC section 10's interactive-touch-target floor (same reasoning
+  `value-report-surface.tsx`'s `PAYLOAD_TOKEN_SIZE` already established).
+- edit: `frontend/src/features/c-session/archetypes/option-select-logic.ts` -- restructured to
+  classify `valid_action_space` before validating `prompt_payload` (the two option sources need
+  genuinely different payload shapes); the `integer-field` refusal replaced by real resolution; the
+  quantity key resolved structurally ("the one `prompt_payload` key that is not `numeral_options`"),
+  never a two-name table. Return type is now a `'choice' | 'numeral-options'` discriminated union --
+  the answer-leak guard is a fact about the TYPE (only `'choice'` has a `payloadValues` field at
+  all), not merely a runtime check.
+- edit: `frontend/src/features/c-session/archetypes/option-select-surface.tsx` -- renders
+  `ObjectQuantityDisplay` + `OptionChoiceRow` bound to `numeralOptions` for the new scene.
+- new tests: `c-object-quantity-display.test.ts`, `c-option-select-numeral-options-resolution.test.ts`,
+  `c-option-select-numeral-options-fail-closed.test.ts`, `c-option-select-numeral-options-coverage.test.ts`.
+- edit (named exception): `c-option-select-logic.test.ts` -- 3 tests inverted from asserting refusal
+  to asserting resolution (`"C-MCL-01 refuses..."` -> `"C-MCL-01 resolves..."`, `"C-CC-03 refuses..."`
+  -> `"C-CC-03 resolves..."`, `"the refusal is keyed on declared type alone..."` -> `"resolution is
+  keyed on declared type alone..."`). Every other test in this file untouched.
+- edit (named exception): `c-option-select-fail-closed.test.ts` -- 4 tests replaced (2 assertions
+  flip null->resolves; 1 already asserted resolution, comment corrected only; 1 still asserts null,
+  now for the real reason -- wrong payload key count -- not the old refusal). Every pipe-string-path
+  negative control in this file untouched.
+- edit (named exception, comment only): `c-mcl-family-surface-registration.test.ts` -- one stale
+  claim corrected ("option-select-logic.ts is what refuses it at render time" -> now resolves it for
+  real); no assertion changed.
+
+**Verification -- measured.**
+
+- `npx tsc --noEmit` -- exit 0.
+- `npm run test:contract` -- **894 tests, 894 passed, 0 failed.** Baseline immediately before this
+  batch: **832 / 832 / 0.** Reconciles: 61 new tests across the 4 new files (20 + 18 + 11 + 12); + 1
+  automatic pickup from `no-node-builtins-outside-tests-and-scripts.test.ts`'s own whole-tree scan
+  finding the one new source file (`object-quantity-display.tsx`) -- the same mechanism the
+  `boolean-toggle.tsx` batch's own entry already documented; 0 removed (every named-exception edit
+  replaced tests 1:1, in place).
+- Per-test-name check (not just the aggregate count), per ruling: the three named-exception files
+  were run standalone before and after the full change (44/44 both times) and every test name outside
+  the explicitly-listed changed ones is byte-identical between runs; the restructuring (classify
+  `valid_action_space` before `prompt_payload`) provably cannot change any single-violation negative
+  control's outcome, since each isolates exactly one guard against an otherwise-valid baseline and
+  both orderings still reach that guard.
+- Every new guard in the numeral-options path proven by disabling it in place, confirming the
+  targeted negative control(s) went red, then restoring and confirming green again: quantity
+  type/finite/integer/negative/bound (one batch, 6 controls incl. the boundary test); `numeral_options`
+  array/length/element (one batch, 7 controls incl. the boundary test); the payload-key-count guard
+  (1 control -- "more than two payload keys"); the shared `prompt_text`/`blanks` guards, spot-checked
+  across both scenes at once (4 controls). **Two guards found redundant-but-harmless**, disclosed
+  rather than silently claimed independently necessary: the `numeral_options`-key-presence
+  `hasOwnProperty` check (subsumed by the immediately-following `Array.isArray` check --
+  `promptPayload[key]` on a missing key is `undefined`, which is not an array either way) and,
+  within the payload-key-count guard, its own coverage of "the quantity key is missing entirely" (that
+  specific case is independently caught by the downstream quantity-type check; only "more than two
+  payload keys" depends on this line, since a `.find()` over 3 keys would otherwise silently pick the
+  first non-`numeral_options` key and drop the third).
+- The accessibility answer-leak guard proven in both halves: the label's own digit-free text
+  (broke it by inserting "7", confirmed red, restored, confirmed green) and the per-object
+  accessibility-hiding attributes (removed them, confirmed red, restored, confirmed green).
+- `C-CC-04` regression: its own pre-existing test (`c-option-select-logic.test.ts`) still passes
+  unmodified after the restructuring -- its `trial_type` guard is untouched code, confirmed by the
+  full suite run, not a new assertion.
+- `C-MCL-04`/`line-position` regression: `resolveArchetype('C-MCL-04', ...)` still returns
+  `'line-position'`; `SURFACE_TABLE` still has no entry for it (new dedicated assertions in
+  `c-option-select-numeral-options-coverage.test.ts`, alongside the pre-existing plan-level proof in
+  `c-mcl-family-surface-registration.test.ts`).
+- `npx expo export --platform ios` -- succeeded, `entry-15ff18ff9ea6c6cfa692eb7cf45266c4.hbc`,
+  5.12 MB; `dist/` removed after.
+
+**What was NOT verified.** Nothing here can mount a component tree -- `ObjectQuantityDisplay`'s and
+the new scene's actual on-screen appearance (including whether 66 wrapped objects fit legibly on a
+real screen without the surrounding chrome overflowing) was never observed, only source and the pure
+resolver's decisions. The screen container (`option-select-surface.tsx`'s own `styles.container`,
+reused unmodified) has no `ScrollView` wrapper at the screen level (checked: `c-session-screen.tsx`'s
+`taskContentMiddle` is a bare `flex: 1`) -- if a wrapped 66-object block plus the existing chrome
+exceeds the visible screen height, nothing makes the rest of the screen (including SUBMIT) reachable.
+This was not fixed, since the surrounding screen chrome is explicitly reuse-unmodified this batch;
+it is exactly the kind of thing ruling 1 anticipated becoming visible only by looking at the result
+in a browser, and is flagged here so it is looked for, not discovered cold. The backend suite was not
+re-run -- no backend file changed except this entry.

@@ -1,9 +1,9 @@
-// `resolveOptionSelectSpec` (10d): resolution over the two approved `option-select` templates on
-// the pipe-string path (C-MCL-02, C-MCL-03), plus the structural refusal of the `integer-field`
-// path (C-MCL-01, and C-CC-03 which registry.ts already routes to this same archetype id -- see
-// option-select-logic.ts's own header for why this is one type-keyed check, not a template-id
-// list). C-CC-04 (also pre-routed here, pipe-string path) is exercised here too, since its
-// non-numeric `trial_type` payload value is the one thing holding it shut this batch.
+// `resolveOptionSelectSpec`: resolution over the pipe-string path (C-MCL-02, C-MCL-03, 10d) and,
+// as of 10e-0, real resolution of the `integer-field` / numeral-options path too (C-MCL-01,
+// C-CC-03 -- see c-option-select-numeral-options-resolution.test.ts for that path's own dedicated
+// coverage; the three tests below that used to assert its REFUSAL now assert real resolution
+// instead, per the 10e-0 ruling that unblocked it). C-CC-04 (pipe-string path) is exercised here
+// too, since its non-numeric `trial_type` payload value is the one thing holding it shut.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,14 +44,14 @@ test('C-MCL-02: exactly 5 exemplar rows (difficulty 1-5), all present in the fro
 test('C-MCL-02: resolves at every difficulty level with scoreKey/alternatives and both payload tokens', () => {
   for (const entry of MCL02_ENTRIES) {
     const spec = resolveOptionSelectSpec(makeTask(entry));
-    if (spec === null) {
-      assert.fail(`C-MCL-02 level ${entry.difficulty_level} failed to resolve`);
+    if (spec === null || spec.kind !== 'choice') {
+      assert.fail(`C-MCL-02 level ${entry.difficulty_level} failed to resolve as 'choice'`);
       continue;
     }
     assert.equal(spec.scoreKey, 'selection', `level ${entry.difficulty_level}`);
     assert.deepEqual(spec.alternatives, ['left', 'right', 'equal'], `level ${entry.difficulty_level}`);
     assert.deepEqual(
-      spec.payloadValues.map((value) => value.key),
+      spec.payloadValues.map((value: { key: string }) => value.key),
       ['left_count', 'right_count'],
       `level ${entry.difficulty_level}`,
     );
@@ -71,21 +71,25 @@ test('C-MCL-03: exactly 5 exemplar rows (difficulty 1-5), all present in the fro
 test('C-MCL-03: resolves at every difficulty level with scoreKey/alternatives and both payload tokens', () => {
   for (const entry of MCL03_ENTRIES) {
     const spec = resolveOptionSelectSpec(makeTask(entry));
-    if (spec === null) {
-      assert.fail(`C-MCL-03 level ${entry.difficulty_level} failed to resolve`);
+    if (spec === null || spec.kind !== 'choice') {
+      assert.fail(`C-MCL-03 level ${entry.difficulty_level} failed to resolve as 'choice'`);
       continue;
     }
     assert.equal(spec.scoreKey, 'comparison_sign', `level ${entry.difficulty_level}`);
     assert.deepEqual(spec.alternatives, ['<', '>', '='], `level ${entry.difficulty_level}`);
     assert.deepEqual(
-      spec.payloadValues.map((value) => value.key),
+      spec.payloadValues.map((value: { key: string }) => value.key),
       ['value_a', 'value_b'],
       `level ${entry.difficulty_level}`,
     );
   }
 });
 
-// --- structural refusal: the integer-field path (C-MCL-01, C-CC-03) --------------------------------
+// --- the integer-field / numeral-options path (C-MCL-01, C-CC-03) ---------------------------------
+// Unblocked in 10e-0. Full resolution coverage (scoreKey, quantity, numeralOptions, in-wire-order,
+// the answer-leak guard) lives in c-option-select-numeral-options-resolution.test.ts; the three
+// tests below are the ones this batch legitimately CHANGES from 10d, kept here so the change is
+// visible in the same file and against the same fixtures the original refusal was proven against.
 
 const MCL01_ENTRIES = EXEMPLAR_ENTRIES.filter((entry) => entry.game_task_template_id === 'C-MCL-01');
 const CC03_ENTRIES = EXEMPLAR_ENTRIES.filter((entry) => entry.game_task_template_id === 'C-CC-03');
@@ -112,23 +116,34 @@ test('re-verification (owner ruling 2, 2026-08-26): set_size is present inside n
   }
 });
 
-test('C-MCL-01 refuses at every difficulty level (integer-field path, not built this batch)', () => {
+test("C-MCL-01 resolves at every difficulty level (10e-0: was 'refuses at every difficulty level' in 10d; the integer-field path is unblocked now)", () => {
   for (const entry of MCL01_ENTRIES) {
-    assert.equal(resolveOptionSelectSpec(makeTask(entry)), null, `level ${entry.difficulty_level}`);
+    const spec = resolveOptionSelectSpec(makeTask(entry));
+    assert.notEqual(spec, null, `level ${entry.difficulty_level}`);
+    assert.equal(spec!.kind, 'numeral-options', `level ${entry.difficulty_level}`);
   }
 });
 
-test('C-CC-03 refuses at every difficulty level (same structural refusal, no template-id list involved)', () => {
+test("C-CC-03 resolves at every difficulty level (10e-0: was 'refuses at every difficulty level' in 10d; same unblock, no template-id list involved either way)", () => {
   for (const entry of CC03_ENTRIES) {
-    assert.equal(resolveOptionSelectSpec(makeTask(entry)), null, `level ${entry.difficulty_level}`);
+    const spec = resolveOptionSelectSpec(makeTask(entry));
+    assert.notEqual(spec, null, `level ${entry.difficulty_level}`);
+    assert.equal(spec!.kind, 'numeral-options', `level ${entry.difficulty_level}`);
   }
 });
 
-test('the refusal is keyed on declared type alone: a synthetic differently-named int key on an otherwise C-MCL-02-shaped task refuses too', () => {
+test("resolution is keyed on declared type alone: a synthetic differently-named int key on an otherwise C-MCL-02-shaped task resolves too (10e-0: was 'the refusal is keyed on declared type alone... refuses too' in 10d; the underlying type-not-name discipline is unchanged, only the outcome for this binding kind is)", () => {
   const task = makeTask(MCL02_ENTRIES[0]!);
   task.valid_action_space = { chosen_value: 'int' };
   task.prompt_payload = { numeral_options: [1, 2, 3], target_representation_value: 2 };
-  assert.equal(resolveOptionSelectSpec(task), null);
+  const spec = resolveOptionSelectSpec(task);
+  assert.notEqual(spec, null);
+  assert.equal(spec!.kind, 'numeral-options');
+  if (spec!.kind === 'numeral-options') {
+    assert.equal(spec!.scoreKey, 'chosen_value');
+    assert.equal(spec!.quantity, 2);
+    assert.deepEqual(spec!.numeralOptions, [1, 2, 3]);
+  }
 });
 
 test('a synthetic differently-named pipe-string key still resolves (proves classification is type-derived, not a hardcoded key name)', () => {
@@ -136,8 +151,11 @@ test('a synthetic differently-named pipe-string key still resolves (proves class
   task.valid_action_space = { verdict: 'up|down|same' };
   const spec = resolveOptionSelectSpec(task);
   assert.notEqual(spec, null);
+  assert.equal(spec!.kind, 'choice');
   assert.equal(spec!.scoreKey, 'verdict');
-  assert.deepEqual(spec!.alternatives, ['up', 'down', 'same']);
+  if (spec!.kind === 'choice') {
+    assert.deepEqual(spec!.alternatives, ['up', 'down', 'same']);
+  }
 });
 
 // --- C-CC-04: pipe-string path, held shut by the non-numeric-payload guard -------------------------

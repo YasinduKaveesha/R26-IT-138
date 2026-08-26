@@ -50,6 +50,20 @@ export const KEYPAD_KEY_SIZE = 48;
 
 export const KEYPAD_KEY_SPACING = 8;
 
+// `object-quantity-display.tsx`'s own per-object size (10e-0) -- a PASSIVE, READ-ONLY display,
+// never pressed, so SPEC section 10's 48px interactive-touch-target floor does not govern it at all
+// (matching `value-report-surface.tsx`'s own `PAYLOAD_TOKEN_SIZE` precedent: "SPEC section 10
+// governs interactive geometry... it says nothing about a label a child never presses"). Kept as
+// its own constant pair, not reused from `TOKEN_TOUCH_TARGET_SIZE`/`STEP_TOUCH_TARGET_SIZE`, for the
+// same reason those two are kept apart from each other: a third, conceptually distinct primitive
+// gets a third pair, even where a value might otherwise coincide. Sized at half of
+// `TOKEN_TOUCH_TARGET_SIZE`/`TOKEN_SPACING` -- small enough that a real quantity in the dozens wraps
+// into a small, legible block on a typical phone width rather than one unusably long row, while
+// still being a deliberately named constant, never a bare literal in the primitive itself.
+export const OBJECT_TOKEN_SIZE = 28;
+
+export const OBJECT_TOKEN_SPACING = 6;
+
 // A ceiling on how large a key is allowed to grow (2026-08-26 request), never a floor -- keys
 // still respect KEYPAD_KEY_SIZE as their minimum (SPEC section 10's 48px accessibility floor,
 // untouched). Without a cap, `key`'s `flex: 1` lets each key's WIDTH grow to fill however wide its
