@@ -1951,3 +1951,537 @@ default that question shut.
 The hub-card-per-family investigation (BKT selection is a single cross-family adaptive stream;
 skills and families are many-to-many, not one-to-one) is recorded above for provenance but was
 explicitly dropped from scope by owner instruction and does **not** appear in `ESCALATIONS.md`.
+
+## 2026-08-26 -- CONNECT Step 1: owner approval recorded for the seven parameter families
+
+The owner signed off on all seven Component C parameter families -- 1 (Selection) and 2 (Safety)
+unconditionally, 3-7 with binding conditions -- authorising the CONNECT work order to open the
+production session gate. Full table transcribed verbatim into
+`Component_C_Frontend/APPROVAL-2026-08-26-seven-families.md` (approver: Yasindu (owner), date
+2026-08-26, scope: the seven Component C parameter families only). No other approver, role,
+signature, or threshold is recorded anywhere.
+
+Two recorded limits, carried into that document rather than resolved in code:
+
+- Family 1's text names "BKT" as the selection authority; in this codebase BKT is Component B's
+  (`app/application/attempt_submission.py`, `opportunity_selection.py`), while Component C's active
+  policy is `policy/rule_based.py` (`QLearningDisabledError` on both Q-learning modes). Read for
+  this runtime as "selection is backend-controlled, frontend never chooses."
+- Family 7's second sentence (BKT distinguishing first-attempt from retry performance) is out of
+  scope for this work order, per the same table's third sentence forbidding an invented
+  retry-weighting formula. CONNECT Step 5 makes the underlying attempt-level data real; it does not
+  implement Family 7 in full.
+
+### Step 0 baseline, measured at `b228564` (not relayed from any prior document)
+
+- Backend, rebuilt container (`docker compose build api` then
+  `docker compose run --rm --no-deps api python -m pytest -q`): **650 passed, 1 failed, 76
+  skipped**. The single failure is `tests/test_auth.py::test_invalid_tokens_fail_closed[expired]`
+  -- root-caused to the uncommitted `auth.py` `leeway=30` change (`auth.py:104`) keeping a token
+  built at `exp-1s` (`test_auth.py:127`) valid. Owner ruling: **carry forward as a pinned
+  known-bad baseline** -- do not fix, do not revert `auth.py`, out of scope and in security code.
+  From this point on, "green" means exactly this set of one failing node id; any change to that
+  set (a different id, an additional failure, or this one disappearing) is a regression, not an
+  improvement, and stops the work order.
+- Frontend: `npx tsc --noEmit` exit 0; `npm run test:contract` 1324/1324/0; `npx expo export
+  --platform ios` succeeded (`dist/` removed after).
+- Git: `b228564078574a75063c04da77303dc0365c0f3f`, branch `C_backend`, 27 commits ahead of
+  `origin/C_backend`; working tree unchanged from HANDOVER.md §7 (2 modified: `auth.py`,
+  `secure-storage.ts`; 2 untracked: `hub.png`, `.playwright-mcp/`).
+
+Both the previously-cited `651 passed / 76 skipped` backend figure and the assumption of a clean
+backend suite are superseded by the pinned baseline above.
+
+## 2026-08-26 -- CONNECT Steps 2+3 (merged): the governed catalogue, vendored, and the first approved runtime bundle
+
+Step 2 as originally written (author a PROVISIONAL catalogue) was based on a wrong premise: that
+no governed catalogue existed anywhere reachable. It does --
+`R26-IT-138_Component_C_Game_Task_Catalogue_v1.0.md` (2133 lines, dated 2026-07-13), in a sibling
+tree outside `Upadya/` (`ResearchProject/Yass/Component_C_v1.0/`), reachable only via a path
+constant inside the installed generator wheel
+(`component_c_generator.catalogue.loader.DEFAULT_CATALOGUE_PATH`). Nothing in `Upadya/` referenced
+it; every frontend document here was written as though it did not exist. Full account, with no
+recommendation, in `Component_C_Frontend/ESCALATIONS.md` §6.
+
+Corrected plan: vendor the real file rather than author a substitute. Verified byte-identical both
+directions (source and vendored copy, `sha256 82004a5fef94528ea1e4187473420453bdfb7e1d3b5ade48ce2bc03486630851`,
+recomputed independently, not trusted from anyone's paste) into
+`backend/provenance/R26-IT-138_Component_C_Game_Task_Catalogue_v1.0.md`. `_CATALOGUE_PATH`
+repointed in both `c_session_service.py` and `task_service.py`. `load_catalogue` confirmed to
+accept it from the new location inside a rebuilt container: 30 templates, 8 families,
+`catalogue_status: PROPOSED_FOR_APPROVAL` -- not `APPROVED`. Two build-context defects found and
+fixed along the way, both required for the file to actually reach a fresh image rather than only
+working locally: `.dockerignore` excludes all of `provenance/` by default and needed a
+path-specific carve-out (following the existing wheel/schema carve-out pattern); the Dockerfile
+copies `provenance/` files individually, one `COPY` line per file, and needed a new line for this
+one. A third, more serious instance of the same class of defect was found only during owner
+verification: `.gitignore`'s blanket `*.md` rule (line 29) has no negation for this path either,
+so the vendored file was untracked-but-ignored -- committable only by accident of the working tree,
+invisible to a fresh clone, which would 409 on every session with no test able to catch it (the
+suite is only ever green because the file happens to be present locally). Fixed with a
+path-specific `.gitignore` negation, same pattern as the existing BE3b/BE3c test-fixture carve-out;
+confirmed both directions (`git check-ignore` exits 1 with no output; `git status` lists the file
+as untracked/committable).
+
+Step 3, merged into the same step per owner correction (the original split guaranteed a red tree
+between the two STOP gates, since the catalogue repoint and the bundle's checksum recomputation
+are one atomic change, not two): authored
+`backend/provenance/c-runtime-bundle-approved-1.0.json`, schema-validated against
+`c-runtime-bundle.schema.json` (schema_version 1.3). `bundle_version: "c-approved-1.0"`,
+`approval_status: "APPROVED"`, `publication_state: "PUBLISHED"`. The three bundle-data families
+(selection, safety, evidence_window) carry every per-field `status: "APPROVED"`, values carried
+forward unchanged from the prior fixture, each `source` citing
+`APPROVAL-2026-08-26-seven-families.md` by family number -- the change is provenance, not numbers.
+`catalogue.checksum` recomputed from the vendored file (not copied); `catalogue.version: "1.0"`
+taken from the real catalogue's own declared version. `catalogue.approval_status` records
+`"PROPOSED_UNSIGNED"` -- the catalogue's own literal status ("PROPOSED FOR APPROVAL") has no exact
+match in this schema's `approvalStatus` enum, and PROPOSED_UNSIGNED's own description ("a cited
+source specifies this exact value, but that source's own approval/sign-off process has not
+completed") is the nearest true one; the mapping is not left implicit -- the schema gained one new
+OPTIONAL, additive field (`versionedArtifact.source_status_note`) and the bundle's `catalogue`
+block carries the catalogue's literal status string verbatim in it, with the file:line citation.
+`database_schema_revision`/`compatibility.database_schema_minimum` set to the real alembic head
+(`20260816_0008`, measured inside the container, not assumed); `backend_code_version` set to the
+real default (`0.1.0-be1.3`, `app/core/config.py`). `_BUNDLE_PATH` repointed in both files.
+`resolve_c_bundle_and_catalogue` confirmed end-to-end inside the container: schema valid, no
+checksum mismatch, `approval_status` reads `APPROVED`, 30 templates loaded.
+
+Two judgment calls, both surfaced to and confirmed by the owner rather than decided silently:
+`catalogue.approval_status` mapping (above), and `activation_date: "2026-08-26T00:00:00Z"` (the
+schema requires a non-null value once `publication_state: PUBLISHED`; grepped the codebase and
+confirmed nothing gates on its actual value).
+
+### The residue, and its root cause
+
+Repointing `_BUNDLE_PATH` alone (before the checksum fix) surfaced 35 failures beyond the pinned
+baseline -- not a regression in the code, but `assert_family_usable`/checksum verification working
+correctly: the committed bundle fixture declared the OLD catalogue's checksum
+(`55709112...`) while `_CATALOGUE_PATH` now served the real one (`82004a5f...`), so
+`resolve_c_bundle_and_catalogue` 409'd every session before any test's own assertions ran. Root
+cause diagnosed by the owner directly (`bundle_resolution.py:77`), not guessed at. Fixed by
+recomputing `catalogue.checksum` against the vendored file in the new approved bundle -- at which
+point 29 of the 35 cleared. The remaining 6, all in
+`tests/test_c4b_routes_and_bundle_config.py`, were a genuine, distinct test-seam gap: that file's
+autouse fixture monkeypatches `_BUNDLE_PATH` to `all_usable_for_tests_bundle_c.json` but had never
+needed to patch `_CATALOGUE_PATH`, because until this batch `_CATALOGUE_PATH` WAS the fixture
+pointer -- no test ever needed to override it. Fixed by patching `_CATALOGUE_PATH` alongside
+`_BUNDLE_PATH` in the same fixture (both `c_session_service` and `task_service` modules), paired
+with `test_catalogue_c.md` -- verified its checksum (`55709112...`) matches exactly what
+`all_usable_for_tests_bundle_c.json` already declared. No test assertion, expected value, or
+template expectation was changed; 11 additive lines total.
+
+Final state, rebuilt container: **650 passed, 1 failed, 76 skipped** -- the failing node id is
+exactly and only `tests/test_auth.py::test_invalid_tokens_fail_closed[expired]`, the pinned Step 0
+baseline, unchanged. Verified twice more after the schema/note addition above; identical both
+times.
+
+### Noted for Step 4, not resolved now
+
+The three bundle-data families in the new bundle carry per-field `status: "APPROVED"` but
+`parameter_source_status: "TEST_FIXTURE_ONLY"` at the block level. Nothing gates on that field for
+these three families (bundle-data families are gated per-field, not by `parameter_source_status`),
+so it is not why anything currently passes or fails -- but a bundle stamped `APPROVED` whose
+config blocks still read `TEST_FIXTURE_ONLY` is internally inconsistent and could be resolved the
+wrong way by a later reader. Owner asked for a proposal at Step 4 planning, not a change now.
+
+## 2026-08-26 -- CONNECT Step 4: the probes replaced, the two adapter methods, the import-guard fix, and two authorized test inversions
+
+The largest code change in the CONNECT work order, previously undocumented here -- written up now
+under owner instruction, since the Component_C_Frontend/ documents are not in git and this file is
+the only durable copy.
+
+**Generation.** `PRODUCTION_GENERATION_CONFIG_PROBE` (deliberately empty, `per_template={}`,
+always-refused) replaced with `PRODUCTION_GENERATION_CONFIG`: a real, populated `GenerationConfig`
+covering all 30 templates, tagged `APPROVED_FOR_PROVISIONAL_IMPLEMENTATION` under
+`APPROVAL-2026-08-26-seven-families.md` Family 4. Template-id coverage verified 1:1 against the
+vendored real catalogue -- no missing id either direction, checked, not assumed.
+
+**The route it took to get there.** A first attempt read
+`component_c_generator.generation_config.DEFAULT_TEMPLATE_GENERATION_PARAMS` directly in
+`task_service.py` and tripped `test_component_c_generator_full_dotted_path_enforcement`
+(`test_be2_architecture_guards.py:504`) -- a real, correctly-firing guard restricting
+`component_c_generator` as an import root to `app/infrastructure/live_engine_c/adapter.py` alone.
+Per supervisor ruling, the guard was not exempted; two new adapter methods were added instead --
+`LiveEngineCAdapter.production_generation_params_by_template()` and
+`.production_generation_config_version()` -- the same shape `supported_template_ids()` already
+uses to expose package data to the application layer. `task_service.py` no longer imports
+`component_c_generator` at all; the guard now passes because the violation is gone, not because it
+was weakened. A full sweep of every other guard in `test_be2_architecture_guards.py` (not just the
+one the docstring pointed at, a miss from the first pass, corrected before implementing) found
+nothing else implicated by this step's changes.
+
+**Policy.** `PRODUCTION_POLICY_CONFIG_PROBE` (deliberately implausible, edge-pinned values, a
+supervisor ruling preserved verbatim in the code comment rather than deleted) replaced with
+`PRODUCTION_POLICY_CONFIG`: the real `default_policy_config()` values (0.80/1.30/0.30/0.40/3/0.60,
+`config_version: "c4.1-policy-1.0.0"`), hardcoded as literals (never calling the factory, S8-a's
+guard unchanged), under Family 5. Both ordering constraints `CPolicyConfig`'s own model_validator
+enforces checked by hand against the real values (0.40 < 0.80; 0.30 < 0.60 -- both hold).
+
+**Scaffold.** Status only, as planned -- `PRODUCTION_SCAFFOLD_CONFIG_PROBE` renamed to
+`PRODUCTION_SCAFFOLD_CONFIG`; its four numeric fields already matched `default_scaffold_config()`
+and were not touched.
+
+**The provenance question.** `_NOT_LIVE_PARAMETER_SOURCE_STATUS` renamed in place to
+`_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS` (value changed to
+`APPROVED_FOR_PROVISIONAL_IMPLEMENTATION`), kept as a hardcoded constant rather than moved into the
+bundle -- the bundle schema carries no blocks for the four code-gated families at all, and building
+them would collapse two deliberately distinct gate mechanisms (per-field bundle-data whitelist vs.
+code-gated status check) into one, a redesign this step was not authorized to make. Written up as
+its own architectural question in `Component_C_Frontend/ESCALATIONS.md`, no recommendation.
+
+**TWO AUTHORIZED TEST INVERSIONS, under supervisor ruling, the one exception to "change no
+assertion" this work order grants, and only for these two:**
+
+1. `tests/test_batch2_adaptation_live_caller.py::test_production_policy_config_probe_does_not_mirror_the_real_defaults`
+   -- renamed to `test_production_policy_config_matches_the_approved_real_defaults`. Its old
+   premise (the probe must NOT resemble a real calibration) was a tripwire against a SILENT
+   promotion; Step 4's promotion is authorized and disclosed, not silent, so the tripwire is
+   inverted rather than retired: it now asserts the values DO match `default_policy_config()`,
+   `config_version` IS `"c4.1-policy-1.0.0"`, and `parameter_source_status` is the approved
+   literal, never `TEST_FIXTURE_ONLY` -- it still fires red on either an invented-value regression
+   or a status promoted ahead of real values.
+2. `tests/test_c5_task_serve_and_evaluate.py::test_p6_next_task_real_http_route_refuses_because_no_governed_generation_config_exists`
+   -- renamed to
+   `test_p6_next_task_real_http_route_serves_a_real_catalogue_task_with_no_leaked_answer`. Its old
+   premise (the real HTTP route always refuses) was retired BY NAME by this same step. Inverted to
+   assert, at the same real HTTP boundary: 201 not 409; the served template id is a real member of
+   the catalogue (membership check, never a hardcoded id); the response key set is exactly
+   `CNextTaskResponse`'s declared set; and no answer-bearing value leaks -- checked
+   `test_s5_full_30_template_leak_loop`'s own way (leaf-value comparison excluding
+   known-public-collision fields), not a naive substring scan, after a first attempt using one
+   false-positived on `C-CC-03`'s own legitimately-public `set_size` value colliding with its
+   secret answer -- caught and fixed before reporting, not left in.
+
+Both authorities: supervisor ruling, CONNECT Step 4, both individually granted, both recorded in
+each test's own updated docstring naming the old premise, why it retired, and what the test now
+protects.
+
+Full backend suite after this step: pinned baseline held exactly
+(`tests/test_auth.py::test_invalid_tokens_fail_closed[expired]`, the only failure, predicted).
+
+## 2026-08-26 -- CONNECT Step 6: the bundle registered, then found missing, then the mechanism
+
+`backend/scripts/register_c_runtime_bundle.py` written -- importable core / side-effects-under-
+`__main__` shape (mirrors `generate_c_template_registry.py`); idempotent (re-run with an unchanged
+manifest is a no-op, same `c_runtime_bundle_record_id`); refuses loudly, never silently overwrites,
+if a `bundle_version` is already registered with a manifest_checksum that disagrees with the file
+on disk (`BundleRegistrationConflictError`) -- proved with a deliberately modified copy of the
+manifest, confirmed the real row was untouched by the refused attempt. `manifest_checksum` computed
+via `hashlib.sha256(path.read_bytes()).hexdigest()`, the same method every other artifact checksum
+in this codebase already uses. Run as `python -m scripts.register_c_runtime_bundle`, never
+`python scripts/...`.
+
+Precedent correction, recorded in the script's own docstring: the work order named
+`scripts/dev_fixture_learner.py` as this script's "DB-writing precedent." That file's own docstring
+states the opposite -- "HTTP-DRIVEN, ZERO DIRECT DATABASE WRITES" -- and a dedicated test asserts it
+never imports a SQL toolkit. No script anywhere in `scripts/` wrote to the database directly before
+this one; only `generate_c_template_registry.py`'s importable-core/`__main__`-only shape was
+actually followed.
+
+Registered, then exercised the real HTTP route end to end for the first time in this project's
+history: `POST /api/v1/c/sessions` -> 201 (`c_session_id b6fc81cf-...`, state active, session_mode
+c_only, grade 2); `POST .../tasks/next` -> 201 (`C-CC-02`, `C-GF-01`, counting, difficulty 1,
+scaffold_state C0, `prompt_text` "Put this many objects in the box."). Method: `TestClient` against
+the fully-wired `app` with only the `get_authenticated_principal` dependency overridden -- the same
+mechanism this suite already treats as "the real HTTP boundary" throughout `test_c5`/`test_c6a`/
+etc.; not a separate network round-trip against the live `uvicorn` process with a real Supabase JWT
+-- that is what Step 8's browser walk is for. `C-CC-02` has a registered frontend archetype
+(grouped with `C-CC-01`), not one of the three held templates. Worth carrying into Step 8: this is
+exactly the template `ESCALATIONS.md` §5 already names as having deictic wording -- the live
+response shows `prompt_payload.target_n: 2` present and not woven into `prompt_text`. Not new, not
+this step's to fix; now reachable by an actual first task rather than theoretical.
+
+Full backend suite re-run after registration: 651 passed, 1 failed (the pinned
+`test_auth.py::test_invalid_tokens_fail_closed[expired]`), 76 skipped -- reported and predicted
+correctly.
+
+**Then the owner queried the database directly and found zero rows for `bundle_version =
+'c-approved-1.0'`.** The suite's own green result said nothing about it -- no test in the suite
+reads `c_runtime_bundle_records`' contents, so nothing could have caught this from inside the
+suite.
+
+**Root cause, first reported wrong, then corrected under owner challenge -- the correction matters
+as much as the finding.** First pass claimed "the ONLY such downgrade anywhere in the suite... one
+hit" against a grep the owner had not seen the output of. The owner ran the same grep and got six:
+
+    grep -rn 'alembic("downgrade"' tests/*.py
+    tests/test_be2_persistence.py:148          downgrade 20260722_0001
+    tests/test_be4a_opportunity_persistence.py:123   downgrade 20260723_0001
+    tests/test_be4b_adaptive_selection.py:170        downgrade 20260727_0001
+    tests/test_be4c_attempt_submission.py:232        downgrade 20260727_0002
+    tests/test_be4d_hint_events.py:234               downgrade 20260728_0001
+    tests/test_be4e_session_completion.py:228        downgrade 20260728_0002
+
+Re-run and confirmed directly, not taken on the owner's word: six matches. Every backend phase has
+its own migration-reversibility test. Checked against `migrations/versions/20260816_0001_c2_
+runtime_bundle_record.py` (the migration that creates `c_runtime_bundle_records`): all six
+downgrade targets (dated 20260722 through 20260728) predate it, so all six -- not five, not one --
+drop the table on the way down and recreate it empty on the way back up. This is systemic to how
+the migration suite verifies reversibility, not incidental to one test's collection-order position.
+Any registered bundle row does not survive a full suite run, regardless of when it was registered
+or which of the six tests happens to run "first" among them. The 49 rows the owner originally found
+were every one a `test-<uuid>`/`DRAFT`/`UNRESOLVED` fixture row written by a test that ran later
+than all six downgrade/upgrade tests in pytest's deterministic (no randomization plugin configured)
+collection order.
+
+**The miss itself, recorded because it is the second of its kind this work order (the first was
+the Step 4 architecture-guard sweep):** a grep was run against a narrower scope than the claim made
+about its result, and the narrow result was reported as a global one -- "the only," "one hit" --
+without showing the command or its raw output. Both misses share the same shape: a negative claim
+("nothing else references this," "only one test does this") asserted from a search that had not
+actually covered what the claim implied. Standing correction, applying from here forward: a
+negative result gets the command and its raw output shown, not just the conclusion.
+
+**Consequence, written down here and in the script's own docstring so it is discoverable rather
+than only known:** register this bundle AFTER the last full backend suite run intended before
+relying on a live session, never before it. A full `pytest -q` run silently un-registers it with no
+failing test to say so. Re-registered; verified this time with a direct SQL query against the real
+`db` service (`select ... where bundle_version = 'c-approved-1.0'` -- 1 row, matching checksum,
+`APPROVED`/`PUBLISHED`), not the script's own printed output. Re-ran both live HTTP calls: 201/201
+again (`c_session_id 9c7608d4-...`; task `C-JB-03`, addition, `prompt_text` "Add the two numbers.").
+
+**`--check` mode, built per owner ruling:** read-only, shares `_lookup` (checksum + query) with the
+write path so the two can never independently drift on "does this match" -- three states
+(`NOT_REGISTERED`/`MATCHING`/`DISAGREEING`), distinct exit codes (1/0/2), `DISAGREEING` reported as
+loud as the write path's own `BundleRegistrationConflictError`. All three states demonstrated with
+raw output and exit codes: `MATCHING` against the real registered bundle (exit 0); `NOT_REGISTERED`
+against a manifest with a never-registered `bundle_version` (exit 1); `DISAGREEING` against the
+same modified-content, same-`bundle_version` file the write-path refusal was proved against earlier
+(exit 2). Confirmed by direct SQL query after the `DISAGREEING` check that it wrote nothing -- same
+row id, same checksum, unchanged.
+
+Second instance this work order of a step reporting green while the artifact it was meant to
+produce was absent -- the first was the .gitignore'd catalogue (CONNECT Steps 2/3). Both invisible
+to their respective test suites for the same reason: the suite exercises code; neither artifact is
+code. Carried into Step 8 planning, where most of what is being verified is also not code.
+
+## 2026-08-26 -- CONNECT Step 7: the frontend cut over
+
+Small, stayed small, as the work order asked. `python -m scripts.register_c_runtime_bundle --check`
+run first (MATCHING, exit 0) to establish the habit before touching anything, per supervisor
+instruction -- every step touching the live app depends on that row from here on.
+
+`frontend/.env.local`: the five `EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE*` vars removed.
+`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `EXPO_PUBLIC_API_BASE_URL`,
+`EXPO_PUBLIC_APP_ENV` untouched, same order. This file is gitignored (`.env.local`), so the change
+never shows in `git status` -- recorded here for exactly that reason, since it is otherwise
+invisible to anyone reading the tree.
+
+No frontend code changed. The fixture code (`component-c-api.ts`'s fixture branch,
+`dev-fixture-exemplars.ts`) and all four `src/api/__tests__/c-dev-fixture-*.test.ts` files left in
+place, per instruction -- they remain the only coverage of that branch.
+
+Pre-flight check, done before removing the vars: grepped every reference to the five var names
+across the whole frontend tree (six files total -- the two real source files plus the four
+fixture test files, confirmed exhaustively, no others). Each of the four test files saves the
+ambient value (including `undefined`), overwrites it with its own explicit value, and restores the
+original in an `afterEach` -- none of them reads the ambient `.env.local` value as an input to what
+they assert. Predicted the reconciled count would not move.
+
+Gate: `npx tsc --noEmit` -- exit 0. `npm run test:contract` -- **1324 tests, 1324 pass, 0 fail** --
+exactly the predicted, reconciled count, unmoved. `npx expo export --platform ios` -- succeeded,
+`dist/` removed after.
+
+## 2026-08-26 -- CONNECT Step 8 (in progress): the stale-container trap recurs, and a real validator defect found live, by a real submission, on a real browser walk
+
+Two findings during the browser-driven verification walk, neither from the automated backend-only
+rehearsal -- both from the owner actually playing the app.
+
+### Finding 1: the running api-1 container was serving a stale image, again
+
+`docker inspect upadya-be1-api-1` showed the long-running service container (`Up 4 hours`, created
+2026-08-25 23:12) was still running image `sha256:4e45af0f9b2d...` -- built well before today's
+CONNECT Steps 3-6 (bundle/catalogue repointing, the real probes, attempt_number, bundle
+registration). `docker compose build api` during those steps updated the `upadya-backend:be1-batch3`
+image tag's underlying layers, but never restarted the already-running container to pick it up --
+`docker compose build` does not recreate a running service on its own. The owner's browser had been
+talking to this stale process the entire time, producing a genuine `409 Conflict` on
+`POST /api/v1/c/sessions` (one of the seven family gates almost certainly still pointed at the old,
+pre-Step-3 bundle path). Root-caused by comparing `docker inspect`'s image id against
+`docker images upadya-backend:be1-batch3`'s latest build, not guessed. Fixed with
+`docker compose up -d --force-recreate api`; confirmed healthy and running the current image
+immediately after; the owner's next attempt through the browser succeeded. Same class of trap
+HANDOVER.md §6.1 already names for `docker compose run`, recurring here against the persistent
+service container instead -- worth widening that section's own wording to cover both.
+
+### Finding 2: `list[str]` action-space fields are unconditionally rejected -- a real, live defect
+
+While playing `C-CC-01` ("Count and Collect"), the owner submitted a genuinely correct answer
+(`selected_object_ids: ["obj-0","obj-1","obj-2"]`, `submitted_total: 3`, matching the task's own
+`correct_answer_payload` exactly -- `expected_total: 3`, `valid_object_ids` the same three ids) and
+got a real `422 ACTION_PAYLOAD_REJECTED`, `details: [{"location": ["selected_object_ids"],
+"type": "type_mismatch"}]`.
+
+Root cause, reproduced directly against the real validator, not guessed:
+`app/domain/live_engine_c/action_payload_validation.py`'s `_value_matches_declared_type` has
+branches for `int`, `bool`, `number`, pipe-string enums, and `list[X]` (which recurses into
+`_value_matches_declared_type(inner_type, element)` for each element) -- but **no branch for bare
+`"str"`**. For `list[str]`, every element's inner check falls through to the function's own
+documented fail-closed default (`return False`, "Unrecognized declaration"). Confirmed directly:
+
+    validate_action_payload(
+        {'submitted_total': 'int', 'selected_object_ids': 'list[str]'},
+        {'selected_object_ids': ['obj-0', 'obj-1', 'obj-2'], 'submitted_total': 3},
+    )
+    -> ActionPayloadValidationError: ((('selected_object_ids',), 'type_mismatch'),)
+
+**Every `list[str]` field is unconditionally rejected, for any content, always** -- not a
+correctness question (the evaluator is never reached; this is the structural gate ahead of it).
+
+**Why the existing suite never caught it:** the one positive-control test for this validator,
+`test_c12_positive_control_valid_payload_reaches_evaluate`
+(`tests/test_c5_task_serve_and_evaluate.py:789-799`), builds its payload with
+`if declared_type.startswith("list["): return []` -- an EMPTY list for every list-typed field.
+`all(...)` over an empty list is vacuously true, so the inner per-element type check
+(`_value_matches_declared_type("str", element)`) was never actually exercised by the only test
+positioned to catch it. The gap in the test is what let the gap in the validator ship -- the same
+shape as the C-BT-04/C-SF-01 answer-key naming gaps found while building the held-template walk
+script, and the same shape the module's OWN docstring warns about for a genuinely new type-string
+vocabulary ("this will surface as a loud rejection during that phase's own testing, not a silent
+gap") -- except it was not caught during any phase's testing, because the one test built to catch
+it was itself built with a value that could never trigger the check.
+
+**Affected templates, checked against all 30 templates' `valid_action_space` declarations (pulled
+directly from `component_c_generator.tasks.registry` while building the held-template walk
+script's answer-key overrides):** exactly two use `list[str]` -- `C-CC-01` (`selected_object_ids`)
+and `C-CC-02` (`placed_object_ids` -- the same template already flagged for the deictic
+`target_n`/`prompt_text` finding, ESCALATIONS.md §5). No other template's `list[...]` field uses
+anything but `list[int]`, which the validator handles correctly.
+
+**Consequence:** both templates are currently unplayable for any submission that selects at least
+one object -- the normal path, not an edge case. Neither template is one of the three held ids;
+both are supposed to be fully live and reachable today.
+
+Reported and held for owner ruling before fixing, per standing discipline -- this is exactly the
+class of defect a live browser walk exists to catch that the test suite's own construction missed,
+found live, by a real correct submission, not by inspection.
+
+**RULED: fix now, not held** -- two of thirty templates unplayable, one (`C-CC-02`) the first task
+the live route ever served, `C-CC-01` sitting in the exact grade-2 `number_sense` pool the held-
+template walk needs. Continuing the walk around it would have corrupted the evidence for
+conditions 3, 5, and 6 (every draw of either template reading as a spurious wrong-answer failure).
+
+**Fix, exactly as ruled, nothing else touched:** one new branch added to
+`action_payload_validation.py`'s `_value_matches_declared_type` --
+`if declared_type == "str": return isinstance(value, str)`. No other type touched.
+
+**The fixture that hid it, fixed too:** `test_c5_task_serve_and_evaluate.py`'s
+`test_c12_positive_control_valid_payload_reaches_evaluate::valid_value` no longer returns `[]` for
+a `list[...]` declaration -- it now returns `[valid_value(inner_type)]`, a real, non-empty element
+recursed through the same function, so the per-element check is actually exercised rather than
+vacuously passed.
+
+**New test, exhaustive, negative-claim rule applied (command and raw output, not the
+conclusion):** `test_c12_list_str_accepted_and_negative_controls_still_fire`, added directly above
+the positive control it corrects. Enumerated every declared type string that actually appears in
+`contract/c-template-registry.json` first, not assumed:
+
+    docker compose run --rm --no-deps api python -c "..." (types = set of every valid_action_space value)
+    <|>|=
+    bool
+    int
+    left|right|equal
+    list[int]
+    list[str]
+    number
+    same|changed
+
+-- exactly the eight types the owner named. All eight asserted both ways (one valid instance, one
+invalid instance) in the new test, plus the two owner-specified negative controls
+(`list[str]` containing a non-string element; `list[int]` containing a string element) proving the
+fix did not convert either fail-closed default into fail-open. Full run, raw:
+
+    docker compose run --rm --no-deps api python -m pytest -q tests/test_c5_task_serve_and_evaluate.py -k "c12" -v
+    collected 17 items / 11 deselected / 6 selected
+    tests/test_c5_task_serve_and_evaluate.py ......                          [100%]
+    6 passed, 11 deselected, 1 warning in 7.32s
+
+Then reproduced the ORIGINAL real failing payload directly, not a synthetic stand-in:
+
+    validate_action_payload(
+        {'submitted_total': 'int', 'selected_object_ids': 'list[str]'},
+        {'selected_object_ids': ['obj-0', 'obj-1', 'obj-2'], 'submitted_total': 3},
+    )
+    -> VALIDATION PASSED
+
+**Frontend checked, per owner instruction, before declaring this closed:** `field-kinds.ts`'s own
+`isValidForKind` for `id-set-collection` was already correct
+(`Array.isArray(value) && value.every((element) => typeof element === 'string')`,
+`field-kinds.ts:95-96`) -- no equivalent bug on the frontend side. Its own test
+(`c-archetype-resolution.test.ts`) does NOT share the backend fixture's vacuous-empty-list blind
+spot: `sampleValueFor`'s `id-set-collection` case already returns a real, non-empty
+`['obj-1', 'obj-2']` (line 49-50), and a dedicated negative control already exists
+(`isValidForKind(binding, ['a', 1])` -> `false`, line 154). Nothing to fix on the frontend; the
+defect was backend-only.
+
+**The asymmetry itself, worth more than the one-line fix (owner's own framing, on independent
+verification of the frontend claim above):** the frontend's positive controls cover BOTH shapes --
+`['obj-0','obj-1']` / `['obj-0','obj-1','obj-2']` (non-empty, real strings) AND, deliberately, an
+empty-list case at `c-object-set-action-key-set-proof.test.ts:34` ("an empty selected_object_ids
+list still encodes -- the client never enforces a minimum selection"). The backend's positive
+control covered ONLY the empty case -- never the non-empty one. Both suites were green for the
+entire life of this code; both sides disagreed about what a real `list[str]` submission looks like
+for that whole time; and neither suite could see it, because neither side's test ever asked the
+other side's actual shape. The defect was not the missing branch -- anyone could have written that
+once shown the gap. The defect was that the two suites tested complementary halves of the same
+question and neither one covered the half the other side actually exercises in production.
+
+No `ESCALATIONS.md` entry -- ruled unnecessary: a straightforward code defect with an obvious
+correct fix and no open question for governance/pedagogy/science does not belong in a document
+whose value is that everything in it genuinely needs an owner's ruling. This entry, closed in
+place, is the sufficient and correct record.
+
+Full backend suite re-run after the fix -- see this entry's own final section below for the raw
+failing-node-id list.
+
+### Held-template reachability -- backend-only script, REACHABILITY EVIDENCE ONLY, explicitly NOT held-template verification
+
+Before the browser walk, a scripted rehearsal (`TestClient` against the real, fully-wired `app`,
+real HTTP calls, a throwaway seeded learner -- never the owner's own account) drove a grade-3
+`c_only` session forward via real `POST .../tasks/next` + `POST .../tasks/{id}/actions` calls,
+answering correctly each time to advance, watching each response's `game_task_template_id`.
+`C-SF-02` (p=1/21) observed at advance 16; `C-TC-02` (p=1/14) observed at advance 29 -- both well
+inside the 62-advance, 95%-confidence ceiling computed for this pair.
+
+**What this proves:** the backend's real adaptive selector genuinely reaches both held templates
+in ordinary play, at rates consistent with the computed probabilities -- retiring the reachability
+question outright.
+
+**What this does NOT prove, stated explicitly per owner instruction, because it would be easy to
+blur later:** conditions 2 and 4 are claims about what the FRONTEND renders when a held template
+arrives -- the fail-closed frame, never a usable surface. A script hitting the API directly never
+loads `planTask`, never calls `resolveArchetypeSurface`, never renders anything at all. This
+rehearsal is backend-side reachability evidence ONLY. It does not, and cannot, stand in for the
+browser walk that conditions 2 and 4 actually require. That evidence is recorded separately below,
+paired with the response body at the moment each screenshot was taken.
+
+### Step 8 evidence table -- browser walk, live, in progress. Slots empty until filled from the actual session; no slot pre-filled with a prediction.
+
+| Condition | What it claims | Evidence | Status |
+|---|---|---|---|
+| 3/7 -- attempt_number increments | Retry a task with wrong answers; `attempt_number` reads 1,1,2,2,3,3 via DB query, never 1,1,1,1,1,1 | DB-CONFIRMED (not yet screenshot-paired): two retried instances in the owner's grade-2 session, `f68c716d-...` (C-BT-01) and `c951b2d7-...` (C-NP-01), both show `answer_submitted`/`answer_evaluated` at `attempt_number` 1 then 2 (never 1,1) -- raw `c_gameplay_events` query, task_index 2 and 3 | CONFIRMED (DB) |
+| 5 -- retry returns to same task, empty surface | Wrong answer -> feedback -> "Try again" -> surface empty, not stale | Owner reports a deliberate wrong answer worked as expected; DB confirms the retry cycle happened (attempt 1 -> 2 on both instances above) -- screenshot sequence of the empty-surface behavior itself still pending | DB-CONFIRMED; screenshot PENDING |
+| 6 -- scaffold_level escalates, backend-controlled | Repeated wrong answers on one task; `scaffold_state` visibly changes, matches response body | DB-CONFIRMED: `c_scaffold_events` for both retried instances above shows `scaffold_level: C1`, `event_type: shown`, `consecutive_incorrect_current_task: 1` -- response-body pairing still pending | DB-CONFIRMED; response-body pairing PENDING |
+| 1 -- frontend never sends template/family id, selection varies | Network tab across several tasks: no template/family field ever sent; ids vary | Session so far: C-TC-01, C-BT-01, C-NP-01, C-TC-03, C-TC-02 -- five distinct templates across five draws, confirming variance; Network-tab confirmation of no template/family field sent still pending | Variance CONFIRMED (DB); Network tab PENDING |
+| 2/4 -- C-SF-02 fail-closed | Held template arrives; fail-closed frame renders, never a usable surface | Not yet reached -- requires a Grade-3 session | PENDING |
+| 2/4 -- C-TC-02 fail-closed | Same | **CONFIRMED live.** Owner hit the fail-closed frame in the grade-2 session; support code `cc01411d-2ce0-4874-8515-542a56579ec5` resolved (by `request_id`, not instance id) to `c_task_instance_id 38ad214f-...`, template `C-TC-02`, family `C-GF-06`, skill subtraction, difficulty 1, task_index **5** -- self-pairing: the response the frame is unattributable without is the same response this lookup found | CONFIRMED |
+| 2/4 -- C-CC-04 fail-closed | Same (grade-2 session) | Not yet drawn in this session (5 draws so far, none C-CC-04) | PENDING |
+
+**Supplementary, not one of the five conditions but flagged by the owner to look at while live:**
+
+| Item | What to look at | Evidence | Status |
+|---|---|---|---|
+| C-CC-01 first real completion | First-ever genuine end-to-end pass through object-set-action, now that the validator fix is live | *(screenshot, pending)* | PENDING |
+| C-CC-02 first real completion | Same | *(screenshot, pending)* | PENDING |
+| C-CC-02 deictic wording | `prompt_payload.target_n` present, absent from `prompt_text` ("Put this many objects in the box.") -- to see, not to fix | *(screenshot, pending)* | PENDING |
+| Mid-task refresh | Refresh the page mid-task (real children will do this by accident on their first session). Tests ESCALATIONS.md §7 (abandoned-instance) directly -- what does the app show, and does `next_task` serve a fresh task silently or surface anything about the abandoned one? | Owner reports refresh worked -- first live observation of the resume-instead-of-mint fix outside a synthetic test. Screenshot + paired response body still pending for the durable record | OBSERVED (verbal); screenshot PENDING |
+
+**Advance log (browser session `26ff52bb-e143-48cf-a341-63e2f398d5f8`, grade 2, running count, filled in as reported):**
+
+| task_index | Template | Notes |
+|---|---|---|
+| 1 | C-TC-01 | Completed correct, attempt 1 |
+| 2 | C-BT-01 | Wrong then correct -- attempt_number 1,2 confirmed; scaffold C0->C1 confirmed |
+| 3 | C-NP-01 | Wrong then correct -- attempt_number 1,2 confirmed; scaffold C0->C1 confirmed |
+| 4 | C-TC-03 | Completed correct, attempt 1 |
+| 5 | C-TC-02 | **HELD -- fail-closed frame confirmed live** (support code = request_id `cc01411d-...`) |
