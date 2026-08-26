@@ -51,6 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from app.application.live_engine_c import c_session_service as c_session_service_module
+from app.application.live_engine_c import task_service as task_service_module
 from app.application.live_engine_c.bundle_resolution import resolve_selection_config
 from app.core.config import get_settings
 from app.domain.live_engine_c.errors import SelectionConfigurationMissingError
@@ -64,6 +65,13 @@ from app.main import app
 
 SCHEMA_PATH = "provenance/c-runtime-bundle.schema.json"
 ALL_USABLE_BUNDLE_PATH = "tests/fixtures/runtime_bundle_c/all_usable_for_tests_bundle_c.json"
+# CONNECT Step 2/3: _CATALOGUE_PATH used to be the app's only fixture pointer, so no test ever
+# needed to patch it -- production repointing it to the real, governed catalogue broke that
+# accident. ALL_USABLE_BUNDLE_PATH declares the OLD (test-fixture) catalogue's checksum, so it
+# must be paired with the matching fixture catalogue below, not the real one the app now serves
+# by default. This mirrors the pairing production now enforces (bundle.catalogue.checksum must
+# match the file _CATALOGUE_PATH actually points at) -- it is a pairing fix, not a new mechanism.
+ALL_USABLE_CATALOGUE_PATH = "tests/fixtures/runtime_bundle_c/test_catalogue_c.md"
 
 
 @pytest.fixture(autouse=True)
@@ -72,7 +80,10 @@ def _all_usable_bundle_for_http_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     hardcoded ``_BUNDLE_PATH``/``_SMOKE_MODE`` are untouched; this patches the imported module
     attributes for the duration of each test in this file."""
     monkeypatch.setattr(c_session_service_module, "_BUNDLE_PATH", ALL_USABLE_BUNDLE_PATH)
+    monkeypatch.setattr(c_session_service_module, "_CATALOGUE_PATH", ALL_USABLE_CATALOGUE_PATH)
     monkeypatch.setattr(c_session_service_module, "_SMOKE_MODE", True)
+    monkeypatch.setattr(task_service_module, "_BUNDLE_PATH", ALL_USABLE_BUNDLE_PATH)
+    monkeypatch.setattr(task_service_module, "_CATALOGUE_PATH", ALL_USABLE_CATALOGUE_PATH)
 BASE_BUNDLE_PATH = "tests/fixtures/runtime_bundle_c/valid_unapproved_bundle_c.json"
 
 
