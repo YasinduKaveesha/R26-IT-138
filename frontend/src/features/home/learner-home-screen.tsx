@@ -118,24 +118,68 @@ export function LearnerHomeScreen() {
     };
   }, [api, getAccessToken]);
 
+  // Once this screen has been visited and left AT ALL — the Play tab (LearnerTabBar's own
+  // `router.replace('/(learner)/play')`, which this screen has no other hook into), the hero
+  // button, a scroll-dismiss, anything — a later return should open straight at the session card,
+  // never back at the hero. `openBLearning` and handleGestureSettle's snap branch already set the
+  // same module flag for their own specific paths (and keep doing so, since dismissTriggeredRef
+  // and showContinuationFade still need to react within THIS mount); this cleanup-only effect is
+  // the catch-all that covers every OTHER way of leaving, so no future exit path can reintroduce
+  // "hero shows again after all" as a gap the way the Play tab just did.
+  useEffect(() => {
+    return () => {
+      heroDismissedThisAppSession = true;
+    };
+  }, []);
+
   const inProgress = sessionState.kind === 'in-progress';
   const nodeStates = derivePathNodeStates(sessionState, PATH_NODE_POSITIONS.length);
-  // In progress, the hero and the current node both go straight into the open session; otherwise
-  // through preparation, which is what performs the readiness check before starting one.
+  // Always through preparation, even when a session is already active: the prep screen performs
+  // its own resume check and offers "Resume Adventure" there, so the child never skips it. This is
+  // the HERO button only — see resumeCurrentQuestion for the "Your Session" card's own current-
+  // question control, which is a different control with a different job.
   const openBLearning = () => {
-    if (sessionState.kind === 'in-progress') {
-      router.push({
-        pathname: '/(learner)/session/[sessionId]',
-        params: { sessionId: sessionState.sessionId },
-      });
-      return;
-    }
+    // Treated the same as scrolling past the hero (see handleGestureSettle's own dismiss branch):
+    // once the child has used the hero's own call-to-action, a later return to this screen should
+    // open straight at the session card rather than showing the hero again from the top.
+    heroDismissedThisAppSession = true;
     router.push('/(learner)/prepare');
+  };
+  // The "Your Session" card's current-question control. Unlike the hero button above, this is
+  // reached only when `sessionState.kind === 'in-progress'` already (derivePathNodeStates never
+  // marks a node 'current' otherwise — see its own doc comment), which means this screen has
+  // ALREADY confirmed, via a live GET .../summary read, exactly which session and which question
+  // is open. Routing that back through /prepare's own readiness check would be re-asking a
+  // question this screen already knows the answer to, and does so redundantly on every tap — so
+  // this jumps straight into the session the card is already showing, the same way the old,
+  // pre-"always through preparation" version of openBLearning used to for every entry point. The
+  // `sessionState.kind !== 'in-progress'` guard is belt-and-braces: TypeScript cannot narrow
+  // `sessionState` from `nodeStates` alone, but the two can never disagree in practice.
+  const resumeCurrentQuestion = () => {
+    if (sessionState.kind !== 'in-progress') return;
+    router.push({
+      params: { sessionId: sessionState.sessionId },
+      pathname: '/(learner)/session/[sessionId]',
+    });
   };
   const scrollRef = useRef<ScrollView>(null);
   const dismissTriggeredRef = useRef(heroDismissedThisAppSession);
   const snapInFlightRef = useRef(false);
-  const [scrollEnabled, setScrollEnabled] = useState(() => !heroDismissedThisAppSession);
+  // Whether THIS mount should open already scrolled past the hero, straight to the session/path
+  // card — true once the hero has been "used" once in this app session (scrolled past, see
+  // handleGestureSettle, OR the hero's own CTA button pressed, see openBLearning). This decides
+  // only where the ScrollView starts; it must NEVER disable scrolling itself — that used to be
+  // `scrollEnabled={false}` after the first dismiss, which permanently locked the child out of
+  // scrolling back up to see the hero again for the rest of the app session. Read once via
+  // `useRef`, not `useState`: a later change to the module-level flag (from a scroll on THIS
+  // mount) must not retroactively move where THIS mount started.
+  const startScrolledToPath = useRef(heroDismissedThisAppSession).current;
+  // Guards `scrollToEnd` so it only ever fires once per mount, the moment the content is first
+  // measured — never again after that, even though `onContentSizeChange`/`onLayout` can keep
+  // firing (e.g. from font/image loads settling in). Without this guard, any later re-fire would
+  // yank the child back down to the bottom even after they had deliberately scrolled up to look
+  // at the hero again, which is exactly the "can't scroll up" bug this whole change fixes.
+  const initialScrollAppliedRef = useRef(false);
   const [showContinuationFade, setShowContinuationFade] = useState(
     () => !heroDismissedThisAppSession,
   );
@@ -159,6 +203,16 @@ export function LearnerHomeScreen() {
   const fixedHeaderHeight = compact ? LEARNER_HEADER_HEIGHT_COMPACT : LEARNER_HEADER_HEIGHT;
   const fixedNavHeight = (compact ? 61 : 73) + 11.75;
   const [measuredViewportHeight, setMeasuredViewportHeight] = useState(0);
+  // The "buttons glitch on returning to home" report: this screen fully remounts every time it's
+  // navigated back to (goHome/goToGameHub elsewhere use router.replace, and expo-router mounts a
+  // fresh instance rather than reusing one). On that fresh mount, `measuredViewportHeight` starts
+  // at 0 for one frame, so `pathPanelWidth` (below) is computed from a rough fallback estimate
+  // instead of the ScrollView's real measured height — the path-stage buttons render once at that
+  // wrong position/size, then visibly snap to the correct one the instant `onLayout` reports the
+  // real height. `layoutReady` hides the ScrollView (via opacity, not by skipping layout — it
+  // still needs to be measured) until that first real `onLayout` has landed, so the correction
+  // happens off-screen instead of as a visible jump.
+  const [layoutReady, setLayoutReady] = useState(false);
   const pathViewportHeight =
     measuredViewportHeight || Math.max(0, usableHeight - fixedHeaderHeight - fixedNavHeight);
   // The header already supplies the visible gap above the panel (its own
@@ -199,7 +253,11 @@ export function LearnerHomeScreen() {
       heroDismissedThisAppSession = true;
       setShowContinuationFade(false);
       scrollRef.current?.scrollTo({ y: maxOffset, animated: true });
-      setScrollEnabled(false);
+      // Deliberately NOT `setScrollEnabled(false)` (that state no longer exists — see
+      // `startScrolledToPath`'s own comment): scrolling stays available for the rest of this
+      // mount, so the child can freely scroll back up to see the hero again. Only the one-time
+      // auto-snap-to-nearest-end decision above is single-shot (`dismissTriggeredRef`), not the
+      // ability to scroll at all.
     } else {
       scrollRef.current?.scrollTo({ y: 0, animated: true });
     }
@@ -287,7 +345,7 @@ export function LearnerHomeScreen() {
                   accessibilityLabel={pathNodeLabel(index, nodeState)}
                   accessibilityRole="button"
                   key={index}
-                  onPress={openBLearning}
+                  onPress={resumeCurrentQuestion}
                   style={({ pressed }) => [
                     styles.pathStage,
                     { left: node.left, top: node.top },
@@ -318,14 +376,31 @@ export function LearnerHomeScreen() {
         <LearnerHeaderBar compact={compact} displayName={displayName} />
 
         <Animated.ScrollView
-          bounces={scrollEnabled}
+          bounces
           contentContainerStyle={styles.scrollContent}
           onContentSizeChange={() => {
-            if (!scrollEnabled) scrollRef.current?.scrollToEnd({ animated: false });
+            // One-shot — see initialScrollAppliedRef's own comment. This can fire again later
+            // (image/font loads settling in) without re-triggering the jump.
+            if (startScrolledToPath && !initialScrollAppliedRef.current) {
+              initialScrollAppliedRef.current = true;
+              scrollRef.current?.scrollToEnd({ animated: false });
+            }
           }}
           onLayout={(event) => {
             setMeasuredViewportHeight(event.nativeEvent.layout.height);
-            if (!scrollEnabled) scrollRef.current?.scrollToEnd({ animated: false });
+            if (startScrolledToPath && !initialScrollAppliedRef.current) {
+              initialScrollAppliedRef.current = true;
+              scrollRef.current?.scrollToEnd({ animated: false });
+              // The imperative scroll doesn't necessarily apply in this same frame (react-native-
+              // web in particular can lag a frame or two behind scrollToEnd's call) — revealing at
+              // the exact same instant risks one visible frame of the hero before the jump to the
+              // path view. This short delay gives it room to land before the reveal.
+              setTimeout(() => {
+                if (mountedRef.current) setLayoutReady(true);
+              }, 50);
+            } else {
+              setLayoutReady(true);
+            }
           }}
           onMomentumScrollEnd={(event) => handleGestureSettle(event.nativeEvent)}
           onScroll={handleScroll}
@@ -339,10 +414,9 @@ export function LearnerHomeScreen() {
             if (speed < 0.05) handleGestureSettle(event.nativeEvent);
           }}
           ref={scrollRef}
-          scrollEnabled={scrollEnabled}
           scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
-          style={styles.scrollView}>
+          style={[styles.scrollView, !layoutReady && styles.scrollViewHidden]}>
           <Animated.View
             style={[
               styles.heroSection,
@@ -476,6 +550,9 @@ const styles = StyleSheet.create({
   scrollContinuationFade6: { backgroundColor: 'rgba(244,244,246,0.66)', flex: 1 },
   scrollContinuationFade7: { backgroundColor: 'rgba(244,244,246,0.82)', flex: 1 },
   scrollView: { flex: 1 },
+  // Opacity, not `display: 'none'`: it must still lay out and fire `onLayout`/`onContentSizeChange`
+  // while hidden, or `layoutReady` would never flip to true — see the state's own comment.
+  scrollViewHidden: { opacity: 0 },
   sectionCompact: { paddingBottom: 3 },
   sideColumn: { flex: 0.94, gap: 6, minHeight: 0 },
   stageArtwork: { alignItems: 'center', aspectRatio: 1, borderRadius: radius.pill, justifyContent: 'center', width: 30 },
