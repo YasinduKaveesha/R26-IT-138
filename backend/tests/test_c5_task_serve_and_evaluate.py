@@ -24,7 +24,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -32,8 +32,8 @@ from app.application.live_engine_c.session_lifecycle import _learner_session_sta
 from app.application.live_engine_c.mastery_fixture import FIXTURE_MASTERY_SOURCE_STUDENT_ID
 from app.application.live_engine_c.task_service import (
     _CATALOGUE_PATH,
-    PRODUCTION_GENERATION_CONFIG_PROBE,
-    PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+    PRODUCTION_GENERATION_CONFIG,
+    PRODUCTION_SCAFFOLD_CONFIG,
     TaskService,
     _stu_session_id,
 )
@@ -599,8 +599,8 @@ def test_p5_unknown_template_fails_closed_via_submit_action() -> None:
                     c_session_id=c_session_id,
                     c_task_instance_id=instance_id,
                     action_payload={"submitted_total": 3},
-                    generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
-                    scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                    generation_config=PRODUCTION_GENERATION_CONFIG,
+                    scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
                     submission_spy=spy,
                 )
             assert spy == []
@@ -650,7 +650,7 @@ def test_c12_rejection_wrong_key_set() -> None:
                 await TaskService().submit_action(
                     session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                     c_session_id=c_session_id, c_task_instance_id=instance_id,
-                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
                     submission_spy=spy,
                 )
             assert excinfo.value.details, "expected structured field_errors"
@@ -681,7 +681,7 @@ def test_c12_rejection_wrong_type() -> None:
                 await TaskService().submit_action(
                     session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                     c_session_id=c_session_id, c_task_instance_id=instance_id,
-                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
                     submission_spy=spy,
                 )
             assert spy == []
@@ -712,7 +712,7 @@ def test_c12_rejection_bad_pipe_string_value() -> None:
                     await TaskService().submit_action(
                         session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                         c_session_id=c_session_id, c_task_instance_id=instance_id,
-                        action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                        action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
                         submission_spy=spy,
                     )
                 assert spy == []
@@ -765,13 +765,67 @@ def test_c12_rejection_bool_for_int() -> None:
                 await TaskService().submit_action(
                     session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                     c_session_id=c_session_id, c_task_instance_id=instance_id,
-                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                    action_payload=malformed, generation_config=PRODUCTION_GENERATION_CONFIG, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
                     submission_spy=spy,
                 )
             assert spy == []
         await database_engine.dispose()
 
     asyncio.run(exercise())
+
+
+def test_c12_list_str_accepted_and_negative_controls_still_fire() -> None:
+    """CONNECT Step 8 finding, closed here (buildLog2.md's own entry has the full account):
+    _value_matches_declared_type had no branch for bare "str", so every list[str] field
+    (C-CC-01's selected_object_ids, C-CC-02's placed_object_ids) was unconditionally rejected --
+    found live, by a real correct submission, invisible to this file's own positive control
+    because that control used an empty list for every list-typed field (vacuously true, never
+    exercising the per-element check). Fixed with exactly one new branch
+    (declared_type == "str": isinstance(value, str)) -- proven here exhaustively against every
+    declared type string that actually appears in contract/c-template-registry.json (int, bool,
+    number, list[int], list[str], and the three pipe-strings), each with one valid and one
+    invalid instance, so a fail-closed default was not accidentally converted into fail-open for
+    any of them."""
+    from app.domain.live_engine_c.action_payload_validation import (
+        ActionPayloadValidationError,
+        validate_action_payload,
+    )
+
+    def assert_valid(declared_type: str, value) -> None:
+        validate_action_payload({"k": declared_type}, {"k": value})  # raises nothing on success
+
+    def assert_invalid(declared_type: str, value) -> None:
+        with pytest.raises(ActionPayloadValidationError) as excinfo:
+            validate_action_payload({"k": declared_type}, {"k": value})
+        assert excinfo.value.field_errors == ((("k",), "type_mismatch"),)
+
+    # The fix itself: list[str] now accepts a real, non-empty list of strings --
+    # exactly the shape that previously 422'd on a genuinely correct C-CC-01 submission.
+    assert_valid("list[str]", ["obj-0", "obj-1", "obj-2"])
+    # Negative control (owner-specified): list[str] containing a non-string must still reject.
+    assert_invalid("list[str]", ["obj-0", 1, "obj-2"])
+    # Negative control (owner-specified): list[int] containing a string must still reject --
+    # proves the fix did not loosen the sibling list[int] path it sits next to.
+    assert_invalid("list[int]", [1, "2", 3])
+
+    # Every OTHER declared type string in the real contract registry, each both ways.
+    assert_valid("int", 1)
+    assert_invalid("int", "1")
+    assert_invalid("int", True)  # bool exclusion, unchanged by this fix
+    assert_valid("bool", True)
+    assert_invalid("bool", 1)
+    assert_valid("number", 1.5)
+    assert_invalid("number", "1.5")
+    assert_valid("list[int]", [1, 2, 3])
+    assert_valid("str", "obj-0")
+    assert_invalid("str", 1)
+    for pipe_type, valid_member, invalid_member in (
+        ("left|right|equal", "left", "up"),
+        ("<|>|=", "<", "!="),
+        ("same|changed", "same", "different"),
+    ):
+        assert_valid(pipe_type, valid_member)
+        assert_invalid(pipe_type, invalid_member)
 
 
 def test_c12_positive_control_valid_payload_reaches_evaluate() -> None:
@@ -795,8 +849,15 @@ def test_c12_positive_control_valid_payload_reaches_evaluate() -> None:
                     return True
                 if declared_type == "number":
                     return 1
-                if declared_type.startswith("list["):
-                    return []
+                if declared_type == "str":
+                    return "a"
+                # NON-empty, recursing through valid_value on the inner type -- an empty list is
+                # a positive control for nothing: all() over an empty list is vacuously true, so
+                # an empty list here would never exercise the per-element type check at all (this
+                # is exactly the gap that let list[str] ship broken -- see buildLog2.md's CONNECT
+                # Step 8 entry).
+                if declared_type.startswith("list[") and declared_type.endswith("]"):
+                    return [valid_value(declared_type[len("list["):-1])]
                 raise AssertionError(declared_type)
 
             payload = {key: valid_value(t) for key, t in instance.valid_action_space.items()}
@@ -805,7 +866,7 @@ def test_c12_positive_control_valid_payload_reaches_evaluate() -> None:
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
                 submission_spy=spy,
             )
             assert spy == [instance_id]
@@ -853,6 +914,63 @@ def test_p6_next_task_response_exact_key_set() -> None:
     asyncio.run(exercise())
 
 
+def test_next_task_resumes_the_pending_instance_instead_of_minting() -> None:
+    """CONNECT resume-instead-of-mint batch, owner ruling (ESCALATIONS.md §7 has the full account
+    of the abandonment cost this closes). Calling next_task twice on one session, without ever
+    submitting, must return the SAME task both times -- same c_task_instance_id, same
+    game_task_template_id, same task_index -- proving the second call resumed rather than drew
+    fresh. See test_batch4_verdict_supersession.py's own addition for the negative control (a
+    TERMINATED instance does NOT get resumed -- the resume path cannot strand a child forever)."""
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
+        async with factory() as session:
+            subject = f"c5-resume-{uuid4()}"
+            student_id, c_session_id = await seed_active_session(session, session_mode="c_only", subject=subject)
+            first = await TaskService().next_task(
+                session, principal_user_id=subject, request_id=f"req-{uuid4()}",
+                c_session_id=c_session_id,
+                generation_config=generation_config_fixture_for_tests(), smoke_mode=True,
+            )
+            second = await TaskService().next_task(
+                session, principal_user_id=subject, request_id=f"req-{uuid4()}",
+                c_session_id=c_session_id,
+                generation_config=generation_config_fixture_for_tests(), smoke_mode=True,
+            )
+            await session.commit()
+            assert second.c_task_instance_id == first.c_task_instance_id
+            assert second.game_task_template_id == first.game_task_template_id
+            assert second.task_index == first.task_index == 1
+
+            # Exactly one opportunity and one instance exist for this session -- the resume did
+            # not create a second row of either kind.
+            opp_count = await session.scalar(
+                select(func.count()).select_from(CTaskOpportunityRecord).where(
+                    CTaskOpportunityRecord.c_session_id == c_session_id
+                )
+            )
+            assert opp_count == 1
+            instance_count = await session.scalar(
+                select(func.count()).select_from(CTaskInstanceRecord).where(
+                    CTaskInstanceRecord.c_task_instance_id == first.c_task_instance_id
+                )
+            )
+            assert instance_count == 1
+
+            # Exactly one game_task_offered event -- the resume wrote nothing new.
+            offered_count = await session.scalar(
+                select(func.count()).select_from(CGameplayEventRecord).where(
+                    CGameplayEventRecord.game_task_instance_id == first.c_task_instance_id,
+                    CGameplayEventRecord.event_type == "game_task_offered",
+                )
+            )
+            assert offered_count == 1
+        await database_engine.dispose()
+
+    asyncio.run(exercise())
+
+
 def test_p6_submit_action_response_exact_key_set() -> None:
     alembic("upgrade", "head")
 
@@ -877,7 +995,7 @@ def test_p6_submit_action_response_exact_key_set() -> None:
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id="req-1",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                action_payload=payload, generation_config=PRODUCTION_GENERATION_CONFIG, scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
             )
             body = json.loads(result.model_dump_json())
             assert set(body.keys()) == {
@@ -894,11 +1012,39 @@ def test_p6_next_task_route_requires_authentication() -> None:
     assert response.status_code == 401
 
 
-def test_p6_next_task_real_http_route_refuses_because_no_governed_generation_config_exists() -> None:
-    """THE HEADLINE CONSEQUENCE, proven at the actual HTTP boundary: a fully authenticated,
-    fully-wired request to the real route -- not a stub, not a 404 -- refuses with a structured
-    409, because the route hardcodes smoke_mode=False and the only GenerationConfig it can
-    construct is the always-refused probe (S1)."""
+def test_p6_next_task_real_http_route_serves_a_real_catalogue_task_with_no_leaked_answer() -> None:
+    """RENAMED, INVERTED under supervisor ruling, CONNECT Step 4, same authority and same
+    reasoning as the policy-probe tripwire in test_batch2_adaptation_live_caller.py (Amendment 3):
+    the OLD test, test_p6_next_task_real_http_route_refuses_because_no_governed_generation_config_
+    exists, asserted THE HEADLINE CONSEQUENCE of Phase 5 through CONNECT Step 3 -- "a fully
+    authenticated, fully-wired request to the real route... refuses with a structured 409, because
+    the route hardcodes smoke_mode=False and the only GenerationConfig it can construct is the
+    always-refused probe." That premise is retired, by name, under
+    APPROVAL-2026-08-26-seven-families.md Family 4 -- CONNECT Step 4 built exactly the governed
+    GenerationConfig this test's old docstring said could not exist. It is the right test to carry
+    the opposite headline, so it is inverted rather than deleted or left failing, same standing
+    rule as Amendment 3: no test deleted, no assertion changed elsewhere, every inversion its own
+    ruling.
+
+    What it now proves, at the same real HTTP boundary the old test used, stated as four separate
+    facts rather than folded into one assertion so a partial regression is attributable:
+    (1) the route returns 201, not 409;
+    (2) the served template id is a real member of the real catalogue's 30 -- membership, never a
+        hardcoded template id, which would pin this test to whatever the adaptive selection
+        happens to pick today and break it on every unrelated selection change;
+    (3) the response body's key set is exactly CNextTaskResponse's declared set -- unchanged from
+        test_p6_next_task_response_exact_key_set's own list, so both tests independently agree on
+        the contract shape;
+    (4) no answer-bearing value leaks -- Family 4's own condition ("must never expose
+        answer-bearing values"), and the first test in the suite positioned to prove it at the
+        real HTTP boundary rather than only through a direct service call. Checked
+        test_s5_full_30_template_leak_loop's own way, not a naive substring scan (a first attempt
+        used one and false-positived immediately: C-CC-03's secret value 3 legitimately recurs in
+        its own public prompt_payload.set_size=3 -- exactly the collision S5's own comment already
+        named and excluded) -- leaf-value comparison against the served body, excluding any secret
+        value already legitimately public on this SAME instance (task_index, difficulty_level,
+        prompt_payload's own values), same disclosed false-negative limit S5 states: a private
+        value colliding with an unrelated legitimately-public one would not be caught."""
     alembic("upgrade", "head")
     subject = f"c5-{uuid4()}"
 
@@ -910,11 +1056,64 @@ def test_p6_next_task_real_http_route_refuses_because_no_governed_generation_con
         return c_session_id
 
     c_session_id = asyncio.run(exercise())
+    adapter = LiveEngineCAdapter()
+    real_catalogue_template_ids = {t.game_task_template_id for t in adapter.load(_CATALOGUE_PATH).templates}
+
     client = client_for(subject)
     try:
         response = client.post(f"/api/v1/c/sessions/{c_session_id}/tasks/next", headers=headers())
-        assert response.status_code == 409, response.text
+        assert response.status_code == 201, response.text
         body = response.json()
-        assert body["error"]["code"] == "CONFLICT"
+
+        assert body["game_task_template_id"] in real_catalogue_template_ids, (
+            body["game_task_template_id"], real_catalogue_template_ids,
+        )
+
+        assert set(body.keys()) == {
+            "c_task_instance_id", "game_family_id", "game_task_template_id", "task_index",
+            "skill_id", "difficulty_level", "representation_mode", "prompt_payload",
+            "interactive_assets", "valid_action_space", "scaffold_state", "technical_status",
+            "blanks", "prompt_text", "request_id",
+        }
+
+        async def fetch_persisted_instance() -> CTaskInstanceRecord:
+            database_engine, factory = isolated_database()
+            async with factory() as session:
+                instance = await session.get(CTaskInstanceRecord, UUID(body["c_task_instance_id"]))
+                assert instance is not None
+                await session.refresh(instance)
+                _ = instance.correct_answer_payload, instance.correctness_function_id, instance.prompt_payload
+            await database_engine.dispose()
+            return instance
+
+        persisted = asyncio.run(fetch_persisted_instance())
+
+        def _leaf_values(node) -> set:
+            found: set = set()
+            if isinstance(node, dict):
+                for value in node.values():
+                    found |= _leaf_values(value)
+            elif isinstance(node, list):
+                for item in node:
+                    found |= _leaf_values(item)
+            else:
+                found.add(str(node))
+            return found
+
+        served_json_text = json.dumps(body)
+        assert "correct_answer_payload" not in served_json_text
+        assert "correctness_function_id" not in served_json_text
+
+        public_values = _leaf_values(body)
+        # Same exclusion S5's own loop discloses and applies: a secret value equal to a value
+        # already legitimately public on THIS instance (task_index, difficulty_level, or anything
+        # already in its own prompt_payload) is not a leak through the projection.
+        known_public_values = {str(body["task_index"]), str(persisted.difficulty_level)} | {
+            str(v) for v in persisted.prompt_payload.values()
+        }
+        for secret_value in persisted.correct_answer_payload.values():
+            if str(secret_value) in known_public_values:
+                continue
+            assert str(secret_value) not in public_values, (secret_value, body)
     finally:
         close_client(client)

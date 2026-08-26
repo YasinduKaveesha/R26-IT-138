@@ -166,10 +166,16 @@ async def _complete_task_and_derive_summary(session, *, c_session_id, instance_i
 async def _build_two_real_completed_tasks(session):
     """Two real, fully completed tasks in ONE real session -- task 1 via
     ``_create_real_instance_via_smoke_mode``, task 2 via a second real
-    ``TaskService.next_task`` call against the SAME ``c_session_id`` (no state guard prevents a
-    second offer; ``task_index`` is simply ``count_for_session(...) + 1``). Both instances carry
-    real terminal events and real, derived summaries -- the shared fixture for the negative
-    control (Sec 7.4) and the chain-isolation test (RULING 2)."""
+    ``TaskService.next_task`` call against the SAME ``c_session_id``. Post CONNECT
+    resume-instead-of-mint batch: ``next_task`` DOES now resume a pending (unterminated) instance
+    rather than minting -- but task 1 is driven to a real terminal event via
+    ``_complete_task_and_derive_summary`` BEFORE this second call, so the resume check
+    (``has_terminal_for_instance``) correctly finds nothing to resume and the mint path runs
+    exactly as before; ``task_index`` is still ``count_for_session(...) + 1``. This helper's own
+    shape is this batch's negative control by construction -- see
+    ``test_next_task_does_not_resume_a_terminated_instance`` below for the explicit assertion.
+    Both instances carry real terminal events and real, derived summaries -- the shared fixture
+    for the negative control (Sec 7.4) and the chain-isolation test (RULING 2)."""
     student_id, c_session_id, instance1_id, subject = await _create_real_instance_via_smoke_mode(session)
     stu_session_id = _stu_session_id()
     summary1 = await _complete_task_and_derive_summary(
@@ -188,6 +194,27 @@ async def _build_two_real_completed_tasks(session):
         session, c_session_id=c_session_id, instance_id=instance2_id, task_index=2, stu_session_id=stu_session_id
     )
     return c_session_id, instance1_id, instance2_id, student_id, summary1, summary2
+
+
+def test_next_task_does_not_resume_a_terminated_instance() -> None:
+    """CONNECT resume-instead-of-mint batch, owner-specified negative control: "a resume that
+    never releases is worse than the abandonment it replaces." Reuses
+    _build_two_real_completed_tasks unchanged -- its own shape already proves this (task 1 is
+    terminated before the second next_task call) -- this test only makes the assertion explicit:
+    the second call's instance is a DIFFERENT id, at a DIFFERENT task_index, than the first's. A
+    child who answers correctly is never stranded on the completed task forever."""
+    alembic("upgrade", "head")
+
+    async def exercise() -> None:
+        database_engine, factory = isolated_database()
+        async with factory() as session:
+            c_session_id, instance1_id, instance2_id, _student_id, _summary1, _summary2 = (
+                await _build_two_real_completed_tasks(session)
+            )
+            assert instance2_id != instance1_id
+        await database_engine.dispose()
+
+    asyncio.run(exercise())
 
 # =====================================================================================
 # §7.3 -- the write-path regression: TelemetryStreamRejectedError still propagates UNCHANGED

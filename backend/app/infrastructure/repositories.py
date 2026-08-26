@@ -120,6 +120,24 @@ class CRuntimeBundleRecordRepository(SqlAlchemyNeutralRepository[CRuntimeBundleR
 class CSessionRecordRepository(SqlAlchemyNeutralRepository[CSessionRecord]):
     model_type = CSessionRecord
 
+    async def lock_for_update(self, c_session_id: UUID) -> None:
+        """CONNECT resume-instead-of-mint batch (supervisor ruling): closes the race where two
+        concurrent ``next_task`` calls on a session with no pending instance yet could both find
+        nothing to resume and both fall through to the mint path, computing the SAME
+        ``task_index`` from the same pre-insert count (``CTaskOpportunityRecord`` carries no
+        uniqueness constraint on ``(c_session_id, task_index)`` -- verified directly). Because
+        ``task_index`` is the SOLE seed-lineage-distinguishing element
+        (``task_service.py``'s own module docstring), a same-``task_index`` collision would derive
+        the identical RNG seed and draw the identical template -- two indistinguishable duplicate
+        opportunity rows, silently corrupting the attempt-level history Family 7 requires be
+        preserved, not merely uncorrupted-looking. Locking the SESSION row here (the instance row
+        may not exist yet, unlike Step 5's lock target) closes both this race and any race between
+        the resume check and the mint decision -- taken once, at the top of ``next_task``, before
+        either."""
+        await self.session.execute(
+            select(CSessionRecord.c_session_id).where(CSessionRecord.c_session_id == c_session_id).with_for_update()
+        )
+
     async def find_starting_or_active_for_learner(self, student_id: UUID) -> CSessionRecord | None:
         return await self.session.scalar(
             select(CSessionRecord).where(
@@ -195,6 +213,42 @@ class CTaskInstanceRecordRepository(SqlAlchemyNeutralRepository[CTaskInstanceRec
             )
         )
 
+    async def lock_for_update(self, c_task_instance_id: UUID) -> None:
+        """CONNECT Step 5 (supervisor ruling, closing the attempt_number race identified while
+        planning that step): the SAME row, the SAME lock the two ``c_gameplay_events`` triggers
+        already take (``PERFORM 1 FROM c_task_instances WHERE c_task_instance_id = ... FOR
+        UPDATE``, migrations/versions/20260816_0003_c3b_gameplay_event_invariants.py), taken here
+        EARLIER in the same transaction -- before ``task_service.submit_action`` counts existing
+        ``answer_submitted`` events to derive ``attempt_number``, not after. Taking it here first
+        means a second, concurrent ``submit_action`` call against the same instance blocks BEFORE
+        it counts, not after -- closing the window where two racing submissions could both read
+        the same count and write the same attempt_number. When the trigger later re-takes this
+        exact lock inside the same transaction, it is already held by that transaction -- no
+        deadlock, no second locking mechanism, no migration."""
+        await self.session.execute(
+            select(CTaskInstanceRecord.c_task_instance_id)
+            .where(CTaskInstanceRecord.c_task_instance_id == c_task_instance_id)
+            .with_for_update()
+        )
+
+    async def find_most_recent_for_session(self, c_session_id: UUID) -> CTaskInstanceRecord | None:
+        """CONNECT resume-instead-of-mint batch (owner ruling): the candidate for "the pending
+        task", if any -- the caller is responsible for checking
+        ``CGameplayEventRecordRepository.has_terminal_for_instance`` on the result before treating
+        it as resumable. Ordered by ``task_index`` descending so a session with more than one
+        unterminated instance (only possible from before this batch shipped) resumes the most
+        recent draw, not an arbitrary one."""
+        return await self.session.scalar(
+            select(CTaskInstanceRecord)
+            .join(
+                CTaskOpportunityRecord,
+                CTaskInstanceRecord.c_task_opportunity_id == CTaskOpportunityRecord.c_task_opportunity_id,
+            )
+            .where(CTaskOpportunityRecord.c_session_id == c_session_id)
+            .order_by(CTaskInstanceRecord.task_index.desc())
+            .limit(1)
+        )
+
     async def find_by_opportunity(self, c_task_opportunity_id: UUID) -> CTaskInstanceRecord | None:
         """Phase 8, J1-4: the 1:1 opportunity -> instance lookup (``uq_c_task_instances_opportunity``,
         persistence_models.py:827) the guarded accessor needs to reach
@@ -235,6 +289,29 @@ class CGameplayEventRecordRepository(SqlAlchemyNeutralRepository[CGameplayEventR
         ).one()
         max_index, max_timestamp = row
         return (max_index or 0), (max_timestamp or 0)
+
+    async def count_answer_submitted_for_instance(self, game_task_instance_id: UUID) -> int:
+        """CONNECT Step 5 (Family 3, "each retry must receive an incrementing attempt_number";
+        ESCALATIONS.md §2): the SAME derivation
+        component_c_generator.behaviour.summary.derive_task_opportunity_summary already performs
+        internally (``len(submitted_events)``, behaviour/summary.py:43-46 -- counts
+        ``answer_submitted`` events, never reads ``attempt_number``), replicated here at WRITE
+        time so the persisted column itself is honest rather than merely derivable from the event
+        count downstream. The caller is responsible for holding
+        ``CTaskInstanceRecordRepository.lock_for_update`` on this same instance first, in the same
+        transaction, before calling this -- see that method's own docstring for why the ordering
+        is what closes the concurrent-submission race, not this query alone. No ceiling is applied
+        or implied here: I4's numeric attempt-count bound is BLOCKED, ESCALATED TO THE OWNER
+        (persistence_models.py's own CGameplayEventRecord docstring, R-L) and is not built in any
+        form by this step -- a child may submit an unbounded number of wrong answers today, and
+        attempt_number will grow unboundedly along with it."""
+        count = await self.session.scalar(
+            select(func.count()).select_from(CGameplayEventRecord).where(
+                CGameplayEventRecord.game_task_instance_id == game_task_instance_id,
+                CGameplayEventRecord.event_type == "answer_submitted",
+            )
+        )
+        return count or 0
 
     async def has_started_for_instance(self, game_task_instance_id: UUID) -> bool:
         """Phase 6a: LATENT DEFECT SINCE PHASE 5, found by this batch's own derivation wiring --

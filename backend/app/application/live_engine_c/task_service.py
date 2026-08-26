@@ -1,37 +1,60 @@
 """Component C Phase 5: the application-service layer behind the two task-serving HTTP endpoints
 (``POST .../tasks/next``, ``POST .../tasks/{tid}/actions``).
 
-HEADLINE CONSEQUENCE — STATE PLAINLY (Phase 5 work order, verbatim instruction): PHASE 5 DELIVERS
-A COMPLETE, TESTED SERVING PATH THAT IS DELIBERATELY NOT LIVE. Every real (non-smoke) call to
-``next_task`` refuses before any task is generated, because GenerationConfig has no governed
-values anywhere in this codebase (S1, Phase 5 work order): "The frozen catalogue supplies no
-numeric bound and no action-space enumeration for any of the 30 templates and the Parameters do
-not fix them either; every value is an ENGINEERING_ASSUMPTION tagged TEST_FIXTURE_ONLY.
-Governance assigned no values here." ``app.domain.live_engine_c.generation_mode_guard.
-assert_generation_config_permitted`` is the guard that enforces this; it is wired in below, for
-the first time, exactly as S1 instructs ("This is that call"). A green test suite exercising this
-module with ``smoke_mode=True`` is evidence the SERVING MECHANISM works — it is explicitly NOT
-evidence that Component C can serve a task to a real child. Do not read it that way.
+HEADLINE CONSEQUENCE, PHASE 5 THROUGH CONNECT STEP 3 (Phase 5 work order, verbatim instruction,
+STATE PLAINLY): PHASE 5 DELIVERED A COMPLETE, TESTED SERVING PATH THAT WAS DELIBERATELY NOT LIVE.
+Every real (non-smoke) call to ``next_task`` refused before any task was generated, because
+GenerationConfig had no governed values anywhere in this codebase (S1, Phase 5 work order): "The
+frozen catalogue supplies no numeric bound and no action-space enumeration for any of the 30
+templates and the Parameters do not fix them either; every value is an ENGINEERING_ASSUMPTION
+tagged TEST_FIXTURE_ONLY. Governance assigned no values here." That reasoning was correct for as
+long as it was true — it stopped being true at CONNECT Step 1, when the owner approved Family 4
+(Generation) "with condition" in ``APPROVAL-2026-08-26-seven-families.md``: "Generated task
+payloads must remain schema-constrained and must never expose answer-bearing values. Unsupported
+payload structures must fail closed." ``app.domain.live_engine_c.generation_mode_guard.
+assert_generation_config_permitted`` is the guard that enforces schema-conformance and fail-closed
+behaviour; it stays wired in below, unchanged, and still runs on every call — CONNECT Step 4 changes
+what config it is checking, never whether the check runs. A green test suite exercising this module
+is now evidence the serving mechanism can be reached in production, under the values and status
+this docstring names below — not evidence of clinical or pedagogical readiness, which
+``APPROVAL-2026-08-26-seven-families.md`` does not claim either.
 
-GENERATIONCONFIG STAYS INJECTION-ONLY, NO DEFAULT ANYWHERE (S1, mirrors W1's shape for
-SelectionConfig): every function below that needs a ``GenerationConfig`` takes it as a required,
-no-default parameter. This module never calls ``default_generation_config()`` and never reads
-``generation_config.DEFAULT_TEMPLATE_GENERATION_PARAMS`` directly either — reading the underlying
-table would hide the same dependency the named-function ban exists to surface (W2's own
-reasoning, extended). Asserted mechanically, not by convention — see
+GENERATIONCONFIG STAYS INJECTION-ONLY, NO DEFAULT ANYWHERE, AND THIS MODULE STILL NEVER READS THE
+PACKAGE'S OWN TABLE DIRECTLY (S1, mirrors W1's shape for SelectionConfig — UNCHANGED, in the end,
+BY CONNECT STEP 4, though a first attempt at this step crossed it and proved the crossing
+unnecessary; recorded here because that is worth knowing, not because it happened). Every function
+below that needs a ``GenerationConfig`` still takes it as a required, no-default parameter, and
+this module still never calls ``default_generation_config()`` — asserted mechanically, see
 ``test_be2_architecture_guards.py::test_no_app_code_defaults_or_calls_default_generation_config``.
+A separate, independent guard in the same file
+(``test_component_c_generator_full_dotted_path_enforcement``) restricts ``component_c_generator``
+as an import root to exactly one file, ``app/infrastructure/live_engine_c/adapter.py`` — the first
+implementation of ``PRODUCTION_GENERATION_CONFIG`` below imported
+``generation_config.DEFAULT_TEMPLATE_GENERATION_PARAMS`` directly here and tripped it, a real
+finding, not a false positive: this module has no more business reading that table than any other
+non-adapter file does. Correction (supervisor ruling, CONNECT Step 4): the values are obtained
+through ``LiveEngineCAdapter.production_generation_params_by_template()`` /
+``.production_generation_config_version()``, the same shape ``supported_template_ids()`` already
+uses to expose package data to this layer — so the no-direct-read discipline this paragraph states
+is not merely restored, it was never actually broken in what shipped. Under
+``APPROVAL-2026-08-26-seven-families.md`` Family 4 ("Generated task payloads must remain
+schema-constrained and must never expose answer-bearing values. Unsupported payload structures
+must fail closed."), the resulting config covers all 30 real catalogue template ids (verified 1:1
+against the vendored catalogue, not assumed) and is tagged
+``APPROVED_FOR_PROVISIONAL_IMPLEMENTATION``, not a silent promotion to a status that looks more
+settled than the approval actually was.
 
-PRODUCTION GENERATION-CONFIG PROBE (BUILDER JUDGMENT — UNRATIFIED): the real HTTP route
-(``app.api.routes.c_task``) has no legitimate source for a populated ``GenerationConfig`` — no
-bundle mechanism exists (S1 explicitly forbids building one) and no default call is permitted
-(above). It therefore passes an intentionally EMPTY probe (``per_template={}``,
-``parameter_source_status="TEST_FIXTURE_ONLY"``) together with a hardcoded, never-client-
-influenced ``smoke_mode=False``. Since every ``GenerationConfig`` value that exists anywhere in
-this codebase is tagged ``TEST_FIXTURE_ONLY`` or ``SMOKE_ONLY`` (there is no other kind — S1's own
-words), the guard call below refuses this probe UNCONDITIONALLY, regardless of what it contains;
-its emptiness is a second, redundant containment (even if the guard were ever bypassed, an empty
-``per_template`` cannot generate anything real) — not the only one. This construction is NOT
-sanctioned by name in the Phase 5 work order; it is disclosed here for exactly that reason.
+PRODUCTION GENERATION CONFIG (was: PRODUCTION GENERATION-CONFIG PROBE, renamed CONNECT Step 4 —
+see that step's own buildLog2.md entry for why keeping "PROBE" on a populated, approved object
+would itself have been the misleading-name defect this rename exists to avoid). Prior state,
+preserved rather than erased: the real HTTP route (``app.api.routes.c_task``) had no legitimate
+source for a populated ``GenerationConfig`` — no bundle mechanism existed (S1 explicitly forbade
+building one) and no default call was permitted (above) — so it passed an intentionally EMPTY probe
+(``per_template={}``, ``parameter_source_status="TEST_FIXTURE_ONLY"``), unconditionally refused by
+the guard regardless of content, its emptiness a second, redundant containment. CONNECT Step 4
+replaces that probe with a real, populated config under the Family 4 approval named above; the
+guard call itself is untouched — it now passes for a different, disclosed reason (a real,
+approved-for-provisional-implementation status) rather than being bypassed.
 
 SEED LINEAGE — BUILDER JUDGMENT — UNRATIFIED, DISCLOSED PROMINENTLY. ``SeedLineage``'s own
 docstring (``app/domain/live_engine_c/types.py``) says: "obtaining a real seed value is left to
@@ -136,7 +159,10 @@ from app.application.live_engine_c.bundle_resolution import (
     resolve_safety_config,
     resolve_selection_config,
 )
-from app.application.live_engine_c.c_session_service import _NOT_LIVE_PARAMETER_SOURCE_STATUS, _require_learner_id
+from app.application.live_engine_c.c_session_service import (
+    _APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
+    _require_learner_id,
+)
 from app.application.live_engine_c.mastery_fixture import (
     FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID,
     FIXTURE_MASTERY_SOURCE_STUDENT_ID,
@@ -178,79 +204,107 @@ from app.infrastructure.repositories import (
     CTaskOpportunityRecordRepository,
 )
 
-# Same ENGINEERING-ONLY TEST-provenance bridge as c_session_service.py, same disclosure.
-_BUNDLE_PATH = "tests/fixtures/runtime_bundle_c/valid_unapproved_bundle_c.json"
+# CONNECT Step 3: repointed to the owner-approved bundle, same as c_session_service.py, same
+# disclosure and same provenance record (APPROVAL-2026-08-26-seven-families.md).
+_BUNDLE_PATH = "provenance/c-runtime-bundle-approved-1.0.json"
 _SCHEMA_PATH = "provenance/c-runtime-bundle.schema.json"
-_CATALOGUE_PATH = "tests/fixtures/runtime_bundle_c/test_catalogue_c.md"
+# CONNECT Step 2: repointed to the governed catalogue, vendored verbatim from the sibling Yass/
+# tree (APPROVAL-2026-08-26-seven-families.md; see backend/buildLog2.md). Its own status line
+# reads PROPOSED FOR APPROVAL, not APPROVED -- vendoring and repointing here does not change
+# that. The TEST_FIXTURE_ONLY catalogue below stays in place; existing tests depend on it.
+_CATALOGUE_PATH = "provenance/R26-IT-138_Component_C_Game_Task_Catalogue_v1.0.md"
 
-# The production probe described in the module docstring -- deliberately empty, deliberately
-# always-refused. NOT a real generation config; never used to generate anything (the guard call
-# raises before any per-template lookup could occur).
-PRODUCTION_GENERATION_CONFIG_PROBE = GenerationConfig(
-    config_version="phase5-not-live-probe",
-    parameter_source_status="TEST_FIXTURE_ONLY",
-    per_template={},
+# CONNECT Step 4: was PRODUCTION_GENERATION_CONFIG_PROBE (deliberately empty, deliberately
+# always-refused, per_template={}) -- see the module docstring's own rewritten paragraph for the
+# full account, including the corrected routing below. Real, populated GenerationConfig over all
+# 30 templates, values obtained through LiveEngineCAdapter -- never a direct import of
+# component_c_generator here (test_component_c_generator_full_dotted_path_enforcement restricts
+# that import root to app/infrastructure/live_engine_c/adapter.py alone; a first attempt imported
+# the package's table directly in this file and correctly tripped that guard). Template-id
+# coverage verified 1:1 against the vendored real catalogue's 30 ids -- no missing id either
+# direction -- under APPROVAL-2026-08-26-seven-families.md Family 4 ("Generated task payloads must
+# remain schema-constrained and must never expose answer-bearing values. Unsupported payload
+# structures must fail closed."). assert_generation_config_permitted still runs on every call,
+# unchanged -- this config passes it now for a disclosed reason, never by bypassing it.
+_adapter_for_production_configs = LiveEngineCAdapter()
+PRODUCTION_GENERATION_CONFIG = GenerationConfig(
+    config_version=_adapter_for_production_configs.production_generation_config_version(),
+    parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
+    per_template=_adapter_for_production_configs.production_generation_params_by_template(),
 )
 
 # Phase 7, Z1/Z5: Scaffold is injection-only (zero SPEC-stated fields, same classification as
 # Generation) but, unlike GenerationConfig, is NOT smoke-gated per task-call -- Z1's own
 # inversion reasoning: gating a protective mechanism per-call would mean "refuse to emit a
 # scaffold," which fails OPEN, not closed. Its usability is checked once, at SESSION START
-# (session_lifecycle.create_session's own five-family gate); by the time submit_action runs, a
-# session already exists, meaning that gate already passed. This probe carries the SAME literal
+# (session_lifecycle.create_session's own five-family gate). This config carries the SAME literal
 # numbers component_c_generator.scaffolds.config.default_scaffold_config() would produce
-# (hardcoded here, never calling that factory -- S8-a's guard) -- unreachable in production
-# regardless, since no session can ever exist there (X2-3): submit_action's own route can never
-# be reached by a real request, the same shape as next_task's own probe.
-PRODUCTION_SCAFFOLD_CONFIG_PROBE = ScaffoldConfig(
+# (hardcoded here, never calling that factory -- S8-a's guard) -- unchanged by CONNECT Step 4,
+# because they already matched the real defaults (confirmed by reading scaffolds/config.py
+# directly, not assumed). CONNECT Step 4: renamed from PRODUCTION_SCAFFOLD_CONFIG_PROBE (it was
+# never empty like Generation's, but "probe" implied deliberately-unusable, which stops being true
+# once a real approved status is attached) and parameter_source_status only moves, under
+# APPROVAL-2026-08-26-seven-families.md Family 6 ("The backend remains authoritative for
+# scaffold_level. The frontend only consumes...").
+PRODUCTION_SCAFFOLD_CONFIG = ScaffoldConfig(
     config_version="c4.2-scaffold-1.0.0",
-    parameter_source_status="TEST_FIXTURE_ONLY",
+    parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
     level_c1_min_consecutive_incorrect=1,
     level_c2_min_consecutive_incorrect=2,
     level_c3_min_consecutive_incorrect=3,
     level_c4_min_consecutive_incorrect=4,
 )
 
-# BATCH 2 -- PRODUCTION POLICY-CONFIG PROBE, SUPERVISOR RULING (quoted in full because the shape
-# of this probe is the opposite of the two above, deliberately): "PolicyConfig has SIX required
+# BATCH 2 -- PRODUCTION POLICY-CONFIG PROBE, SUPERVISOR RULING, PRESERVED VERBATIM BECAUSE IT WAS
+# CORRECT UNDER A CLOSED GATE (quoted in full, not summarised): "PolicyConfig has SIX required
 # numeric fields, no defaults, so it cannot be constructed empty like the generation probe. A
 # probe is therefore unavoidable. It must NOT mirror default_policy_config()'s values the way
 # PRODUCTION_SCAFFOLD_CONFIG_PROBE mirrors default_scaffold_config(): values matching the real
 # defaults make probe-supplied behaviour indistinguishable from correct behaviour, which for a
 # config feeding the safety layer is the worst available failure mode. Carry
 # parameter_source_status='TEST_FIXTURE_ONLY' and values chosen to be conspicuously
-# non-calibrated."
+# non-calibrated." That ruling governed a config with no legitimate source of real values --
+# governance had assigned none, so ANY plausible-looking number would have overstated what was
+# known, and the ruling's own fix (implausible, edge-pinned values) was the correct response to
+# that specific problem.
 #
-# WHY THESE SPECIFIC NUMBERS, SO NOBODY "CORRECTS" THEM TOWARD THE REAL DEFAULTS: the real
-# default_policy_config() values (component_c_generator.policy.config, never called from app/ --
-# S8-a's guard) are 0.80 / 1.30 / 0.30 / 0.40 / 3 / 0.60 -- a plausible-looking, internally
-# consistent threshold set a reviewer could mistake for a real calibration. Every value below is
-# instead pinned against its own field's extreme edge (0.001 or 0.999 for every [0,1] threshold;
-# 19.0 attempts and 97 consecutive errors for the two unbounded-above fields) -- a shape no real
-# engineering assumption would ever take (a genuine "little struggle" ceiling of ~19 attempts, or
-# a "real error run" of 97, is not a defensible threshold for anything), so the values themselves
-# signal TEST_FIXTURE_ONLY even to a reader who never looks at the field name. The two ordering
-# constraints CPolicyConfig's own model_validator enforces
+# CONNECT STEP 4 -- THE GATE OPENED, THE PROBLEM THE RULING SOLVED NO LONGER EXISTS: under
+# APPROVAL-2026-08-26-seven-families.md Family 5 ("Policy -- APPROVED WITH CONDITION: retry is
+# child-initiated and returns to the same task; scaffold escalation remains backend-controlled;
+# exact retry limits and final feedback policy can be refined later"), governance has now assigned
+# real values -- the same ones the ruling above named and forbade mirroring, because at the time
+# they were merely plausible-looking rather than authorized. They are no longer merely
+# plausible-looking. Renamed from PRODUCTION_POLICY_CONFIG_PROBE to PRODUCTION_POLICY_CONFIG for
+# the same reason as Generation and Scaffold: it is no longer a probe. The real
+# default_policy_config() values (component_c_generator.policy.config, still never CALLED from
+# app/ -- S8-a's guard still applies, these are hardcoded literals, same discipline
+# PRODUCTION_SCAFFOLD_CONFIG already used) are 0.80 / 1.30 / 0.30 / 0.40 / 3 / 0.60. The two
+# ordering constraints CPolicyConfig's own model_validator enforces
 # (decrease_correctness_threshold < increase_correctness_threshold;
 # increase_max_strain < decrease_min_strain, packaging/component_c_internal/component_c_generator/
-# policy/config.py:47-53) are still satisfied (0.001 < 0.999 both times) so construction does not
-# fail -- deliberately implausible, not deliberately broken. ``config_version`` is likewise never
-# "c4.1-policy-1.0.0" (the real, reviewed version string) so a log line naming this probe's own
-# version cannot be mistaken for a governed release either. ``parameter_source_status`` is the
-# SAME imported ``_NOT_LIVE_PARAMETER_SOURCE_STATUS`` constant session_lifecycle's own six-family
-# gate is fed at session creation (c_session_service.py) -- not a second, independently-typed
-# "TEST_FIXTURE_ONLY" string literal -- so THE SEAM assertion below
-# (``assert_policy_config_matches_session_gate``, called in ``submit_action``) has a real,
-# structural relationship to compare, not two literals that merely happen to read the same today.
-PRODUCTION_POLICY_CONFIG_PROBE = PolicyConfig(
-    config_version="batch2-implausible-not-calibrated-probe",
-    parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
-    increase_correctness_threshold=0.999,
-    increase_max_avg_attempts=19.0,
-    increase_max_strain=0.001,
-    decrease_correctness_threshold=0.001,
-    decrease_error_run_threshold=97,
-    decrease_min_strain=0.999,
+# policy/config.py:47-53) are checked and hold for these real values (0.40 < 0.80;
+# 0.30 < 0.60) -- verified by hand, since the app-level PolicyConfig dataclass below carries no
+# validator of its own to enforce this mechanically. ``config_version`` is now
+# "c4.1-policy-1.0.0", the real, reviewed version string this config now legitimately is.
+# ``parameter_source_status`` is still the SAME imported constant (renamed
+# ``_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS``) session_lifecycle's own gate is fed at session
+# creation (c_session_service.py) -- not a second, independently-typed literal -- so THE SEAM
+# assertion below (``assert_policy_config_matches_session_gate``, called in ``submit_action``)
+# still has a real, structural relationship to compare, now carrying the new value on both sides.
+#
+# tests/test_batch2_adaptation_live_caller.py::test_production_policy_config_probe_does_not_mirror_the_real_defaults
+# asserted the OLD state (probe != real defaults, status == TEST_FIXTURE_ONLY) as a tripwire
+# against a SILENT promotion. Per supervisor ruling, CONNECT Step 4, it is inverted rather than
+# deleted -- see that test's own updated docstring for what it now protects.
+PRODUCTION_POLICY_CONFIG = PolicyConfig(
+    config_version="c4.1-policy-1.0.0",
+    parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
+    increase_correctness_threshold=0.80,
+    increase_max_avg_attempts=1.30,
+    increase_max_strain=0.30,
+    decrease_correctness_threshold=0.40,
+    decrease_error_run_threshold=3,
+    decrease_min_strain=0.60,
 )
 
 # SEVENTH-FAMILY GATE batch: PRODUCTION_EVIDENCE_WINDOW_CONFIG_PROBE (batch 2's own disclosed
@@ -392,6 +446,17 @@ class TaskService:
         if session_record.state != "active":
             raise ConflictError()
 
+        # CONNECT resume-instead-of-mint batch (owner ruling): lock the SESSION row before the
+        # gate checks and the resume-or-mint decision -- the instance row this task might resume
+        # (or the one a racing concurrent call might mint) does not exist yet at this point, unlike
+        # Step 5's lock target. Closes both the concurrent-first-call race (two calls on a fresh
+        # session both finding nothing to resume, both minting the SAME task_index -- verified
+        # CTaskOpportunityRecord carries no uniqueness constraint on (c_session_id, task_index),
+        # and task_index is the SOLE seed-lineage-distinguishing element per this module's own
+        # docstring, so a collision would silently draw the identical template twice) and any race
+        # between the resume check below and the mint path.
+        await CSessionRecordRepository(session).lock_for_update(c_session_id)
+
         try:
             assert_generation_config_permitted(generation_config, smoke_mode=smoke_mode)
         except GenerationConfigNotPermittedError as exc:
@@ -409,6 +474,31 @@ class TaskService:
             catalogue = adapter.load(_CATALOGUE_PATH)
         except LiveEngineCError as exc:
             raise ConflictError() from exc
+
+        # CONNECT resume-instead-of-mint batch (owner ruling): if this session already has an
+        # unterminated instance, return it instead of minting a new one -- an app reopened, a page
+        # refreshed, or a retried request must not silently abandon the task the child was already
+        # on (ESCALATIONS.md §7 has the full account of what that cost before this batch: no
+        # terminal event, no summary, no marker distinguishing "abandoned" from "never reached").
+        # DELIBERATELY PLACED AFTER the gate checks above, not before them, even though the
+        # generation work below (select_task, the RNG, instance construction) is genuinely
+        # unnecessary on this path and returning earlier would be the obvious optimization: a
+        # resumed task must never be able to outlive the approval that authorized it. If a
+        # parameter family's approval were ever withdrawn between when this task was first offered
+        # and when it is resumed, assert_generation_config_permitted / the bundle-and-catalogue
+        # resolution above must still refuse -- a resume path that skipped them would be fail-OPEN
+        # in a system whose entire discipline is fail-closed, and it would look completely normal
+        # while doing it. The cost is one bundle resolution per resume; do not "optimize" this away.
+        event_repo = CGameplayEventRecordRepository(session)
+        pending_instance = await CTaskInstanceRecordRepository(session).find_most_recent_for_session(c_session_id)
+        if pending_instance is not None and not await event_repo.has_terminal_for_instance(
+            pending_instance.c_task_instance_id
+        ):
+            try:
+                task_fields = _task_fields(pending_instance)
+            except LiveEngineCError as exc:
+                raise ConflictError() from exc
+            return CNextTaskResponse(**task_fields.model_dump(), request_id=request_id)
 
         learner_state, _local_state_record = await _learner_session_state(session, student_id)
         # task_index is 1-based: the package's own GameTaskInstance model requires >= 1.
@@ -608,7 +698,25 @@ class TaskService:
         # have been anything but zero. Fixed here to two events, mirroring the package's real
         # event vocabulary: submitted (action_payload only) then evaluated (evaluation_payload
         # only), same attempt_number, consecutive event_index.
+        #
+        # CONNECT Step 5: lock the instance row FIRST, in this transaction, before either count
+        # below -- the SAME row the c_gameplay_events triggers themselves lock at insert time
+        # (CTaskInstanceRecordRepository.lock_for_update's own docstring has the full reasoning).
+        # This is what closes the race two concurrent submissions on one instance would otherwise
+        # have: without it, both could read the same existing_submitted_count and write the same
+        # attempt_number, undercounting retries in exactly the way Family 3's condition ("each
+        # retry must receive an incrementing attempt_number") exists to prevent.
+        await instance_repo.lock_for_update(c_task_instance_id)
         max_index, max_timestamp = await event_repo.max_index_and_timestamp_for_instance(c_task_instance_id)
+        # CONNECT Step 5 (Family 3; ESCALATIONS.md §2 closed by this batch): attempt_number was
+        # hardcoded to 1 on both events below. Derived here instead, from the count of this
+        # instance's own existing answer_submitted events -- the SAME derivation
+        # derive_task_opportunity_summary already performs internally (behaviour/summary.py:43-46)
+        # -- so the persisted column is honest rather than only derivable downstream. Both events
+        # written by this call share the same attempt_number (they are the same attempt) and their
+        # event_index values stay consecutive, both already true of the existing max_index+1/+2
+        # derivation above -- this adds one more shared value alongside it, not a second scheme.
+        attempt_number = await event_repo.count_answer_submitted_for_instance(c_task_instance_id) + 1
 
         # Phase 6a, second LATENT DEFECT SINCE PHASE 5 found by the same exercise: no code path
         # anywhere ever wrote "game_task_started" (next_task writes only "game_task_offered").
@@ -650,7 +758,7 @@ class TaskService:
             task_index=instance_record.task_index,
             event_type="answer_submitted",
             event_index=max_index + 1,
-            attempt_number=1,
+            attempt_number=attempt_number,
             event_timestamp_relative_ms=max_timestamp + 1,
             action_payload=dict(action_payload),
             evaluation_payload=None,
@@ -674,7 +782,7 @@ class TaskService:
             task_index=instance_record.task_index,
             event_type="answer_evaluated",
             event_index=max_index + 2,
-            attempt_number=1,
+            attempt_number=attempt_number,
             event_timestamp_relative_ms=max_timestamp + 2,
             action_payload=None,
             # NEVER correctness_function_id, NEVER the correct_answer_payload -- only the
@@ -762,16 +870,16 @@ class TaskService:
                 # exist.
                 adaptation_evidence_window_config = resolve_evidence_window_config(bundle)
 
-                # THE SEAM: see PRODUCTION_POLICY_CONFIG_PROBE's own comment and
-                # bundle_resolution.assert_policy_config_matches_session_gate's docstring for the
-                # full reasoning. Ties the PolicyConfig object actually reaching
+                # THE SEAM: see PRODUCTION_POLICY_CONFIG's own comment (renamed CONNECT Step 4)
+                # and bundle_resolution.assert_policy_config_matches_session_gate's docstring for
+                # the full reasoning. Ties the PolicyConfig object actually reaching
                 # decide_and_persist_adaptation below to the SAME parameter_source_status this
                 # session was gated on at creation (session_lifecycle.create_session's own
                 # assert_code_gated_family_usable(family_name="policy_config", ...) call) --
                 # structurally, not by coincidence of two literals matching today.
                 assert_policy_config_matches_session_gate(
-                    PRODUCTION_POLICY_CONFIG_PROBE,
-                    session_gated_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
+                    PRODUCTION_POLICY_CONFIG,
+                    session_gated_parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
                 )
             except LiveEngineCError as exc:
                 raise ConflictError() from exc
@@ -826,7 +934,7 @@ class TaskService:
                 evidence=evidence,
                 current_difficulty_level=instance_record.difficulty_level,
                 seed_lineage=adaptation_seed_lineage,
-                policy_config=PRODUCTION_POLICY_CONFIG_PROBE,
+                policy_config=PRODUCTION_POLICY_CONFIG,
                 safety_config=adaptation_safety_config,
                 selection_config=adaptation_selection_config,
                 request_id=request_id,
