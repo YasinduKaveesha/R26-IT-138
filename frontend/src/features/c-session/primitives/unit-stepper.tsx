@@ -47,9 +47,63 @@ export type UnitStepperProps = {
   disabled?: boolean;
   onStepForward: () => void;
   onStepBack: () => void;
+  /** Fires when the coarse "+N" button is pressed -- only rendered when `coarseStep` is set. The
+   *  caller adds `coarseStep` to its own `forwardSteps` state; this component holds none of its
+   *  own, matching every other callback here. */
+  onCoarseForward?: () => void;
+  /** Fires when the coarse "-N" button is pressed -- only rendered when `coarseStep` is set. */
+  onCoarseBack?: () => void;
+  /**
+   * How many forward ticks the line renders. Defaults to `MAX_LINE_FORWARD_STEPS`, the corruption
+   * bound `line-traversal` relies on (see its comment above -- there the extent MUST NOT come from
+   * the payload, since deriving it from the addends would leak the answer). `line-position` (10d)
+   * passes its own `interval_max` here instead, which is legitimate for THAT archetype because the
+   * line's range is the task's own stated given, not a derived answer -- see
+   * `line-position-logic.ts`'s header for why the two cases differ.
+   */
+  maxForwardSteps?: number;
+  /**
+   * When set, renders a second, LARGER step pair (+/- this many units) alongside the +/-1 pair.
+   * Added for 10d's `line-position`, whose targets sit up to 34 units from the origin: unit-only
+   * stepping there would cost 34 taps at difficulty 5 against 2 at difficulty 1, and unlike
+   * `line-traversal` (where each unit jump IS the counting-on act being scored) those taps assess
+   * nothing -- they are pure transit cost, which is exactly the SPEC section 10 interaction-cost
+   * confound. See `line-position-surface.tsx`'s header for the full reasoning and the measured
+   * tap counts. Omitted by `line-traversal`, which keeps unit-only stepping deliberately.
+   *
+   * This stays within ruling 6.3: still discrete integer stepping, still a constant per-step touch
+   * target, still a line that scrolls rather than compresses. The coarse step is a fixed constant
+   * chosen by the caller, never derived from `difficulty_level`.
+   */
+  coarseStep?: number;
+  /**
+   * A forward offset (from `originValue`, same units as `forwardSteps`) to mark with a distinct
+   * FLAG tick, separate from the movable position marker. Added for 10d's `line-position`, whose
+   * prompt ("Move the marker to the target spot on the line") is deictic and needs a visible
+   * target -- omitted entirely by `line-traversal`, which has no such given position to show.
+   *
+   * This does not newly expose `target_position`'s own numeral: every tick already renders its own
+   * value (`tickLabel`, below) regardless of this prop, the same way every other position on the
+   * line is labelled -- the flag only marks WHICH of those already-visible ticks is the one to
+   * reach, exactly the way a marked destination on a paper number line would. There is no separate
+   * digit token anywhere that would let a child bypass the line and read the target off a numeral
+   * printed next to the prompt instead.
+   */
+  targetForwardOffset?: number;
 };
 
-export function UnitStepper({ disabled = false, forwardSteps, onStepBack, onStepForward, originValue }: UnitStepperProps) {
+export function UnitStepper({
+  coarseStep,
+  disabled = false,
+  forwardSteps,
+  maxForwardSteps = MAX_LINE_FORWARD_STEPS,
+  onCoarseBack,
+  onCoarseForward,
+  onStepBack,
+  onStepForward,
+  originValue,
+  targetForwardOffset,
+}: UnitStepperProps) {
   const scrollRef = useRef<ScrollView>(null);
   const position = originValue + forwardSteps;
 
@@ -63,7 +117,12 @@ export function UnitStepper({ disabled = false, forwardSteps, onStepBack, onStep
   }, [forwardSteps]);
 
   const canStepBack = forwardSteps > 0 && !disabled;
-  const canStepForward = forwardSteps < MAX_LINE_FORWARD_STEPS && !disabled;
+  const canStepForward = forwardSteps < maxForwardSteps && !disabled;
+  // A coarse step is only offered when it would land within range -- pressing it never overshoots
+  // past 0 or `maxForwardSteps` and needs no clamping on the caller's side.
+  const canCoarseBack = coarseStep !== undefined && forwardSteps - coarseStep >= 0 && !disabled;
+  const canCoarseForward =
+    coarseStep !== undefined && forwardSteps + coarseStep <= maxForwardSteps && !disabled;
 
   return (
     <View>
@@ -72,13 +131,14 @@ export function UnitStepper({ disabled = false, forwardSteps, onStepBack, onStep
         ref={scrollRef}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.line}>
-        {Array.from({ length: MAX_LINE_FORWARD_STEPS + 1 }, (_, tickIndex) => {
+        {Array.from({ length: maxForwardSteps + 1 }, (_, tickIndex) => {
           const tickValue = originValue + tickIndex;
           const isMarker = tickIndex === forwardSteps;
+          const isTarget = tickIndex === targetForwardOffset;
           return (
             <View key={tickIndex} style={styles.tickColumn}>
-              <View style={[styles.tick, isMarker && styles.tickMarked]}>
-                {isMarker ? <View style={styles.marker} /> : null}
+              <View style={[styles.tick, isTarget && styles.tickTarget, isMarker && styles.tickMarked]}>
+                {isMarker ? <View style={styles.marker} /> : isTarget ? <View style={styles.targetDot} /> : null}
               </View>
               <AppText style={styles.tickLabel}>{tickValue}</AppText>
             </View>
@@ -86,6 +146,29 @@ export function UnitStepper({ disabled = false, forwardSteps, onStepBack, onStep
         })}
       </ScrollView>
       <View style={styles.controls}>
+        {/* Coarse row above fine row, forward on the outside of both -- so the two "+" buttons sit
+            adjacent (top-right area) and the two "-" buttons sit adjacent (bottom-left area), a
+            layout a child can learn once ("bigger jump" vs "small jump", each direction grouped)
+            rather than four buttons in an arbitrary order. Coarse buttons render ONLY when
+            `coarseStep` is set -- `line-traversal` never passes it, so its own two-button shape is
+            unchanged. */}
+        {coarseStep !== undefined && (
+          <Pressable
+            accessibilityLabel={`jump forward ${coarseStep}`}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canCoarseForward }}
+            delayLongPress={GESTURE_LONG_PRESS_MS}
+            disabled={!canCoarseForward}
+            hitSlop={HIT_SLOP}
+            onPress={onCoarseForward}
+            style={({ pressed }) => [
+              styles.controlButton,
+              !canCoarseForward && styles.controlButtonDisabled,
+              pressed && canCoarseForward && styles.pressed,
+            ]}>
+            <AppText style={styles.controlButtonText}>{`▲▲ jump +${coarseStep}`}</AppText>
+          </Pressable>
+        )}
         <Pressable
           accessibilityLabel="jump forward one"
           accessibilityRole="button"
@@ -116,6 +199,23 @@ export function UnitStepper({ disabled = false, forwardSteps, onStepBack, onStep
           ]}>
           <AppText style={styles.controlButtonText}>▼ back</AppText>
         </Pressable>
+        {coarseStep !== undefined && (
+          <Pressable
+            accessibilityLabel={`step back ${coarseStep}`}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canCoarseBack }}
+            delayLongPress={GESTURE_LONG_PRESS_MS}
+            disabled={!canCoarseBack}
+            hitSlop={HIT_SLOP}
+            onPress={onCoarseBack}
+            style={({ pressed }) => [
+              styles.controlButton,
+              !canCoarseBack && styles.controlButtonDisabled,
+              pressed && canCoarseBack && styles.pressed,
+            ]}>
+            <AppText style={styles.controlButtonText}>{`▼▼ back ${coarseStep}`}</AppText>
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -149,6 +249,9 @@ const styles = StyleSheet.create({
     gap: STEP_SPACING,
     paddingVertical: STEP_SPACING,
   },
+  // The dot's own fill is back to solid colors.primary (2026-08-26: the faded-green fill this file
+  // briefly used was reverted -- the OUTER RING (tickMarked, below) is where accentGreen belongs
+  // instead, so the dot stays red and the ring around it is what turned green).
   marker: {
     backgroundColor: colors.primary,
     borderRadius: radius.pill,
@@ -175,7 +278,25 @@ const styles = StyleSheet.create({
     fontFamily: typography.fonts.body,
     fontSize: typography.fontSize.xs,
   },
+  // Back to colors.primary (2026-08-26 correction): the ring around the current-position tick
+  // matches the dot inside it (`marker`, above) -- both red, not a red dot inside a green ring.
   tickMarked: {
     borderColor: colors.primary,
+  },
+  // The GIVEN target tick (line-position only) -- accentGreen, distinct from `tickMarked`'s own red,
+  // so the two are never confused. `tickMarked` still wins over `tickTarget` when both coincide
+  // (style array order below), since the child's own position is the more useful thing to see once
+  // they have actually reached the target.
+  tickTarget: {
+    borderColor: colors.accentGreen,
+  },
+  // A SOLID green CIRCLE (2026-08-26 correction: an earlier draft made this hollow -- border only,
+  // no fill -- the user asked for it filled), not the flag glyph an even earlier draft used (the
+  // emoji did not render consistently and showed as a placeholder box).
+  targetDot: {
+    backgroundColor: colors.accentGreen,
+    borderRadius: radius.pill,
+    height: STEP_TOUCH_TARGET_SIZE * 0.5,
+    width: STEP_TOUCH_TARGET_SIZE * 0.5,
   },
 });

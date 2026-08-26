@@ -34,14 +34,14 @@ test("archetype-surfaces.ts's SURFACE_TABLE now has an 'option-select' entry (so
   assert.match(source, /'option-select':\s*OptionSelectSurface/);
 });
 
-test("archetype-surfaces.ts's SURFACE_TABLE still has no 'line-position' entry (source-scan, comments stripped -- proves the §PRE-FLIGHT blocker is respected)", () => {
+test("archetype-surfaces.ts's SURFACE_TABLE now has a 'line-position' entry (source-scan, comments stripped -- 2026-08-26: the §2.2 interaction-cost blocker is resolved via unit-stepper.tsx's new coarse-step, see line-position-logic.ts's own header)", () => {
   const source = stripComments(readFileSync(surfacesFile, 'utf-8'));
-  assert.doesNotMatch(source, /'line-position':/);
+  assert.match(source, /'line-position':\s*LinePositionSurface/);
 });
 
-test('negative control: the source-scan pattern would catch a fabricated line-position registration (proves the scan is not vacuous)', () => {
-  const fabricated = "const SURFACE_TABLE = { 'line-position': LinePositionSurface };";
-  assert.match(fabricated, /'line-position':/);
+test('negative control: the source-scan pattern would NOT match an absent registration (proves the scan is not vacuous)', () => {
+  const fabricated = "const SURFACE_TABLE = { 'value-report': ValueReportSurface };";
+  assert.doesNotMatch(fabricated, /'line-position':\s*LinePositionSurface/);
 });
 
 for (const templateId of ['C-MCL-02', 'C-MCL-03']) {
@@ -50,7 +50,7 @@ for (const templateId of ['C-MCL-02', 'C-MCL-03']) {
   });
 }
 
-test("C-MCL-04: resolveArchetype still yields 'line-position' -- an id with no SURFACE_TABLE entry, which is what makes it fail closed with reason 'no-surface-registered' rather than 'unresolvable-template' (see c-plan-task-surface.test.ts for that distinction proven generically via a fake resolver)", () => {
+test("C-MCL-04: resolveArchetype yields 'line-position' -- now a REGISTERED surface (2026-08-26), no longer the no-surface-registered fail-closed case this test previously described", () => {
   assert.equal(resolveArchetype('C-MCL-04', entryFor('C-MCL-04').valid_action_space), 'line-position');
 });
 

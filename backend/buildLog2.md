@@ -1115,3 +1115,106 @@ fixed with `flexShrink: 0` + `minHeight` on the scroll bound.
 **What was NOT independently re-verified.** The backend suite was not re-run -- no backend file
 changed. `ObjectPool`'s `accent`-tint contrast and the shared chrome's new border/shadow were judged
 visually by the owner, not measured against any accessibility contrast standard.
+
+## 2026-08-26 — feat: `line-position` archetype registered, completing 10d (C-MCL-04)
+
+**What was built.** `line-position`, the archetype for C-MCL-04 alone -- the fourth and last
+template of C-GF-03 Match, Compare, Locate. Card #3 flips from *Partly ready* to *Ready to play* on
+its own (`readinessOf` computes family readiness from `SURFACE_TABLE` at call time) -- no hub file
+touched. This closes out 10d, left partial since `de91132` (C-MCL-02/C-MCL-03 shipped) and 10e-0
+(C-MCL-01 unblocked): all four MCL templates are now registered.
+
+**Why this was still open.** The master work order's own §2.2 blocker was never actually about the
+STEPPING MECHANISM -- that was already ruled ("discrete integer stepping, constant per-step touch
+target, the line scrolls or paginates, never compresses") and `unit-stepper.tsx` was already built
+generic for this reuse in 10c. What was genuinely unresolved was the INTERACTION-COST CONFOUND `de91132`'s
+own Finding 2 measured and left open: unit-only stepping from 0 costs 2 taps at L1 and 34 at L5 (a
+17x spread), and unlike `line-traversal` (where each unit jump IS the counting-on act being scored),
+every tap past the first here is pure transit cost, assessing nothing -- exactly the SPEC section 10
+confound that killed 10a's original stepper design. Finding 2 named candidate fixes without choosing
+one; the owner this session picked coarse+fine stepping over unit-only (accepting the residual tap
+cost) or escalating without shipping.
+
+**The fix: coarse+fine discrete stepping, built into `unit-stepper.tsx` itself, not a new primitive.**
+A new optional `coarseStep` prop adds a second `+N`/`-N` button pair alongside the existing `+1`/`-1`
+pair -- `line-position` passes a fixed `LINE_POSITION_COARSE_STEP = 10` (never derived from
+`interval_max` or `difficulty_level`); `line-traversal` passes nothing, so its own two-button shape
+is unchanged. At L5 (target 34) this collapses 34 taps to 7 (3 coarse + 4 fine), measured and
+asserted by a dedicated test. Two other additions to the shared primitive, both additive and
+`line-traversal`-inert: `maxForwardSteps` (defaults to the old corruption-only
+`MAX_LINE_FORWARD_STEPS`; `line-position` passes `interval_max` instead, legitimate here because
+that value is the task's own stated range, not an answer to protect) and `targetForwardOffset`
+(marks one tick with a distinct visual, omitted by `line-traversal`, which has no such given position
+to show).
+
+**`target_position` is the GIVEN, not the answer -- and still never rendered as a bare numeral.**
+The prompt ("Move the marker to the target spot on the line") is deictic and needs a visible target;
+unlike `line-traversal`'s sum, there is no way to complete the task without showing where the target
+is. It renders as a marked tick on the line itself (a solid green circle, after two rounds of visual
+correction -- see below), never as a printed digit next to the prompt. A dedicated leak-guard test
+(`c-line-position-no-target-leak.test.ts`) proves `spec.targetPosition` is passed to exactly one
+place in the surface (`UnitStepper`'s `targetForwardOffset` prop) and never interpolated into any
+`AppText` node.
+
+**A real discoverability gap, found by the owner testing at L5, fixed with a bucketed range hint.**
+`UnitStepper`'s own auto-scroll only follows the MARKER (which starts at 0); with a target up to 200
+units away and entirely off-screen, nothing told the child which direction or how far to go. Fixed
+with `targetRangeStart`/`targetRangeEnd` -- a `TARGET_HINT_BUCKET_SIZE`-wide (5) window containing
+`target_position`, computed structurally and rendered as "Target is between 30 and 35" above the
+line. This narrows the search space without pinpointing the exact value, the same trade-off a paper
+number line's own printed gridlines make. Bucket boundaries fall on multiples of 5 ("0-5, 5-10,
+10-15"), corrected once after an initial off-by-one draft ("30-34" instead of "30-35").
+
+**UI iteration, owner-driven from browser testing across all 5 difficulty levels:**
+- The target tick went through two visual drafts before landing: a 🏁 emoji (did not render
+  consistently, showed as a placeholder box) → a hollow green ring → a solid green filled circle.
+- The current-position marker and its own tick ring went through a similar correction: solid red
+  dot / red ring (original) → faded green dot (rejected, hard to read) → back to a solid red dot,
+  but with the ring around it changed to green (accepted) → both reverted to red after the target's
+  dot went solid green, since a red-ringed red dot next to a green-ringed green dot reads more
+  clearly than a red dot inside a green ring. Final state: current position is entirely red (ring +
+  dot), target is entirely green (ring + solid dot) -- two internally-consistent colour pairs, never
+  mixed.
+- A "The marker is at N" live caption was added, then removed at the owner's request in the same
+  session -- the marker's own tick-label numeral already shows this.
+
+**Shared-primitive consequence, flagged rather than left silent.** `unit-stepper.tsx` is shared with
+`line-traversal` (10c, shipped and previously browser-verified). Every change above to `tickMarked`'s
+ring colour and the `marker` dot's fill also applies to `line-traversal`'s own rendering, since
+neither archetype-specific colour was gated behind a prop -- `line-traversal`'s marker now renders
+with the same red ring + red dot combination line-position settled on, which happens to match what it
+already had (red ring, red dot) after this round's reversions, so no visual regression resulted, but
+this was not independently re-confirmed in the browser for `line-traversal` specifically this
+session -- only reasoned about from the diff.
+
+**Files:**
+- new: `line-position-logic.ts` (pure resolver), `line-position-surface.tsx`.
+- edit: `unit-stepper.tsx` (`coarseStep`, `maxForwardSteps`, `targetForwardOffset` props; `marker`/
+  `tickMarked`/`tickTarget`/`targetDot` style changes, described above).
+- edit: `archetype-surfaces.ts` (one import, one `SURFACE_TABLE` entry).
+- edit (named exception): `c-mcl-family-surface-registration.test.ts` -- 3 tests inverted from
+  asserting `line-position` has NO surface entry to asserting it now does (the fact this file
+  documented changed); every other test in the file untouched.
+- new tests, flat in `src/api/__tests__/`: `c-line-position-logic.test.ts`,
+  `c-line-position-fail-closed.test.ts`, `c-line-position-key-set-proof.test.ts`,
+  `c-line-position-prompt-text.test.ts`, `c-line-position-carries-interactive-assets.test.ts`,
+  `c-line-position-no-representation-mode.test.ts`, `c-line-position-motor-constancy.test.ts`,
+  `c-line-position-no-target-leak.test.ts`.
+
+**Verification -- measured.**
+- `npx tsc --noEmit` -- exit 0, throughout every iteration in this batch.
+- `npm run test:contract` -- **1087 tests, 1087 passed, 0 failed**, final state. Baseline
+  immediately before this batch: 999 / 999 / 0 (post-10e). Re-run after every source change in this
+  batch.
+- Both `MAX_INTERVAL_MAX` and the `target_position` range bound (`[0, intervalMax]`) proven by
+  disabling each in place, confirming the targeted negative controls went red, restoring, confirming
+  green again.
+- `npx expo export --platform ios` -- succeeded; `dist/` removed after.
+- **Every difficulty level looked at in a browser by the owner directly**: C-MCL-04 at L1-L5
+  (interval_max 10/20/50/100/200, target_position 2/7/26/36/34), through every visual correction
+  described above, all confirmed correct at the final state. Card #3 confirmed reading **Ready to
+  play** in the hub.
+
+**What was NOT independently re-verified.** `line-traversal`'s own rendering, after the shared
+`unit-stepper.tsx` colour changes -- see the "Shared-primitive consequence" paragraph above. The
+backend suite was not re-run -- no backend file changed.

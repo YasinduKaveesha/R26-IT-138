@@ -12,6 +12,7 @@ import type { ComponentType } from 'react';
 
 import type { CNextTaskResponse } from '@/src/api/generated/openapi-types';
 import type { ArchetypeId } from '@/src/features/c-session/archetypes/registry';
+import { LinePositionSurface } from '@/src/features/c-session/archetypes/line-position-surface';
 import { LineTraversalSurface } from '@/src/features/c-session/archetypes/line-traversal-surface';
 import { ObjectSetActionSurface } from '@/src/features/c-session/archetypes/object-set-action-surface';
 import { OptionSelectSurface } from '@/src/features/c-session/archetypes/option-select-surface';
@@ -37,6 +38,11 @@ const SURFACE_TABLE: Partial<Record<ArchetypeId, ComponentType<ArchetypeSurfaceP
   // registry.ts's own pre-existing mapping -- see object-set-action-logic.ts's header for how one
   // resolver covers both templates' different declared-key shapes.
   'object-set-action': ObjectSetActionSurface,
+  // C-MCL-04 alone (C-GF-03). Completes the family this batch's own option-select entry already
+  // partially lit up -- see line-position-logic.ts's header for why this is a separate archetype
+  // from line-traversal, and unit-stepper.tsx's own coarse-step addition for the interaction-cost
+  // fix this template needed before it could ship (master work order §2.2).
+  'line-position': LinePositionSurface,
 };
 
 /**
