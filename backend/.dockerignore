@@ -86,3 +86,14 @@ provenance/wheels/*
 # characterization test suite to cross-check the TEST-FIXTURE-ONLY catalogue against the
 # reviewed coverage report. Contains no generator source, no wheel, no research artifacts.
 !provenance/component-b-coverage.json
+# CONNECT Step 2: the governed Component C catalogue (vendored verbatim from the sibling Yass/
+# tree, sha256 82004a5fef94528ea1e4187473420453bdfb7e1d3b5ade48ce2bc03486630851), read by
+# _CATALOGUE_PATH in c_session_service.py and task_service.py. Contains no generator source, no
+# wheel, no research artifacts -- a single reviewed Markdown catalogue document. Its own status
+# line reads PROPOSED FOR APPROVAL, not APPROVED; vendoring it does not change that status.
+!provenance/R26-IT-138_Component_C_Game_Task_Catalogue_v1.0.md
+# CONNECT Step 3: the approved C runtime bundle manifest, authored under
+# APPROVAL-2026-08-26-seven-families.md. Read by _BUNDLE_PATH in c_session_service.py and
+# task_service.py. Contains no generator source, no wheel, no research artifacts -- a single
+# JSON manifest, schema-validated against provenance/c-runtime-bundle.schema.json.
+!provenance/c-runtime-bundle-approved-1.0.json
