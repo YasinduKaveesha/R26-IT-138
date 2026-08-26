@@ -15,6 +15,16 @@
 // task-identifying wire field. That React remounts on a changed key is React's documented
 // behaviour, relied on here and NOT verified by this project. The behavioural half remains
 // unverified, and is a supervisor observation to make in a browser, not a claim this file supports.
+//
+// EXTENDED for the retry loop: the key is now `` `${task.c_task_instance_id}:${attempt}` ``, not
+// `task.c_task_instance_id` alone. Combining with `attempt` closes the identical gap one level
+// down -- a WRONG answer may be resubmitted on the same instance id without limit (the backend
+// writes no terminal event on that path), so a key bound to the instance id alone would not change
+// between attempts on one task, and the answer_feedback_panel's "Try again" would remount nothing:
+// the previous, wrong entry would still be sitting in the surface. The predicate below now extracts
+// the key as a full expression (handling the template-literal shape, not just a bare member
+// expression) and a second predicate confirms `attempt` is actually part of it -- both are required
+// for the guard to mean what this file claims.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,19 +47,60 @@ function strippedSource(text: string): string {
 }
 
 /**
- * The field name a `<Surface ... />` element's `key` is bound to, or `null` when there is no
- * Surface element, no key on it, or a key bound to anything other than a `task.<field>` member
- * expression -- a string literal, a number, a loop index, or a call all yield `null`.
+ * The raw text of a `<Surface ... />` element's `key={...}` expression (everything between the
+ * outer braces, brace-balanced so a nested `${...}` template expression does not truncate the
+ * match early), or `null` if there is no Surface element or no `key` attribute on it at all.
+ */
+function keyExpressionOfSurfaceElement(elementSource: string): string | null {
+  const marker = elementSource.match(/\bkey=\{/);
+  if (!marker || marker.index === undefined) return null;
+  let index = marker.index + marker[0].length;
+  let depth = 1;
+  const start = index;
+  while (index < elementSource.length && depth > 0) {
+    if (elementSource[index] === '{') depth += 1;
+    else if (elementSource[index] === '}') depth -= 1;
+    index += 1;
+  }
+  if (depth !== 0) return null; // unbalanced -- malformed source, not a key this guard can trust
+  return elementSource.slice(start, index - 1);
+}
+
+/**
+ * The task-field name a `<Surface ... />` element's `key` expression references (via a bare
+ * `task.<field>` member expression appearing ANYWHERE inside the key, so both
+ * `key={task.c_task_instance_id}` and `` key={`${task.c_task_instance_id}:${attempt}`} `` are
+ * recognised), or `null` when there is no Surface element, no key on it, or the key references no
+ * `task.<field>` at all -- a string literal, a number, a loop index, or a bare call yield `null`.
  *
- * This is the single predicate under test. The real file and every negative control below run
+ * This is the primary predicate under test. The real file and every negative control below run
  * through it, so the controls exercise the guard itself rather than a lookalike of it.
  */
 export function keyFieldOfSurfaceElement(source: string): string | null {
   const element = strippedSource(source).match(/<Surface\b[^>]*\/>/);
   if (!element) return null;
 
-  const key = element[0].match(/\bkey=\{task\.([A-Za-z_][A-Za-z0-9_]*)\}/);
+  const keyExpr = keyExpressionOfSurfaceElement(element[0]);
+  if (keyExpr === null) return null;
+
+  const key = keyExpr.match(/\btask\.([A-Za-z_][A-Za-z0-9_]*)\b/);
   return key ? key[1] : null;
+}
+
+/**
+ * Whether a `<Surface ... />` element's `key` expression ALSO references the retry attempt count
+ * (a bare `attempt` identifier), independent of which task field it uses. `false` for every shape
+ * `keyFieldOfSurfaceElement` itself would call `null` on, and for a key bound to the task field
+ * alone with no attempt component -- the exact pre-retry shape this guard exists to catch.
+ */
+export function keyIncludesAttempt(source: string): boolean {
+  const element = strippedSource(source).match(/<Surface\b[^>]*\/>/);
+  if (!element) return false;
+
+  const keyExpr = keyExpressionOfSurfaceElement(element[0]);
+  if (keyExpr === null) return false;
+
+  return /\battempt\b/.test(keyExpr);
 }
 
 // Fields that are present on a task but provably REPEAT across consecutive tasks, so a key bound to
@@ -136,4 +187,49 @@ test('the guard rejects a key bound to a repeating field, through the real predi
   const field = keyFieldOfSurfaceElement('<Surface key={task.game_task_template_id} task={task} />');
   assert.equal(field, 'game_task_template_id');
   assert.ok(NON_IDENTIFYING_FIELDS.includes(field), 'the repeating-field list would not catch it');
+});
+
+// ---------------------------------------------------------------------------
+// The attempt component of the key -- added for the retry loop. `keyFieldOfSurfaceElement` alone
+// cannot see this: a key bound to `task.c_task_instance_id` with no attempt component passes every
+// test above unchanged, yet would not remount between a wrong answer and a "try again" on the same
+// task. `keyIncludesAttempt` is the second, independent check that closes that gap.
+// ---------------------------------------------------------------------------
+
+test('the real Surface element\'s key includes the task field AND the attempt count', () => {
+  const source = readFileSync(screenPath, 'utf8');
+  assert.notEqual(keyFieldOfSurfaceElement(source), null, 'no task field in the key');
+  assert.ok(keyIncludesAttempt(source), 'c-session-screen.tsx\'s Surface key does not include `attempt`');
+});
+
+test('the attempt guard fires on the pre-retry shape -- task field alone, no attempt', () => {
+  assert.equal(
+    keyIncludesAttempt('<Surface key={task.c_task_instance_id} onSubmit={s} task={task} />'),
+    false,
+  );
+});
+
+test('the attempt guard fires when there is no Surface element, or no key, at all', () => {
+  assert.equal(keyIncludesAttempt('const a = 1;'), false);
+  assert.equal(keyIncludesAttempt('<Surface onSubmit={s} task={task} />'), false);
+});
+
+test('the attempt guard fires on a lookalike identifier -- `attemptCount` is not `attempt`', () => {
+  assert.equal(
+    keyIncludesAttempt('<Surface key={`${task.c_task_instance_id}:${attemptCount}`} task={task} />'),
+    false,
+  );
+});
+
+test('the attempt guard recognises the real, correctly-shaped key -- not vacuously false', () => {
+  assert.ok(
+    keyIncludesAttempt('<Surface key={`${task.c_task_instance_id}:${attempt}`} task={task} />'),
+  );
+});
+
+test('keyFieldOfSurfaceElement still extracts the task field from the template-literal shape', () => {
+  assert.equal(
+    keyFieldOfSurfaceElement('<Surface key={`${task.c_task_instance_id}:${attempt}`} task={task} />'),
+    'c_task_instance_id',
+  );
 });

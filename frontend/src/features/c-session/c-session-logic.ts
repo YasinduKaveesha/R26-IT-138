@@ -12,6 +12,7 @@ import type {
   CActiveSessionResponse,
   CNextTaskResponse,
   CreateCSessionRequest,
+  CSubmitActionResult,
 } from '@/src/api/generated/openapi-types';
 import type { ArchetypeSurfaceProps } from '@/src/features/c-session/archetype-surfaces';
 import { resolveArchetype, type ArchetypeId } from '@/src/features/c-session/archetypes/registry';
@@ -75,6 +76,34 @@ export function planTaskSurface(
   return { kind: 'mount', task, Surface };
 }
 
+// --- submission outcome ----------------------------------------------------------------------
+
+export type SubmissionOutcome =
+  | { kind: 'advance' }
+  | { kind: 'retry'; scaffoldLevel: string };
+
+/**
+ * Turn one `CSubmitActionResult` into the screen's next move: advance to the next task, or stay on
+ * this one and let the child retry. `response_matched` is the server's verdict, read and relayed --
+ * this function never computes correctness, never inspects what the child submitted, and never
+ * compares a submitted value against anything. It exists so that fact is provable (a source-scan
+ * test can assert this function's only input is the already-validated result type, never the
+ * submitted payload) rather than merely asserted in a comment.
+ *
+ * `scaffoldLevel` is carried through verbatim on a retry, exactly as the server sent it --
+ * `scaffold_level` is a plain string on the wire (`CSubmitActionResult`), not a closed enum this
+ * codebase owns, so an unexpected value is relayed rather than rejected. Displaying or ignoring it
+ * is the caller's choice; this function does not interpret it.
+ *
+ * The backend allows unlimited resubmission of a task instance until a CORRECT answer writes its
+ * one allowed terminal event (`task_service.py`'s `has_terminal_for_instance` guard) -- so `retry`
+ * is not a client-invented affordance, it is the flow the contract already supports and this
+ * function is what finally reads the result needed to drive it.
+ */
+export function planSubmissionOutcome(result: CSubmitActionResult): SubmissionOutcome {
+  if (result.response_matched) return { kind: 'advance' };
+  return { kind: 'retry', scaffoldLevel: result.scaffold_level };
+}
 // --- session continuation ------------------------------------------------------------------
 
 /**

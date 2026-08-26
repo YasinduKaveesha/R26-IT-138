@@ -49,7 +49,38 @@ function getDevelopmentFixture(): string | null {
   return fixture || null;
 }
 
+// EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_VERDICT drives `submitAction`'s canned `response_matched` --
+// it does not make the fixture EVALUATE anything. There is still no comparison anywhere in this
+// file between a submitted payload and any expected answer; the env var only selects which fixed
+// literal to hand back, exactly as EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_FAMILY selects a literal
+// accent override two blocks below. This is what keeps this file's own long-standing comment
+// ("nothing in this codebase ever computes response_matched client-side") true after this change,
+// not just before it.
+//
+// `'alternate'` exists so a full retry cycle (not-matched, escalate scaffold_level, matched) is
+// walkable in a browser without restarting the dev server between attempts -- the only way to SEE
+// `answer-feedback-panel.tsx`'s two states and the remount-per-attempt key, since nothing in this
+// repository can mount a component tree in an automated test.
+type DevFixtureVerdict = 'correct' | 'incorrect' | 'alternate';
+
+function readDevFixtureVerdict(): DevFixtureVerdict {
+  const raw = process.env.EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_VERDICT?.trim();
+  if (raw === 'incorrect' || raw === 'alternate') return raw;
+  return 'correct';
+}
+
+// C0..C4 is the real `scaffold_level` vocabulary (persistence_models.py's CHECK constraint), the
+// same set `technical_status`/`scaffold_state` already draw from elsewhere in this file -- not an
+// invented sequence.
+const SCAFFOLD_LEVELS = ['C0', 'C1', 'C2', 'C3', 'C4'] as const;
+
 function createFixtureApi(fixture: string): ComponentCApi {
+  // Closed over by `submitAction` below, not module-level -- state private to one fixture api
+  // instance, matching how `api` itself is held for the lifetime of one screen mount
+  // (c-session-screen.tsx's own `useMemo`). Reset only by remounting the screen (or restarting the
+  // dev server), same as every other fixture value in this file.
+  let notMatchedCount = 0;
+  let alternateCallCount = 0;
   return {
     async createSession() {
       return {
@@ -135,12 +166,51 @@ function createFixtureApi(fixture: string): ComponentCApi {
     },
     // response_matched here is a canned fixture value, not a computed verdict -- this fixture
     // never evaluates correctness. A real submission's response_matched comes from the server
-    // alone; nothing in this codebase ever computes it client-side.
+    // alone; nothing in this codebase ever computes it client-side. Which canned value comes back
+    // is selected by EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_VERDICT (see its own comment above);
+    // `payload` is accepted only because the real route signature requires it and is never read.
     async submitAction() {
+      const verdict = readDevFixtureVerdict();
+
+      if (verdict === 'correct') {
+        return {
+          c_task_instance_id: 'dev-c-task-fixture-only',
+          response_matched: true,
+          scaffold_level: 'C0',
+          request_id: 'dev-c-submit-action-ok',
+        };
+      }
+
+      if (verdict === 'incorrect') {
+        const level = SCAFFOLD_LEVELS[Math.min(notMatchedCount, SCAFFOLD_LEVELS.length - 1)];
+        notMatchedCount += 1;
+        return {
+          c_task_instance_id: 'dev-c-task-fixture-only',
+          response_matched: false,
+          scaffold_level: level,
+          request_id: 'dev-c-submit-action-ok',
+        };
+      }
+
+      // 'alternate': odd calls (1st, 3rd, ...) not-matched with an escalating scaffold level; even
+      // calls (2nd, 4th, ...) matched -- so submitting the same wrong answer, then trying again,
+      // walks the full retry cycle described in this file's header comment above.
+      const callIndex = alternateCallCount;
+      alternateCallCount += 1;
+      const matched = callIndex % 2 === 1;
+      if (matched) {
+        return {
+          c_task_instance_id: 'dev-c-task-fixture-only',
+          response_matched: true,
+          scaffold_level: 'C0',
+          request_id: 'dev-c-submit-action-ok',
+        };
+      }
+      const level = SCAFFOLD_LEVELS[Math.min(Math.floor(callIndex / 2), SCAFFOLD_LEVELS.length - 1)];
       return {
         c_task_instance_id: 'dev-c-task-fixture-only',
-        response_matched: true,
-        scaffold_level: 'C0',
+        response_matched: false,
+        scaffold_level: level,
         request_id: 'dev-c-submit-action-ok',
       };
     },

@@ -42,8 +42,10 @@ import { HIT_SLOP, TOUCH_TARGET_MIN_SIZE } from '@/src/features/c-session/motor-
 import {
   classifySessionFailure,
   decideSessionBootstrap,
+  planSubmissionOutcome,
   planTaskSurface,
 } from '@/src/features/c-session/c-session-logic';
+import { AnswerFeedbackPanel } from '@/src/features/c-session/answer-feedback-panel';
 import { FailClosedFrame } from '@/src/features/c-session/fail-closed-frame';
 import { accentForGameFamily } from '@/src/features/c-session/game-family-accents';
 import { NeutralMessageScreen } from '@/src/features/c-session/neutral-message-screen';
@@ -69,7 +71,21 @@ export type CSessionScreenProps = {
 
 type Phase =
   | { kind: 'loading' }
-  | { kind: 'task'; task: CNextTaskResponse; Surface: ComponentType<ArchetypeSurfaceProps> }
+  // `attempt` and `feedback` extend the existing `task` phase rather than adding a sibling phase,
+  // because a retry stays ON this same task instance -- it is not a new task, so it does not
+  // belong to a new phase. `feedback === null` renders the archetype surface (today's behaviour,
+  // unchanged); `feedback !== null` renders `AnswerFeedbackPanel` INSTEAD OF the surface -- see
+  // that file's own header for why that placement, not an overlay, is load-bearing. `attempt`
+  // increments only on a "try again" press and is folded into the surface's remount `key` below,
+  // so a wrong answer never survives visibly into the next attempt, mirroring `19d4530`'s fix for
+  // the same problem across TASKS rather than across attempts on one task.
+  | {
+      kind: 'task';
+      task: CNextTaskResponse;
+      Surface: ComponentType<ArchetypeSurfaceProps>;
+      attempt: number;
+      feedback: { matched: boolean; scaffoldLevel: string } | null;
+    }
   | { kind: 'fail-closed'; supportCode: string | null }
   | { kind: 'technical-block'; supportCode: string | null }
   | { kind: 'failure'; supportCode: string | null; copy: { title: string; detail: string } }
@@ -147,7 +163,13 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
           return;
         }
         recordTaskStarted();
-        setPhase({ kind: 'task', task: surfacePlan.task, Surface: surfacePlan.Surface });
+        setPhase({
+          kind: 'task',
+          task: surfacePlan.task,
+          Surface: surfacePlan.Surface,
+          attempt: 0,
+          feedback: null,
+        });
       } catch (error) {
         routeFailure(error);
       }
@@ -166,20 +188,53 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
       const payload = encodeActionPayload(task.valid_action_space, values);
       if (payload === null) return;
       try {
-        await api.submitAction(
+        const result = await api.submitAction(
           cSessionId,
           task.c_task_instance_id,
           { action_payload: payload },
           accessToken,
         );
         recordActionSubmitted();
-        await loadNextTask(cSessionId, accessToken);
+        // Neither branch calls `loadNextTask` directly, even on a matched answer -- advancing is
+        // always the child's own "Next" press (see answer-feedback-panel.tsx's header), never
+        // automatic. `outcome` only decides what the panel SHOWS; `planSubmissionOutcome` computes
+        // nothing about correctness itself, it relays `result.response_matched` and
+        // `result.scaffold_level` exactly as the server sent them.
+        const outcome = planSubmissionOutcome(result);
+        setPhase((prev) =>
+          prev.kind === 'task'
+            ? { ...prev, feedback: { matched: outcome.kind === 'advance', scaffoldLevel: result.scaffold_level } }
+            : prev,
+        );
       } catch (error) {
         routeFailure(error);
       }
     },
-    [api, loadNextTask, routeFailure],
+    [api, routeFailure],
   );
+
+  // Fired by AnswerFeedbackPanel's "Try again" -- clears the panel and bumps `attempt`, which is
+  // folded into the surface's remount `key` below so the wrong answer does not survive visibly
+  // into the fresh attempt. Stays on the SAME task instance; no network call, since nothing about
+  // the task itself changed.
+  const retryTask = useCallback(() => {
+    setPhase((prev) =>
+      prev.kind === 'task' ? { ...prev, feedback: null, attempt: prev.attempt + 1 } : prev,
+    );
+  }, []);
+
+  // Fired by AnswerFeedbackPanel's "Next" -- the one place a matched answer actually advances the
+  // session, mirroring submitFromSurface's own token/session-id handling exactly.
+  const advanceToNextTask = useCallback(async () => {
+    const cSessionId = cSessionIdRef.current;
+    if (!cSessionId) return;
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      routeFailure(new ApiClientError('unauthenticated', 'No access token is available.'));
+      return;
+    }
+    await loadNextTask(cSessionId, accessToken);
+  }, [getAccessToken, loadNextTask, routeFailure]);
 
   // The bridge from an archetype surface's own onSubmit (raw per-key values, no session/task
   // plumbing -- see ArchetypeSurfaceProps) to handleSubmit's full signature. Reads cSessionId from
@@ -319,7 +374,7 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
   // for this task, per its own ArchetypeSurfaceProps contract (task + onSubmit only -- no exit
   // affordance in that contract, which is why the exit control lives in this wrapper rather than
   // being threaded into the surface itself).
-  const { Surface, task } = phase;
+  const { Surface, attempt, feedback, task } = phase;
   // The ground behind the task panel is the accent of the family this task came from, read from
   // the shared table by `game_family_id` -- a required wire field, never a literal here, so Number
   // Path opens on its own blue and every other family on its own colour without this file naming
@@ -375,11 +430,31 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
                 explicit reset.
 
                 `c_task_instance_id` is the registry's own per-instance identifier and is a required
-                non-null string on CNextTaskResponse. It is used alone and deliberately not combined
-                with `task_index`: a composite would encode a distrust of the contract without
-                detecting its violation, quietly papering over a backend that had issued two tasks
-                under one instance id instead of letting that surface as the defect it would be. */}
-              <Surface key={task.c_task_instance_id} onSubmit={submitFromSurface} task={task} />
+                non-null string on CNextTaskResponse. It is deliberately not combined with
+                `task_index`: a composite would encode a distrust of the contract without detecting
+                its violation, quietly papering over a backend that had issued two tasks under one
+                instance id instead of letting that surface as the defect it would be.
+
+                It IS combined with `attempt` (added for retry): a wrong answer may be resubmitted
+                on this same instance id without limit, and without `attempt` in the key, a
+                "try again" would reconcile into the SAME component instance and the wrong answer
+                would still be sitting there, filled in, for the child to resubmit unchanged. That
+                is the identical defect this key was first added to prevent (`19d4530`), one level
+                down -- across attempts on one task, not across tasks. */}
+              {feedback === null ? (
+                <Surface
+                  key={`${task.c_task_instance_id}:${attempt}`}
+                  onSubmit={submitFromSurface}
+                  task={task}
+                />
+              ) : (
+                <AnswerFeedbackPanel
+                  matched={feedback.matched}
+                  onNext={() => void advanceToNextTask()}
+                  onTryAgain={retryTask}
+                  scaffoldLevel={feedback.scaffoldLevel}
+                />
+              )}
             </View>
             <View style={styles.taskContentSpacerBottom} />
         </View>

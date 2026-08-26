@@ -1790,3 +1790,164 @@ was sufficient. Finding 1's claim that a two-stage interaction is the ONLY non-l
 reasoned argument from the payload and the primitive's structure, not an exhaustively enumerated
 proof -- if someone finds a leak-free single-stage scene, that would overturn the falsification and
 should be recorded as such.
+
+## 2026-08-26 -- Answer feedback + retry loop for Component C: the server's verdict, finally read
+
+**Base commit `46736ab`** (10h, Share Fairly / C-18 falsification). Frontend baseline measured
+fresh at the start of this batch: `1298 tests, 1298 pass, 0 fail`, `tsc` clean -- **not** the
+`832/832/0` figure from an earlier turn, which four sub-phases had already superseded by this point.
+
+**What was asked, and what was actually buildable.** The owner asked for four things: connect the
+UI to the real backend, remove the dev fixture, wire each game-hub card to its own family, and add
+correct/incorrect + retry feedback. Investigation (not assumption) showed three of the four are
+blocked outside the frontend:
+
+- **Live backend** -- `create_session` refuses every production request with HTTP 409, on two
+  independent gates (bundle per-field approval status, and a hardcoded non-smoke code gate). The
+  backend's own comment states this is deliberate: "NO bundle committed anywhere in this codebase
+  can ever satisfy this gate today... not a bug" (`session_lifecycle.py:135-143`). Opening it is a
+  sign-off act across seven parameter families, not a code change.
+- **Dev fixture removal** -- blocked by the above; removing it first leaves an app that can only
+  render the 409 failure screen.
+- **Hub card per family** -- out of scope for this batch on the owner's explicit instruction after
+  investigation showed it is not a simple wiring gap: `CreateCSessionRequest` carries only
+  `{grade, session_mode}`, `next_task` takes no body, and `adapter.select_task` has no family
+  parameter anywhere in its call chain (`task_service.py:440-458`, `adapter.py:1077-1097`). Deeper
+  than the missing parameter: skills and families are many-to-many (7 skills, 8 families,
+  `loader.py:191-194,257,261-263`), so "select only from family X" has no natural meaning against
+  the current BKT/skill-mastery model. Recorded and then explicitly dropped from this batch's scope
+  by the owner -- not carried into `ESCALATIONS.md`, per instruction.
+- **Correct/incorrect + retry** -- buildable, and built. The rest of this entry is this item only.
+
+**A correction to the supervisor's own earlier claim, caught before code was written.** An earlier
+session recorded that "'try again' is not expressible in the current contract." That was wrong.
+Re-reading `task_service.py` directly showed a terminal event is written only on a **correct**
+answer (`write_completed_correct_terminal_event`); an incorrect answer may be resubmitted on the
+same `c_task_instance_id` without limit (`has_terminal_for_instance` only blocks a second
+submission once a terminal event exists), and each resubmission re-runs
+`decide_and_persist_scaffold_level`, escalating `scaffold_level`. **Retry-with-scaffolding was the
+flow the backend was already built for; the frontend simply never read the result needed to drive
+it.** Corrected in `Component_C_Frontend_Build_Steps.md` section 7.1 the same day, append-only.
+
+### What was built
+
+1. **`planSubmissionOutcome`** (`c-session-logic.ts`) -- `{kind:'advance'}` on
+   `response_matched`, else `{kind:'retry', scaffoldLevel}`, carrying the server's own
+   `scaffold_level` verbatim. Computes nothing about correctness; a source-scan test
+   (`c-submission-outcome.test.ts`) asserts its body reads only `result.response_matched` /
+   `result.scaffold_level` and contains no reference to `action_payload`, `valid_action_space`, or
+   `prompt_payload`.
+2. **`answer-feedback-panel.tsx`** (new) -- two states (not-matched / matched), one button each
+   (Try again / Next), both child-initiated. No auto-advance timer, on the same reasoning that
+   ruled out 10a's per-slot stepper: a new timing constant would need to live in
+   `motor-constants.ts` and be justified there; a button sidesteps the question entirely.
+3. **`c-session-screen.tsx`** -- the `task` phase gained `attempt: number` and
+   `feedback: {matched, scaffoldLevel} | null`. `feedback === null` renders the archetype surface
+   (unchanged); `feedback !== null` renders `AnswerFeedbackPanel` **instead of**, never alongside,
+   the surface -- a correctness requirement, not a layout choice: a correct answer writes the one
+   terminal event a task instance may ever have, and resubmitting a terminal instance 409s
+   (`task_already_terminal`), which `classifySessionFailure` would route to the technical-block
+   screen. Rendering the panel instead of the surface is what makes a second submission
+   structurally impossible while feedback is showing. The `<Surface>` remount key changed from
+   `task.c_task_instance_id` alone to a template literal combining it with `attempt` -- without the
+   attempt component, "Try again" would reconcile into the same component instance and the wrong
+   answer would still be sitting there, unentered, for the child to resubmit unchanged; the
+   existing key comment was corrected in place (not left stale) to explain both components.
+4. **Dev fixture verdict** (`component-c-api.ts`) -- `EXPO_PUBLIC_COMPONENT_C_DEV_FIXTURE_VERDICT`:
+   `correct` (default, unchanged behaviour) / `incorrect` (always not-matched, escalates
+   `scaffold_level` C0 through C4 across calls, ceilinged at C4) / `alternate` (not-matched,
+   matched, not-matched, ... -- a walkable full retry cycle). Still evaluates nothing: the value
+   returned depends only on the env var and a per-fixture-instance call counter, never on the
+   submitted payload -- proven by a test comparing two independent fixture instances' first-call
+   results across different payload content, for all three verdict modes.
+
+### Tests -- four new files, one existing file extended
+
+- `c-submission-outcome.test.ts` (5) -- advance/retry, verbatim `scaffold_level` relay including an
+  unexpected string, the source-scan purity proof.
+- `c-feedback-replaces-surface.test.ts` (7) -- the no-double-submit structural guard: a
+  balanced-paren extractor confirms `<Surface>` and `<AnswerFeedbackPanel>` are the two branches of
+  one `feedback === null` ternary, never siblings and never two independent `&&` blocks. Five
+  negative controls, one positive control, one real-file assertion, all proven to fire correctly
+  after two real bugs in the guard itself were caught and fixed (see below).
+- `c-dev-fixture-verdict.test.ts` (7) -- all three verdict modes, the C4 ceiling, the
+  payload-blindness proof.
+- `c-surface-remounts-per-task.test.ts` (extended, 9 to 15) -- the pre-existing key-extraction
+  predicate was rewritten to brace-balance the key expression (the real key is now a template
+  literal, not a bare `task.field` member expression, which the old regex could not see at all --
+  proven by running the suite before this fix and watching it fail red against the real file) and
+  a second predicate, `keyIncludesAttempt`, was added with its own five controls.
+- `c-mcl-family-surface-registration.test.ts` and every other pre-existing test file: unchanged in
+  count, confirmed by running each in isolation before and after.
+
+### Two real bugs this batch's own guards caught before being reported green
+
+1. **The mutual-exclusivity regex anchored on the wrong occurrence of "feedback".** First draft
+   matched the literal substring "feedback" to find the ternary condition, and matched the import
+   path for answer-feedback-panel.tsx (which also contains "feedback") long before the real
+   `feedback === null` condition in the file. Fixed by anchoring on the full comparison
+   (`feedback` followed by a comparison operator followed by `null`), not the bare identifier.
+2. **The same guard's branch extraction used a non-greedy colon match**, which stopped at the
+   first colon it found -- and the real key expression is a template literal containing its own
+   colon between the instance id and the attempt count, so the "false branch" was sliced open
+   mid-key rather than at the ternary's actual separator. Fixed with a brace-balanced extractor
+   now in the test file, which cannot be fooled by a colon or question mark nested inside either
+   branch.
+3. **`withDevFixtureEnv` in the verdict test file did not await its own async callback before its
+   `finally` restored the env vars.** Since every callback's first line was an awaited call to
+   `submitAction`, the helper returned control to `finally` the instant that await was reached --
+   restoring the environment before the callback's assertions ever actually ran against the
+   intended verdict. Two tests ("correct" and "unset") passed anyway, by coincidence: their
+   expected values matched what the RESTORED (default) environment would produce regardless.
+   "incorrect" and "alternate" could not pass by the same coincidence and failed loudly, which is
+   what surfaced the bug -- fixed by making the helper `async` and awaiting `run()` inside `try`.
+
+None of the three reached this entry as a false "green" -- each was caught by its own test failing
+before being reported.
+
+### Verification
+
+- `npx tsc --noEmit` -- exit 0.
+- `npm run test:contract` -- **1324 / 1324 / 0**. Reconciled: 1298 plus 25 written plus 1
+  auto-generated equals 1324. The +1 is `no-node-builtins-outside-tests-and-scripts.test.ts`, which
+  generates one assertion per source file it scans and picked up the new `answer-feedback-panel.tsx`
+  -- confirmed by name, not assumed.
+- `npx expo export --platform ios` -- succeeded (`entry-f4a0686ce62b1aad0d4deeddba4bf916.hbc`,
+  5.21 MB); `dist/` removed after.
+- No file under `archetypes/` appears in this batch's diff -- confirmed by `git status` against
+  that directory specifically. No archetype surface was touched.
+- Every new guard proven bidirectionally (break it, confirm red, restore, confirm green), including
+  the three bugs above, each of which is itself an instance of "broke, confirmed red, fixed,
+  confirmed green" rather than a defect shipped unnoticed.
+- **Browser-verified**, `C-NP-01` at difficulty 1, verdict mode `alternate`: submit wrong -- "Let's
+  try that again" plus support-level text shown, no premature "answered" appearance -- Try again --
+  surface reappears with the previous entry actually gone, not just hidden -- submit correct --
+  "Nice work!" -- Next -- next task loads. Confirmed by the owner directly, not inferred from
+  source.
+
+### What was not verified
+
+Nothing here proves the child's actual entered value is cleared by React's remount as opposed to
+merely being re-initialized state that happens to look empty -- that distinction is React's own
+documented remount behaviour, relied on and not independently re-verified, matching every other
+`key`-based remount guard already in this codebase (`c-surface-remounts-per-task.test.ts`'s own
+long-standing disclaimer). The pedagogical appropriateness of showing correct/incorrect at all was
+not decided by building this, and the copy was deliberately kept neutral so building it would not
+default that question shut.
+
+### Findings recorded, not resolved -- full text in `ESCALATIONS.md`
+
+1. The seven-parameter-family sign-off gate blocking every live session (verified this batch by
+   reading `bundle_resolution.py`, `c_session_service.py`, `session_lifecycle.py` directly).
+2. `attempt_number` hardcoded to `1` server-side, newly consequential now that retry is a reachable
+   flow (was always true; this batch is the first time it matters).
+3. Section 7.1's discard-the-verdict finding, now closed by construction rather than by ruling.
+4. The feedback-copy departure from Component B's own "identical for every outcome, nothing
+   evaluative" precedent -- shipped neutral, not decided.
+5. Carried forward unchanged: `C-TC-02`'s `directed` flag, `C-SF-02`'s permanent C-18 hold,
+   `C-CC-04`'s answer-bearing `trial_type`, `C-MCL-02`'s symbolic question, the object-grouping
+   question.
+
+The hub-card-per-family investigation (BKT selection is a single cross-family adaptive stream;
+skills and families are many-to-many, not one-to-one) is recorded above for provenance but was
+explicitly dropped from scope by owner instruction and does **not** appear in `ESCALATIONS.md`.
