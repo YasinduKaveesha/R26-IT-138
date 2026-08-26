@@ -74,6 +74,8 @@ def _value_matches_declared_type(declared_type: str, value: Any) -> bool:
     if declared_type == "number":
         # Owner interpretive decision 1: "number" means int or float.
         return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if declared_type == "str":
+        return isinstance(value, str)
     list_match = _LIST_TYPE_RE.match(declared_type)
     if list_match:
         inner_type = list_match.group(1)
