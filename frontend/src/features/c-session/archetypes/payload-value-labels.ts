@@ -41,6 +41,16 @@ const FRIENDLY_LABELS: Record<string, string> = {
   // build, not the answer -- see object-set-action-logic.ts's header for why it is safe to render
   // as a plain numeral, unlike option-select-logic.ts's quantity field on the numeral-options path.
   target_n: 'How many',
+  // `named-integer-fields` (10f, C-BT-01..04). These are PAYLOAD keys -- the numbers the child
+  // reads -- so the table applies to them as it always has. The ACTION keys of the same templates
+  // (`tens`, `ones`, `post_tens`, ...) deliberately do NOT come through here: see
+  // named-integer-fields-logic.ts's own `humanizeActionKey` and the header paragraph explaining why
+  // an action-space key must never be routed through a client-side name table.
+  target_number: 'Number',
+  // "to start" rather than a bare "Tens"/"Ones": BT-03/04 show the BEFORE state while the child
+  // enters the AFTER state, and two unqualified "Tens" labels on one screen would be ambiguous.
+  pre_tens: 'Tens to start',
+  pre_ones: 'Ones to start',
 };
 
 function humanizeKey(key: string): string {

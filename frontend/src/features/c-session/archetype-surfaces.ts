@@ -14,6 +14,7 @@ import type { CNextTaskResponse } from '@/src/api/generated/openapi-types';
 import type { ArchetypeId } from '@/src/features/c-session/archetypes/registry';
 import { LinePositionSurface } from '@/src/features/c-session/archetypes/line-position-surface';
 import { LineTraversalSurface } from '@/src/features/c-session/archetypes/line-traversal-surface';
+import { NamedIntegerFieldsSurface } from '@/src/features/c-session/archetypes/named-integer-fields-surface';
 import { ObjectSetActionSurface } from '@/src/features/c-session/archetypes/object-set-action-surface';
 import { OptionSelectSurface } from '@/src/features/c-session/archetypes/option-select-surface';
 import { OrderedValueSequenceSurface } from '@/src/features/c-session/archetypes/ordered-value-sequence-surface';
@@ -43,6 +44,10 @@ const SURFACE_TABLE: Partial<Record<ArchetypeId, ComponentType<ArchetypeSurfaceP
   // from line-traversal, and unit-stepper.tsx's own coarse-step addition for the interaction-cost
   // fix this template needed before it could ship (master work order §2.2).
   'line-position': LinePositionSurface,
+  // C-BT-01..04 (C-GF-04). C-EG-02 also resolves to `named-integer-fields` (registry.ts, 10g's own
+  // future template), but structurally fails closed here rather than mounting -- see
+  // named-integer-fields-logic.ts's header for why that refusal needs no template-id branch.
+  'named-integer-fields': NamedIntegerFieldsSurface,
 };
 
 /**

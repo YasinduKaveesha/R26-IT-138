@@ -1218,3 +1218,125 @@ session -- only reasoned about from the diff.
 **What was NOT independently re-verified.** `line-traversal`'s own rendering, after the shared
 `unit-stepper.tsx` colour changes -- see the "Shared-primitive consequence" paragraph above. The
 backend suite was not re-run -- no backend file changed.
+
+---
+
+## 10f -- `named-integer-fields` archetype registered, completing C-GF-04 Build and Trade (C-BT-01..04)
+
+**What shipped.** A sixth archetype, `named-integer-fields`, registered in `archetype-surfaces.ts`,
+covering all four C-BT-* templates: C-BT-01 (`target_number` -> `tens`/`ones`), C-BT-02
+(`target_number` -> `hundreds`/`tens`/`ones`), C-BT-03 and C-BT-04 (`pre_tens`/`pre_ones` ->
+`post_tens`/`post_ones`, the two "trade" templates). Card **#4 Build and Trade** now reads **Ready to
+play** in the hub, computed by `readinessOf` from the same `SURFACE_TABLE` the task loop reads --
+no hub file touched. New files: `archetypes/named-integer-fields-logic.ts` (pure resolver),
+`archetypes/named-integer-fields-surface.tsx`, `primitives/named-field-row.tsx` (the labelled
+multi-field entry control). Modified: `archetype-surfaces.ts` (one import + one `SURFACE_TABLE`
+entry), `payload-value-labels.ts` (three payload-key label entries: `target_number`, `pre_tens`,
+`pre_ones`).
+
+**The composite-archetype proof this sub-phase owed.** One resolver covers both the 2-field shape
+(BT-01/03/04) and the 3-field shape (BT-02), discriminated purely by the COUNT of `integer-field`
+keys `valid_action_space` declares (`MIN_FIELDS = 2`), never by template id or key count table.
+`c-named-integer-fields-no-template-branch.test.ts` source-scans the three new files for any
+`C-BT-0*` literal or `game_task_template_id` read and finds none.
+
+**Field labels are mechanically derived from the key, never a table** (master work order §3's own
+`named-integer-fields` row, verbatim). `humanizeActionKey` (`named-integer-fields-logic.ts`) turns
+`post_tens` into "Post Tens" by splitting on `_` and capitalising -- deliberately kept apart from
+`payload-value-labels.ts`'s own `FRIENDLY_LABELS` table, which still governs PAYLOAD keys
+(`target_number`, `pre_tens`, `pre_ones`) since a payload key is content the child reads, not a field
+the child fills, and that table has always been allowed there. The owner was asked explicitly
+(AskUserQuestion) whether to extend the payload-label table to action keys too, for friendlier
+copy ("Tens now" instead of "Post Tens") -- declined in favour of the strict mechanical rule, to stay
+inside the work order's letter and avoid a second name table.
+
+**No auto-carry, no auto-borrow, no pre-fill** (work order §10f row, verbatim). Decomposing
+`target_number` (BT-01/02) and performing the trade from `pre_tens`/`pre_ones` (BT-03/04) ARE the
+assessed skills. Every entry field starts empty (`useNamedFieldEntry`'s buffers all seed to `''`),
+nothing is derived from another field or from a payload value, and SUBMIT gates only on "every field
+has a value" (required for `encodeActionPayload` to succeed at all) -- never on the fields summing to
+the given number or matching the trade correctly. `c-named-integer-fields-no-client-arithmetic.test.ts`
+source-scans for arithmetic performed on a payload-shaped identifier and finds none.
+
+**C-EG-02 reaches this archetype and fails closed structurally, not by template-id refusal.**
+`registry.ts` already mapped `C-EG-02` -> `named-integer-fields` before this batch (10g's own future
+template, per the work order's sequence table), so registering the surface makes EG-02 reachable
+before 10g has designed for it. It fails closed on its own wire shape: its `prompt_payload` carries
+`direction: "read"`, a STRING, and the numbers-only payload guard every archetype since 10b has
+carried rejects it -- the same class of guard, not a special case. This is deliberately NOT the
+explicit `game_task_template_id === 'C-TC-02'` line `value-report-logic.ts` had to carry;
+`named-integer-fields-logic.ts` stays entirely template-id-blind.
+`c-named-integer-fields-eg02-fails-closed.test.ts` pins both the outcome and the reason, with a
+positive control (stripping the offending key resolves fine) proving the refusal traces to that one
+guard and not to hidden template-id logic.
+
+**A new primitive was built, not an extension of an existing one -- owner decision (AskUserQuestion,
+this batch).** The labelled multi-field entry control (`primitives/named-field-row.tsx`) reuses the
+focus/buffer mechanism `value-token-row.tsx`'s entry mode already established, but as a deliberately
+separate, copied ~15-line implementation rather than an additive mode on that file. Reasoning: the
+two are different scenes (positional blanks vs. named place-value fields), and extending the shared
+file would mean a later style change reaches two shipped surfaces at once -- exactly the
+`unit-stepper.tsx` / `line-traversal` side effect 10d's own entry already flags. `named-field-row.tsx`
+was restructured mid-batch (see "UI iteration" below) from a self-contained row-plus-keypad component
+into a state hook (`useNamedFieldEntry`, keyed by field KEY not display position) plus a single-box
+renderer (`NamedFieldBox`), so the surface could compose a merged layout freely without the reorder
+ever risking a value landing under the wrong submitted key.
+
+**UI iteration, entirely owner-driven from the running app (2026-08-26), in order:**
+1. Initial shape: entry fields in a visually separate block below the payload row, smaller box size,
+   grey dashed borders, wire-alphabetical field order (`ones` before `tens`, since the wire's own
+   `valid_action_space` key order is alphabetical -- not the intuitive place-value order). Owner
+   flagged all three as wrong in one pass from a C-BT-01 screenshot.
+2. Corrected to: one merged row (payload token + entry fields, same box size, same label style,
+   reproducing `value-report-surface.tsx`'s own shapes), fields reordered to descending place value
+   (`Tens` before `Ones`) via a new `PLACE_VALUE_RANK` table scoped to display order only (state
+   stays keyed by field key, so reordering can never misattribute a submitted value), and unfocused
+   borders recoloured from `colors.border` to the family accent.
+3. C-BT-02 (3 fields + 1 payload token = 4 columns) then overflowed that merged row: `flex: 1`
+   columns inside a `flexWrap: 'wrap'` row compressed instead of wrapping -- the identical RN Web
+   flex-shrink pitfall 10e's own `object-pool.tsx` header already documents, recurring in a second
+   file. Owner rejected the compressed result outright ("not like that").
+4. Owner's actual requested shape, arrived at over three more corrections: the GIVEN payload
+   value(s) alone in their own row directly under the prompt (gap halved from the container's
+   default); the entry fields as a SEPARATE row directly below that (gap halved again); box size
+   reduced from `TOKEN_TOUCH_TARGET_SIZE * 1.6` to `TOKEN_TOUCH_TARGET_SIZE` alone (still above SPEC
+   §10's 48px floor, and now the SAME fixed size across every template and level, never a per-scene
+   resize) so the widest real row -- C-BT-02's three fields -- fits on one line without wrapping;
+   field labels moved from above their box to below it; and, once both rows were reordered
+   independently, the given-value row's own alphabetical order (`pre_ones` before `pre_tens`) no
+   longer lined up column-for-column under the now-reordered field row (`Post Tens` before
+   `Post Ones`) -- so `displayOrder` was generalised to apply the same `PLACE_VALUE_RANK` table to
+   both rows, restoring column alignment (`Tens to start` above `Post Tens`, `Ones to start` above
+   `Post Ones`).
+
+**The touch-target-size reduction is a single global constant, not a per-scene one.** `PAYLOAD_TOKEN_SIZE`
+(surface) and `FIELD_BOX_SIZE` (primitive) both changed from `TOKEN_TOUCH_TARGET_SIZE * 1.6` to
+`TOKEN_TOUCH_TARGET_SIZE` alone, together, for every template and every level -- motor constancy
+(SPEC §10) holds because C-BT-01/03/04's 3-column row and C-BT-02's 4-column row use the identical
+box size; only the row's own WIDTH grows with column count, never any one target's size. Verified by
+`c-named-field-row-layout.test.ts`, which asserts both constants share the same literal value.
+
+**Verification.**
+- `npx tsc --noEmit` -- exit 0 throughout every UI iteration.
+- `npm run test:contract` -- green at 1187/1187 (was 1184 before this batch's 8 new test files:
+  `c-named-integer-fields-logic`, `-fail-closed`, `-key-set-proof`, `-no-template-branch`,
+  `-no-client-arithmetic`, `-motor-constancy`, `-no-representation-mode`,
+  `-carries-interactive-assets`, `-eg02-fails-closed`, plus `c-named-field-row-layout` -- 9 files,
+  net +3 tests after several were revised mid-batch to match the two-row restructure).
+- Every new guard proven load-bearing by disabling it in place (the numbers-only payload guard / the
+  MIN_FIELDS and MAX_FIELDS bounds / the integer-field-kind guard), confirming the targeted negative
+  controls went red, restoring from a `$TEMP`-directory backup, confirming an exact diff and green
+  tests again.
+- `npx expo export --platform ios` -- succeeded twice (initial batch and after the UI restructure);
+  `dist/` removed both times.
+- **Every difficulty level looked at in a browser by the owner directly**: C-BT-01 at L1 and L5
+  (target_number 3, 37), C-BT-02 at L1 and L5 (target_number 185, 586 -- the 4-column overflow case),
+  C-BT-03 at L1 and L5 (pre_tens/pre_ones 0/10 and 5/12), C-BT-04 at L1 and L5 (pre_tens/pre_ones
+  1/3 and 3/4), through every visual correction described above, all confirmed correct at the final
+  state. A full submission (typing digits into both fields, SUBMIT enabling and advancing) was also
+  confirmed working end to end. Card #4 confirmed reading **Ready to play** in the hub.
+
+**What was NOT independently re-verified.** Nothing shared -- unlike 10d's `unit-stepper.tsx` change,
+every file this batch touches or introduces is new or owned solely by this archetype
+(`archetype-surfaces.ts` and `payload-value-labels.ts` were edited additively, one entry each, with
+no existing entry altered). The backend suite was not re-run -- no backend file changed.
