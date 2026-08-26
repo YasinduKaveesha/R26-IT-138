@@ -32,8 +32,8 @@ from app.application.live_engine_c.adaptation_service import decide_and_persist_
 from app.application.live_engine_c.mastery_fixture import FIXTURE_MASTERY_SOURCE_STUDENT_ID
 from app.application.live_engine_c.task_service import (
     _CATALOGUE_PATH,
-    PRODUCTION_GENERATION_CONFIG_PROBE,
-    PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+    PRODUCTION_GENERATION_CONFIG,
+    PRODUCTION_SCAFFOLD_CONFIG,
     TaskService,
     _stu_session_id,
 )
@@ -186,8 +186,8 @@ def test_correct_answer_persists_the_real_safety_forces_recovery_flag(monkeypatc
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=correct_payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
-                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                action_payload=correct_payload, generation_config=PRODUCTION_GENERATION_CONFIG,
+                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
             )
             assert result.response_matched is True, (
                 "fixture assumption failed: C-CC-03's own correct_answer_payload did not evaluate "
@@ -266,8 +266,8 @@ def test_read_back_flag_reaches_the_scaffold_decision(monkeypatch: pytest.Monkey
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_2_id,
-                action_payload=wrong_payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
-                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                action_payload=wrong_payload, generation_config=PRODUCTION_GENERATION_CONFIG,
+                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
             )
             assert result.response_matched is False
             # ARRIVAL, not just presence: the exact kwarg the incorrect branch passed downstream.
@@ -282,7 +282,7 @@ def test_read_back_flag_reaches_the_scaffold_decision(monkeypatch: pytest.Monkey
 # THE NEGATIVE CONTROL -- the condition this batch exists to satisfy. With the flag True the
 # scaffold decision must DIFFER from the flag-False case on an otherwise IDENTICAL incorrect
 # submission (one prior incorrect attempt on the current task -> C1 under
-# PRODUCTION_SCAFFOLD_CONFIG_PROBE's own level_c1_min_consecutive_incorrect=1). Restoring the
+# PRODUCTION_SCAFFOLD_CONFIG's own level_c1_min_consecutive_incorrect=1). Restoring the
 # literal `False` this batch replaces collapses the True case to C1 too, breaking this assertion.
 # =====================================================================================
 
@@ -326,8 +326,8 @@ def test_negative_control_flag_changes_the_scaffold_outcome(prior_flag: bool, ex
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_2_id,
-                action_payload=wrong_payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
-                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                action_payload=wrong_payload, generation_config=PRODUCTION_GENERATION_CONFIG,
+                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
             )
             assert result.response_matched is False
             assert result.scaffold_level == expected_level
@@ -363,8 +363,8 @@ def test_no_prior_policy_decision_row_does_not_force_recovery() -> None:
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=wrong_payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
-                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                action_payload=wrong_payload, generation_config=PRODUCTION_GENERATION_CONFIG,
+                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
             )
             assert result.response_matched is False
             # Ordinary escalation, never a forced C4 -- the no-prior-row case reads as False, for

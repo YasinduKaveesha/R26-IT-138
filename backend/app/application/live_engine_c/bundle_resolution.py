@@ -204,14 +204,16 @@ def assert_policy_config_matches_session_gate(
     caller under ``app/``, ``task_service.submit_action``): ``assert_code_gated_family_usable``
     above gates ``policy_config`` at SESSION CREATION by a SEPARATE STRING argument
     (``session_lifecycle.create_session``'s own ``policy_parameter_source_status`` parameter,
-    sourced today from ``c_session_service._NOT_LIVE_PARAMETER_SOURCE_STATUS`` -- the ONLY value
-    any real session in this codebase is ever gated on) -- that string is never read off a
-    ``PolicyConfig`` object, because none exists yet at session-creation time. The ``PolicyConfig``
-    object ``decide_and_persist_adaptation`` actually runs against is built LATER, per task, at
-    ``submit_action``. These are two different values, from two different call sites, that today
-    happen to carry the identical literal ``"TEST_FIXTURE_ONLY"`` -- but nothing before this
-    function made that STRUCTURAL. A future change resolving a governed ``PolicyConfig`` for the
-    session-start gate while ``submit_action`` still passed the always-refused probe would produce
+    sourced today from ``c_session_service._APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS``, renamed
+    CONNECT Step 4 from ``_NOT_LIVE_PARAMETER_SOURCE_STATUS`` -- the ONLY value any real session in
+    this codebase is ever gated on) -- that string is never read off a ``PolicyConfig`` object,
+    because none exists yet at session-creation time. The ``PolicyConfig`` object
+    ``decide_and_persist_adaptation`` actually runs against is built LATER, per task, at
+    ``submit_action``. These are two different values, from two different call sites, that CONNECT
+    Step 4 keeps carrying the identical literal (now ``"APPROVED_FOR_PROVISIONAL_IMPLEMENTATION"``,
+    was ``"TEST_FIXTURE_ONLY"``) -- but nothing before this function made that STRUCTURAL. A future
+    change resolving a governed ``PolicyConfig`` for the session-start gate while ``submit_action``
+    still passed a config with a different status would produce
     a governed-looking session silently running adaptation on invented thresholds, with the gate
     itself reporting success -- because the gate never looked at the object doing the work.
 

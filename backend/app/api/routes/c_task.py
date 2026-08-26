@@ -3,12 +3,15 @@
 same auth dependency (``get_authenticated_principal``), same router-registration pattern,
 structured ``details=[{"location", "type"}]`` error shape via the installed handlers.
 
-NOT LIVE (Phase 5 work order's own headline consequence, restated here): the real, non-smoke call
-below ALWAYS refuses at ``assert_generation_config_permitted`` inside ``TaskService.next_task`` --
-see ``app.application.live_engine_c.task_service``'s module docstring for the full reasoning.
-These routes exist, are registered, are auth-checked, and are structurally complete; they cannot
-currently serve a real task to a real child, by design, because no governed GenerationConfig
-value exists anywhere in this codebase yet."""
+CONNECT STEP 4 (was: NOT LIVE, Phase 5 through CONNECT Step 3): the real, non-smoke call below no
+longer unconditionally refuses at ``assert_generation_config_permitted`` inside
+``TaskService.next_task`` -- see ``app.application.live_engine_c.task_service``'s module docstring
+for the full reasoning. The guard itself is unchanged and still runs on every call; what changed is
+which ``GenerationConfig``/``PolicyConfig``/``ScaffoldConfig`` it is checking, under
+``APPROVAL-2026-08-26-seven-families.md``. These routes remain gated on session creation
+(``session_lifecycle.create_session``'s own seven-family gate, unaffected by this file) and on the
+production runtime bundle actually being registered and approved (CONNECT Step 6) -- this file
+alone does not make a session reachable."""
 
 from typing import Annotated, Any, Mapping
 from uuid import UUID
@@ -16,8 +19,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 
 from app.application.live_engine_c.task_service import (
-    PRODUCTION_GENERATION_CONFIG_PROBE,
-    PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+    PRODUCTION_GENERATION_CONFIG,
+    PRODUCTION_SCAFFOLD_CONFIG,
     TaskService,
 )
 from app.domain.c_session import StrictModel
@@ -51,10 +54,10 @@ async def next_task(
             principal_user_id=principal.user_id,
             request_id=request.state.request_id,
             c_session_id=c_session_id,
-            # See task_service.py's module docstring, "PRODUCTION GENERATION-CONFIG PROBE" --
-            # deliberately empty, deliberately always-refused; smoke_mode is hardcoded False and
-            # is never a client-controllable value.
-            generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
+            # See task_service.py's module docstring, "PRODUCTION GENERATION CONFIG" -- real,
+            # populated, approved-for-provisional-implementation (CONNECT Step 4); smoke_mode is
+            # hardcoded False and is never a client-controllable value.
+            generation_config=PRODUCTION_GENERATION_CONFIG,
             smoke_mode=False,
         )
         await db_session.commit()
@@ -81,8 +84,8 @@ async def submit_action(
             c_session_id=c_session_id,
             c_task_instance_id=c_task_instance_id,
             action_payload=body.action_payload,
-            generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
-            scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+            generation_config=PRODUCTION_GENERATION_CONFIG,
+            scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
         )
         await db_session.commit()
         return response

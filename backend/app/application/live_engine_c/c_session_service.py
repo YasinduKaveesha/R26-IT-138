@@ -60,15 +60,22 @@ from app.infrastructure.repositories import (
     CRuntimeBundleRecordRepository,
 )
 
-# ENGINEERING-ONLY TEST-provenance DRAFT bridge, mirroring opportunity_selection.py's own
-# _ENGINEERING_TEST_BUNDLES exactly -- not a governed bundle-artifact resolution mechanism.
-_BUNDLE_PATH = "tests/fixtures/runtime_bundle_c/valid_unapproved_bundle_c.json"
+# CONNECT Step 3: repointed to the owner-approved bundle (APPROVAL-2026-08-26-seven-families.md;
+# see backend/buildLog2.md). Was the ENGINEERING-ONLY TEST-provenance DRAFT bridge, mirroring
+# opportunity_selection.py's own _ENGINEERING_TEST_BUNDLES -- that fixture stays in place;
+# existing tests depend on it.
+_BUNDLE_PATH = "provenance/c-runtime-bundle-approved-1.0.json"
 
-# Phase 7, Z2: Generation/Policy/Scaffold have no governed value anywhere in this codebase (Z1 --
-# zero SPEC-stated fields for any of the three) -- every config ever constructed for them carries
-# this exact status. This is the one literal string the real HTTP route can ever supply to the
-# session-start code gate; never a call to any default_*_config() factory (S8-a's guard).
-_NOT_LIVE_PARAMETER_SOURCE_STATUS = "TEST_FIXTURE_ONLY"
+# CONNECT Step 4: renamed from _NOT_LIVE_PARAMETER_SOURCE_STATUS, which became actively false the
+# moment the gate opened -- a false name is worse than a churned one. Generation, Policy, Scaffold,
+# and Aggregation are still CODE-GATED, not bundle-data (Z1 -- the bundle schema carries no blocks
+# for any of the four; see Component_C_Frontend/ESCALATIONS.md's entry on the four-way split for
+# why that stays true even though Policy now has real reviewed numbers). This is the one literal
+# string the real HTTP route can ever supply to the session-start code gate; never a call to any
+# default_*_config() factory (S8-a's guard). Value changed under
+# APPROVAL-2026-08-26-seven-families.md (Families 4/5/6/7, "APPROVED WITH CONDITION") -- production
+# keeps smoke_mode=False and now passes on real, approved statuses, never by turning smoke mode on.
+_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS = "APPROVED_FOR_PROVISIONAL_IMPLEMENTATION"
 
 # The real HTTP route never lets a client set smoke_mode -- same shape as task_service.py's
 # PRODUCTION_GENERATION_CONFIG_PROBE/hardcoded smoke_mode=False. A MODULE-LEVEL constant (not an
@@ -80,7 +87,11 @@ _NOT_LIVE_PARAMETER_SOURCE_STATUS = "TEST_FIXTURE_ONLY"
 # Generation/Policy/Scaffold even when the bundle itself is all-usable.
 _SMOKE_MODE = False
 _SCHEMA_PATH = "provenance/c-runtime-bundle.schema.json"
-_CATALOGUE_PATH = "tests/fixtures/runtime_bundle_c/test_catalogue_c.md"
+# CONNECT Step 2: repointed to the governed catalogue, vendored verbatim from the sibling Yass/
+# tree (APPROVAL-2026-08-26-seven-families.md; see backend/buildLog2.md). Its own status line
+# reads PROPOSED FOR APPROVAL, not APPROVED -- vendoring and repointing here does not change
+# that. The TEST_FIXTURE_ONLY catalogue below stays in place; existing tests depend on it.
+_CATALOGUE_PATH = "provenance/R26-IT-138_Component_C_Game_Task_Catalogue_v1.0.md"
 
 
 def _fields(record: CSessionRecord) -> CSessionFields:
@@ -182,10 +193,10 @@ class CSessionService:
                 selection_config_field_statuses=bundle.selection_configuration.field_statuses,
                 safety_config_field_statuses=bundle.safety_configuration.field_statuses,
                 evidence_window_config_field_statuses=bundle.evidence_window_configuration.field_statuses,
-                generation_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
-                policy_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
-                scaffold_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
-                aggregation_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
+                generation_parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
+                policy_parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
+                scaffold_parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
+                aggregation_parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
                 smoke_mode=_SMOKE_MODE,
                 request_id=request_id,
                 mastery_by_skill=mastery_by_skill,

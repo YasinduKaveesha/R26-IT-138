@@ -148,6 +148,15 @@ from component_c_generator.selection.selector import (
 from component_c_generator.tasks.registry import (
     supported_template_ids as _pkg_supported_template_ids,
 )
+# CONNECT Step 4, ruling on the #3 surprise: routed through the adapter rather than exempting
+# task_service.py from the full-dotted-path guard (test_component_c_generator_full_dotted_path_
+# enforcement, test_be2_architecture_guards.py:504) -- that guard restricts component_c_generator
+# as an import root to this one file, deliberately, and weakening it to accommodate a new caller
+# would be the first guard this work order actually loosened. generation_config is not among the
+# 16 never-ship modules (test_c1a_wheel_provenance.NEVER_SHIP_MODULES) so this import is
+# legitimate; it is module-qualified, never `from ... import DEFAULT_TEMPLATE_GENERATION_PARAMS`,
+# so every read below names its source.
+from component_c_generator import generation_config as _pkg_generation_config
 
 from models.contracts import (
     BToCMasteryPayload as _PkgBToCMasteryPayload,
@@ -990,6 +999,34 @@ class LiveEngineCAdapter:
         catalogue-file-sourced; already a plain ``tuple[str, ...]``, so no type mapping is
         needed."""
         return _pkg_supported_template_ids()
+
+    def production_generation_params_by_template(self) -> Mapping[str, TemplateGenerationParams]:
+        """CONNECT Step 4 (supervisor ruling, correcting the #3 surprise): the sanctioned read of
+        ``component_c_generator.generation_config.DEFAULT_TEMPLATE_GENERATION_PARAMS``, exposed to
+        the application layer the same way ``supported_template_ids`` exposes the package's
+        template-id list -- through this one adapter method, never a direct import elsewhere under
+        app/ (``test_component_c_generator_full_dotted_path_enforcement``). Argument-free,
+        code-sourced (not catalogue-file-sourced), field-by-field mapped into the domain
+        ``TemplateGenerationParams`` shape, mirroring ``_to_pkg_template_generation_params``'s own
+        reverse direction. Never calls ``default_generation_config()`` -- reads the raw table
+        directly, same discipline the S8-a guard already enforces for every other config factory."""
+        return {
+            template_id: TemplateGenerationParams(
+                magnitude_a_by_level=params.magnitude_a_by_level,
+                magnitude_b_by_level=params.magnitude_b_by_level,
+                count_a_by_level=params.count_a_by_level,
+                count_b_by_level=params.count_b_by_level,
+                choice_set=params.choice_set,
+                max_generation_attempts=params.max_generation_attempts,
+            )
+            for template_id, params in _pkg_generation_config.DEFAULT_TEMPLATE_GENERATION_PARAMS.items()
+        }
+
+    def production_generation_config_version(self) -> str:
+        """Companion to ``production_generation_params_by_template`` -- the package's own
+        ``GENERATION_CONFIG_VERSION`` string, exposed the same way, so ``task_service.py`` never
+        imports ``component_c_generator`` to read either."""
+        return _pkg_generation_config.GENERATION_CONFIG_VERSION
 
     # ---- ActivationPort ---------------------------------------------------------------
 

@@ -21,12 +21,12 @@ import pytest
 
 from app.application.live_engine_c import task_service as task_service_module
 from app.application.live_engine_c.bundle_resolution import assert_policy_config_matches_session_gate
-from app.application.live_engine_c.c_session_service import _NOT_LIVE_PARAMETER_SOURCE_STATUS
+from app.application.live_engine_c.c_session_service import _APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS
 from app.application.live_engine_c.task_service import (
-    PRODUCTION_GENERATION_CONFIG_PROBE,
-    PRODUCTION_POLICY_CONFIG_PROBE,
+    PRODUCTION_GENERATION_CONFIG,
+    PRODUCTION_POLICY_CONFIG,
     PRODUCTION_POLICY_MODE,
-    PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+    PRODUCTION_SCAFFOLD_CONFIG,
     TaskService,
 )
 from app.domain.live_engine_c.errors import ConfigurationFamilyNotUsableError
@@ -85,40 +85,66 @@ def test_seam_mismatched_status_raises_and_names_policy_config() -> None:
 
 
 def test_production_policy_config_probe_carries_the_session_gate_status() -> None:
-    """Positive control for the seam's own real inputs: PRODUCTION_POLICY_CONFIG_PROBE's
-    parameter_source_status is the SAME imported _NOT_LIVE_PARAMETER_SOURCE_STATUS constant
+    """Positive control for the seam's own real inputs: PRODUCTION_POLICY_CONFIG's
+    parameter_source_status is the SAME imported _APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS constant
     session_lifecycle's own six-family gate is fed at session creation -- not a second,
     independently-typed literal that merely happens to read the same today. Would FAIL if either
     constant were ever edited without the other."""
-    assert PRODUCTION_POLICY_CONFIG_PROBE.parameter_source_status == _NOT_LIVE_PARAMETER_SOURCE_STATUS
+    assert PRODUCTION_POLICY_CONFIG.parameter_source_status == _APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS
     assert_policy_config_matches_session_gate(
-        PRODUCTION_POLICY_CONFIG_PROBE,
-        session_gated_parameter_source_status=_NOT_LIVE_PARAMETER_SOURCE_STATUS,
+        PRODUCTION_POLICY_CONFIG,
+        session_gated_parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
     )  # does not raise -- the real call site's own seam check currently passes
 
 
 # =====================================================================================
-# THE POLICY PROBE -- SUPERVISOR RULING: values must NOT be indistinguishable from a real
-# calibration. Proven structurally against the pinned package's own default_policy_config(), so a
-# future edit "correcting" the probe toward those values breaks this test rather than silently
-# reintroducing the worst-failure-mode shape the ruling exists to prevent.
+# THE POLICY CONFIG -- SUPERVISOR RULING, ORIGINAL FORM (until CONNECT Step 4): values must NOT be
+# indistinguishable from a real calibration. Proven structurally against the pinned package's own
+# default_policy_config(), so a future edit "correcting" the probe toward those values breaks this
+# test rather than silently reintroducing the worst-failure-mode shape the ruling exists to
+# prevent.
+#
+# INVERTED, CONNECT STEP 4, SUPERVISOR RULING (the one exception to "change no assertion" this
+# work order grants, and only for this test): the tripwire fired exactly as designed when Step 4
+# proposed matching the real defaults -- that firing is this test's SUCCESS, not its obsolescence,
+# per the owner's own reading of its own comment: "a future edit 'correcting' the probe... breaks
+# this test rather than SILENTLY reintroducing" the risk -- the word doing the work is SILENTLY.
+# What CONNECT Step 4 changed is not that matching the real defaults became safe; it is that doing
+# so became AUTHORIZED and VISIBLE (APPROVAL-2026-08-26-seven-families.md Family 5) rather than a
+# silent promotion nobody signed off on. The invariant this test protects is still live: a policy
+# config must never carry values indistinguishable from a real calibration UNLESS a named approval
+# document says so AND the status field says so too. So it is inverted, not deleted or left
+# failing: it now asserts the values DO match (the approval is real), the status is the approved
+# literal, never TEST_FIXTURE_ONLY (a silent promotion would leave the OLD status on NEW values,
+# which this now catches from the other direction), and it still fires -- red -- if either drifts
+# without the other: invented values under an approved status, or real values still tagged
+# TEST_FIXTURE_ONLY.
 # =====================================================================================
 
 
-def test_production_policy_config_probe_does_not_mirror_the_real_defaults() -> None:
+def test_production_policy_config_matches_the_approved_real_defaults() -> None:
+    """Renamed from test_production_policy_config_probe_does_not_mirror_the_real_defaults.
+    Inverted under supervisor ruling, CONNECT Step 4, APPROVAL-2026-08-26-seven-families.md Family
+    5 ("Policy -- APPROVED WITH CONDITION"). Protects: the policy config in production code must
+    carry the real default_policy_config() values ONLY together with the approved
+    parameter_source_status -- catches a value drift away from the approval (invented numbers) and
+    a status drift ahead of it (real numbers still marked TEST_FIXTURE_ONLY, i.e. exactly the
+    silent-promotion shape the original ruling was written to prevent) as the same failure."""
     from component_c_generator.policy.config import default_policy_config
 
     real = default_policy_config()
-    probe = PRODUCTION_POLICY_CONFIG_PROBE
-    assert probe.config_version != real.config_version
+    config = PRODUCTION_POLICY_CONFIG
+    assert config.config_version == real.config_version == "c4.1-policy-1.0.0"
     for field in (
         "increase_correctness_threshold", "increase_max_avg_attempts", "increase_max_strain",
         "decrease_correctness_threshold", "decrease_error_run_threshold", "decrease_min_strain",
     ):
-        assert getattr(probe, field) != getattr(real, field), field
-    # And still TEST_FIXTURE_ONLY, same status class as every other config anywhere in this
-    # codebase (S1's own words) -- never silently promoted to a governed-looking status.
-    assert probe.parameter_source_status == "TEST_FIXTURE_ONLY"
+        assert getattr(config, field) == getattr(real, field), field
+    # Never TEST_FIXTURE_ONLY -- a real-valued config still carrying that status would be the
+    # silent-promotion shape the original ruling existed to prevent, approached from the other
+    # side.
+    assert config.parameter_source_status == "APPROVED_FOR_PROVISIONAL_IMPLEMENTATION"
+    assert config.parameter_source_status != "TEST_FIXTURE_ONLY"
 
 
 # =====================================================================================
@@ -146,8 +172,8 @@ def test_correct_answer_writes_exactly_one_policy_decision_row() -> None:
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=correct_payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
-                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                action_payload=correct_payload, generation_config=PRODUCTION_GENERATION_CONFIG,
+                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
             )
             assert result.response_matched is True, (
                 "fixture assumption failed: C-CC-03's own correct_answer_payload did not evaluate "
@@ -185,8 +211,8 @@ def test_incorrect_answer_writes_no_policy_decision_row() -> None:
             result = await TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=wrong_payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
-                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                action_payload=wrong_payload, generation_config=PRODUCTION_GENERATION_CONFIG,
+                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
             )
             assert result.response_matched is False
 
@@ -240,8 +266,8 @@ def test_adaptation_call_happens_after_summary_is_persisted(monkeypatch: pytest.
             result = await task_service_module.TaskService().submit_action(
                 session, principal_user_id=subject, request_id=f"req-{uuid4()}",
                 c_session_id=c_session_id, c_task_instance_id=instance_id,
-                action_payload=correct_payload, generation_config=PRODUCTION_GENERATION_CONFIG_PROBE,
-                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG_PROBE,
+                action_payload=correct_payload, generation_config=PRODUCTION_GENERATION_CONFIG,
+                scaffold_config=PRODUCTION_SCAFFOLD_CONFIG,
             )
             assert result.response_matched is True, (
                 "fixture assumption failed: C-CC-03's own correct_answer_payload did not evaluate "
