@@ -999,3 +999,119 @@ This was not fixed, since the surrounding screen chrome is explicitly reuse-unmo
 it is exactly the kind of thing ruling 1 anticipated becoming visible only by looking at the result
 in a browser, and is flagged here so it is looked for, not discovered cold. The backend suite was not
 re-run -- no backend file changed except this entry.
+
+## 2026-08-26 — feat: `object-set-action` archetype registered (10e), C-CC-01 and C-CC-02
+
+**What was built.** `object-set-action`, the archetype for C-GF-01 Count and Collect's last two
+templates. Card #1 flips from *Partly ready* to *Ready to play* on its own (`readinessOf` computes
+family readiness from `SURFACE_TABLE` at call time) -- no hub file touched. Baseline measured before
+this batch: HEAD `d78de79`, `npx tsc --noEmit` exit 0, `npm run test:contract` **999 / 999 / 0**
+(after the uncommitted 10e-0 numeral-options batch landed as its own commit).
+
+**The composite proof this sub-phase owed (master work order §3/§4).** C-CC-01 declares BOTH an
+`id-set-collection` and a companion `integer-field`; C-CC-02 declares ONLY the `id-set-collection`.
+One resolver (`resolveObjectSetActionSpec`) covers both, classifying purely by which declared TYPES
+are present -- never by template id or key name. `totalKey: string | null` is the type-level fact
+the surface switches on (`SelectAndCountScene` for C-CC-01, `PlaceIntoBoxScene` for C-CC-02), proven
+by a dedicated structural test (`c-object-set-action-no-template-branch.test.ts`) that the new files
+never contain either template id or any of the four real payload/action key names.
+
+**Structural, not by-name, id-set resolution.** C-CC-01 carries ids across TWO payload keys
+(`valid_object_ids`, `distractor_object_ids`); C-CC-02 in ONE (`available_object_ids`). Every
+`string[]`-valued `prompt_payload` key is concatenated, in wire key order, into one flat `objectIds`
+list -- so C-CC-01's valid and distractor ids render as ONE undifferentiated pool, with no
+client-side distinction beyond rendering them (matching the sequence doc's own "Does NOT deliver").
+
+**Two decisions ruled by the owner this session, both written into `object-set-action-logic.ts`'s
+and `object-set-action-surface.tsx`'s own headers:**
+- `submitted_total` (C-CC-01) is NEVER auto-derived from `selectedIds.size`. Counting the selection
+  IS the assessed skill, and unlike `line-traversal`'s derived `final_position` (already visible on
+  the number line), nothing on this screen already shows the count. Also never gated by a minimum
+  selection -- an intermediate draft disabled "ADD ANSWER" until at least one object was selected,
+  and the owner corrected that: a child who believes NONE of the objects should count must be able
+  to advance and type `0`; `submitted_total` is validated server-side, not pre-judged client-side.
+- `target_n` (C-CC-02) renders as a bare numeral token, no label. It is the GIVEN size of the set to
+  build, not the answer, so nothing needs disambiguating the way `value-report`'s multi-operand
+  labels do.
+
+**Escalated finding, accepted with an explicit trade-off (2026-08-26, owner decision).** After
+testing at difficulty 5 (~22-object pool for C-CC-01), the owner asked for a staged reveal (pool,
+then a separate keypad step) so a large pool didn't have to share the screen with the keypad. A
+follow-up request then asked for this to apply ONLY at large pool sizes, not small ones -- meaning
+the SCREEN FLOW ITSELF now varies with content size (`STAGED_FLOW_MIN_POOL_SIZE = 8`, keyed on
+`spec.objectIds.length`, never on `difficulty_level`, which this file never reads at all). This is a
+departure from SPEC section 10's motor-constancy doctrine as this codebase has otherwise applied it
+everywhere else (every other archetype keeps interaction FLOW fixed across every difficulty level,
+letting only magnitude vary) -- flagged explicitly rather than left silent, since it was raised as a
+concern and the owner reaffirmed the request anyway. The threshold (8) is derived from C-CC-01's own
+five real exemplar pool sizes (3, 6, 10, 15, 22 across L1-L5): it sits in the gap between L2's 6 and
+L3's 10, so only L1/L2 render single-screen; L3-L5 stage (pool -> ADD ANSWER -> keypad/VIEW/SUBMIT,
+fully reversible either direction, `selectedIds`/`totalDigits` never cleared on a phase change).
+
+**C-CC-02's own UI iteration, also owner-driven from browser testing at difficulty 5 (~20 objects):**
+the box (placed objects) renders every object at once (`ObjectPool`'s new `scrollable={false}` mode,
+added this batch alongside the existing bounded-scroll default) rather than scrolling internally, so
+the child can see exactly how many are in the box. SUBMIT is pinned to a fixed position (`position:
+absolute`, anchored to the scene's own bottom edge) that never moves regardless of box size -- two
+earlier drafts got this wrong (first: SUBMIT still in normal flow after the box, so it moved as the
+box grew; second: the remaining-available pool hidden entirely behind SUBMIT via an opaque overlay,
+which the owner rejected -- "it should only disappear once it runs out of room, not always"). The
+shipped shape: the available pool renders in the white space between the box and SUBMIT inside a
+`flex: 1, overflow: 'hidden'` viewport that exactly fills the leftover vertical space above SUBMIT's
+own reserved bottom band, so a pool that fits shows in full and a pool that doesn't clips at the
+boundary, appearing to emerge from underneath as objects are added or removed -- SUBMIT itself never
+participates in that clipping and never shifts. A related bug found along the way: the disabled
+SUBMIT state's standard opacity-0.5 dim let whatever sat behind/near it show through; C-CC-02's
+SUBMIT now uses an opaque muted-grey disabled style (`submitButtonDisabledOpaque`) instead, via a new
+optional `disabledStyle` prop on the shared `SubmitButton`.
+
+**Shared-chrome change, also owner-driven (`c-session-screen.tsx`, all archetypes affected).** The
+task screen's own background is now a fixed neutral (`#F4F4F6`, `TASK_SCREEN_BACKGROUND`) rather than
+the family accent; the accent moved to the card's own border instead (`borderColor` applied inline
+from `accentForGameFamily`). The card's border width, shadow, and elevation now match
+`learner-home-screen.tsx`'s own hero card exactly (`borderWidth: 4`, `elevation: 5`, `shadowOffset:
+{0,4}`, `shadowOpacity: 0.18`, `shadowRadius: 7` -- values copied, not imported, since that style is
+private to its own file). This changes every archetype's screen, not just this batch's own two
+templates -- flagged here since it is outside 10e's own file list but was a direct, explicit request.
+
+**Other object-pool.tsx additions this batch:** a `scrollable` prop (default `true`, unchanged
+bounded-scroll behaviour for callers that don't opt out) and an `accent` prop -- every object's fill
+is a low-alpha tint of the family accent (`hexToRgba`, computed locally, no accent-specific "soft"
+palette existed to reuse) with a solid-accent fill once selected, and the border is always the solid
+accent. A layout bug found early (objects rendering as flat-bottomed half-circles) traced to a React
+Native Web flex-shrink pitfall: a `ScrollView` with only `maxHeight` set, nested inside a
+`justifyContent: 'space-between'` column, can be compressed below its own content's natural height:
+fixed with `flexShrink: 0` + `minHeight` on the scroll bound.
+
+**Files:**
+- new: `object-set-action-logic.ts` (pure resolver), `object-set-action-surface.tsx` (two scenes),
+  `primitives/object-pool.tsx` (shared pool primitive, built once per master work order §5A).
+- edit: `payload-value-labels.ts` (`target_n: 'How many'` entry, added then made moot when the label
+  was removed per a later request -- the table entry stays, harmless, for any future reuse).
+- edit: `archetype-surfaces.ts` (one import, one `SURFACE_TABLE` entry).
+- edit: `c-session-screen.tsx` (shared chrome, described above).
+- new tests, flat in `src/api/__tests__/`: `c-object-set-action-logic.test.ts`,
+  `c-object-set-action-key-set-proof.test.ts`, `c-object-set-action-fail-closed.test.ts`,
+  `c-object-set-action-no-template-branch.test.ts`, `c-object-set-action-no-client-validation.test.ts`,
+  `c-object-set-action-motor-constancy.test.ts`, `c-object-set-action-no-representation-mode.test.ts`,
+  `c-object-set-action-carries-interactive-assets.test.ts`, `c-object-pool-layout.test.ts`.
+
+**Verification -- measured.**
+- `npx tsc --noEmit` -- exit 0, throughout every UI iteration in this batch.
+- `npm run test:contract` -- **999 tests, 999 passed, 0 failed**, final state, re-confirmed after
+  every source change in this batch (re-run well over a dozen times across the session).
+- Every fail-closed guard in `object-set-action-logic.ts` proven by disabling it in place, confirming
+  the targeted negative control went red, restoring, confirming green again: the duplicate-id guard,
+  the `MAX_POOL_OBJECTS` bound, the "more than one non-array payload key" guard, and the
+  `MAX_TARGET_VALUE` bound -- each isolated against the same otherwise-valid baseline.
+- `npx expo export --platform ios` -- succeeded twice (once mid-batch, once as the final check after
+  all UI corrections); `dist/` removed both times.
+- **Every screen looked at in a browser, at every difficulty level, by the owner directly**: C-CC-01
+  at L1-L5 (L1/L2 single-screen; L3-L5 staged flow, VIEW/ADD ANSWER round-trip, pool wrap and accent
+  fill, entrance animation) and C-CC-02 at L1-L5 (target token, dashed accent-bordered box, fixed
+  SUBMIT, clipped available-pool viewport at L5's larger pool) -- all confirmed correct by the owner
+  after the iterations described above. Card #1 confirmed reading **Ready to play** in the hub.
+
+**What was NOT independently re-verified.** The backend suite was not re-run -- no backend file
+changed. `ObjectPool`'s `accent`-tint contrast and the shared chrome's new border/shadow were judged
+visually by the owner, not measured against any accessibility contrast standard.

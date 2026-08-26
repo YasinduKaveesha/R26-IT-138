@@ -79,6 +79,12 @@ type Phase =
  *  menu showed. Only the colour BEHIND the card changes per family. */
 const TASK_PANEL_BACKGROUND = '#fffdf6';
 
+// The screen's own ground, BEHIND the card (2026-08-26 request): a fixed neutral, not the family
+// accent -- the accent moved to the card's own border instead (`taskPanel.borderColor`, below), so
+// each family is still visually distinguished, just on the card's edge rather than filling the
+// whole screen.
+const TASK_SCREEN_BACKGROUND = '#F4F4F6';
+
 const FAILURE_COPY: Record<'authentication' | 'network' | 'technical', { title: string; detail: string }> = {
   authentication: { title: 'Sign-in needed', detail: 'Ask a grown-up to help you sign in again.' },
   network: { title: 'No connection', detail: 'Check the internet and try again in a moment.' },
@@ -321,7 +327,7 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
   // fail-closed condition; see game-family-accents.ts.
   const accent = accentForGameFamily(task.game_family_id);
   return (
-    <SafeAreaView style={[styles.taskSafeArea, { backgroundColor: accent }]}>
+    <SafeAreaView style={[styles.taskSafeArea, { backgroundColor: TASK_SCREEN_BACKGROUND }]}>
       {/* Mirrors the Play hub's own outer shape (game-hub-screen.tsx's `mobileCanvas`): a flex:1,
           alignSelf-centred, maxWidth-500 canvas, stretched by its SafeAreaView ancestor rather than
           centred by it. The hub's SafeAreaView sets no alignItems (default 'stretch'); this one
@@ -335,7 +341,7 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
             0/3/0.14/6 shadow, warm ground -- now holding the whole task: the exit control, the
             prompt, the token row, the keypad and SUBMIT. The surface itself is unchanged in what it
             renders; it simply renders inside the card rather than loose on the screen. */}
-        <View style={styles.taskPanel}>
+        <View style={[styles.taskPanel, { borderColor: accent }]}>
             {/* Floats above the flow rather than taking a row of its own, so the 10% top spacer
                 below measures cleanly from the card's own top edge to the question -- not from
                 wherever this button's row happened to end. */}
@@ -419,27 +425,30 @@ const styles = StyleSheet.create({
   // 5% bottom spacer, and any unused slack shows up as extra white space between them instead of
   // pushing either one off its fixed gap.
   taskContentMiddle: { flex: 1 },
-  // The Play hub's panel card, same numbers: radius.lg, a 3px surface1 border, the 0/3/0.14/6
-  // shadow and the same warm ground. The accent the card sits on is applied inline from the task's
-  // own game family, so nothing about a specific family is written down here.
+  // The card's border and shadow now match learner-home-screen.tsx's own hero card exactly
+  // (2026-08-26 request): borderWidth 4, elevation 5, shadowOffset {0,4}, shadowOpacity 0.18,
+  // shadowRadius 7 -- learner-home-screen.tsx:418's own `hero` style, values copied rather than
+  // imported since that style is private to its own file. `borderColor` is applied inline from the
+  // task's own game family (was `colors.surface1` -- a fixed white border -- until this request
+  // moved the family's accent from the SCREEN's background, now `TASK_SCREEN_BACKGROUND`, onto the
+  // card's own edge instead), so nothing about a specific family is written down here.
   //
   // Sized to 90% of the canvas on both axes and centred by the canvas's own `alignItems` /
-  // `justifyContent`, rather than `flex: 1`, so the card reads as a card sitting on its family's
-  // colour -- matching the hub's own card-on-ground look -- instead of filling the screen edge to
-  // edge.
+  // `justifyContent`, rather than `flex: 1`, so the card reads as a card sitting on the screen's
+  // neutral ground, distinguished by its own accent-coloured border -- instead of filling the
+  // screen edge to edge.
   taskPanel: {
     backgroundColor: TASK_PANEL_BACKGROUND,
-    borderColor: colors.surface1,
     borderRadius: radius.lg,
-    borderWidth: 3,
-    elevation: 4,
+    borderWidth: 4,
+    elevation: 5,
     height: '90%',
     padding: spacing.smPlus,
     position: 'relative',
     shadowColor: colors.foreground,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.14,
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 7,
     width: '90%',
   },
   taskSafeArea: { flex: 1 },

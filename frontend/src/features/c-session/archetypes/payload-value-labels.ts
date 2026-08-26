@@ -37,6 +37,10 @@ const FRIENDLY_LABELS: Record<string, string> = {
   // the generator's own prompt_text ("Start at the larger number") -- this label states that
   // fact, it does not compute or re-derive it.
   start: 'Start',
+  // `object-set-action` (10e, C-CC-02 only). `target_n` is the GIVEN size of the set the child must
+  // build, not the answer -- see object-set-action-logic.ts's header for why it is safe to render
+  // as a plain numeral, unlike option-select-logic.ts's quantity field on the numeral-options path.
+  target_n: 'How many',
 };
 
 function humanizeKey(key: string): string {

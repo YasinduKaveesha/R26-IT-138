@@ -13,6 +13,7 @@ import type { ComponentType } from 'react';
 import type { CNextTaskResponse } from '@/src/api/generated/openapi-types';
 import type { ArchetypeId } from '@/src/features/c-session/archetypes/registry';
 import { LineTraversalSurface } from '@/src/features/c-session/archetypes/line-traversal-surface';
+import { ObjectSetActionSurface } from '@/src/features/c-session/archetypes/object-set-action-surface';
 import { OptionSelectSurface } from '@/src/features/c-session/archetypes/option-select-surface';
 import { OrderedValueSequenceSurface } from '@/src/features/c-session/archetypes/ordered-value-sequence-surface';
 import { ValueReportSurface } from '@/src/features/c-session/archetypes/value-report-surface';
@@ -32,6 +33,10 @@ const SURFACE_TABLE: Partial<Record<ArchetypeId, ComponentType<ArchetypeSurfaceP
   // structurally refuse rather than mount a partial or answer-leaking surface, and 10d's own
   // build-log entry for the finding this was raised against before this line was added.
   'option-select': OptionSelectSurface,
+  // Registered by archetype id: this one entry lights up both C-CC-01 and C-CC-02 (C-GF-01),
+  // registry.ts's own pre-existing mapping -- see object-set-action-logic.ts's header for how one
+  // resolver covers both templates' different declared-key shapes.
+  'object-set-action': ObjectSetActionSurface,
 };
 
 /**
