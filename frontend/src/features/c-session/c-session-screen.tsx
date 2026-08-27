@@ -42,7 +42,9 @@ import { encodeActionPayload } from '@/src/features/c-session/archetypes/encode-
 import { HIT_SLOP, TOUCH_TARGET_MIN_SIZE } from '@/src/features/c-session/motor-constants';
 import {
   classifySessionFailure,
+  createSubmitGate,
   decideSessionBootstrap,
+  isDuplicateSubmissionConflict,
   planSubmissionOutcome,
   planTaskSurface,
 } from '@/src/features/c-session/c-session-logic';
@@ -125,6 +127,12 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
   const cSessionIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const backgroundedRef = useRef(false);
+  // One gate per mounted screen. `useRef` so the cell survives re-renders and, critically, so
+  // reading it is synchronous -- a `useState` flag cannot close a same-frame double-tap race.
+  const submitGateRef = useRef(createSubmitGate());
+  // Render-only mirror of the gate, for the in-flight overlay. Never read to decide whether a
+  // submission may proceed; `submitGateRef` alone owns that.
+  const [submitting, setSubmitting] = useState(false);
 
   const goHome = useCallback(() => router.replace('/(learner)/home'), []);
 
@@ -212,6 +220,25 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
             : prev,
         );
       } catch (error) {
+        // The benign duplicate: this instance already carries a terminal event, so the child's
+        // earlier answer landed and was scored. Show them that outcome instead of a technical
+        // failure screen -- same `feedback` field, same AnswerFeedbackPanel, same "Next" press to
+        // advance, so this reuses the success path's own machinery rather than adding a parallel
+        // one. `matched: true` is sound because `completed_correct` is the only wired terminal
+        // reason (see isDuplicateSubmissionConflict's header for the ruling that guarantees it).
+        //
+        // `scaffold_level` is unavailable here -- there is no result body on an error -- so the
+        // task's own server-sent `scaffold_state` is relayed rather than a value invented in this
+        // file. It is not rendered on the matched branch anyway; AnswerFeedbackPanel shows the
+        // support level only when `matched` is false.
+        if (isDuplicateSubmissionConflict(error)) {
+          setPhase((prev) =>
+            prev.kind === 'task'
+              ? { ...prev, feedback: { matched: true, scaffoldLevel: prev.task.scaffold_state } }
+              : prev,
+          );
+          return;
+        }
         routeFailure(error);
       }
     },
@@ -248,12 +275,26 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
     async (values: Record<string, unknown>) => {
       const cSessionId = cSessionIdRef.current;
       if (!cSessionId || phase.kind !== 'task') return;
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        routeFailure(new ApiClientError('unauthenticated', 'No access token is available.'));
-        return;
+      // The re-entry guard, taken BEFORE the first `await`. Placing it after any await would
+      // reopen the exact race it exists to close: both taps would reach the suspension point
+      // before either had claimed the gate. `submitGateRef` holds a synchronous cell for the same
+      // reason it is not `useState` -- see createSubmitGate's own header.
+      if (!submitGateRef.current.tryEnter()) return;
+      setSubmitting(true);
+      try {
+        const accessToken = await getAccessToken();
+        if (!accessToken) {
+          routeFailure(new ApiClientError('unauthenticated', 'No access token is available.'));
+          return;
+        }
+        await handleSubmit(cSessionId, phase.task, accessToken, values);
+      } finally {
+        // `finally`, not the happy path: handleSubmit routes its own failures rather than
+        // rethrowing, but an unauthenticated early return and any future throw must still release
+        // the gate. A gate left closed is a permanently dead SUBMIT button with no error shown.
+        submitGateRef.current.release();
+        if (mountedRef.current) setSubmitting(false);
       }
-      await handleSubmit(cSessionId, phase.task, accessToken, values);
     },
     [getAccessToken, handleSubmit, phase, routeFailure],
   );
@@ -489,6 +530,23 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
               )}
             </View>
             <View style={styles.taskContentSpacerBottom} />
+            {/* In-flight indicator. Two jobs, both required by the same defect:
+                  1. It TELLS the child the answer is being processed, so an unresponsive-looking
+                     SUBMIT does not read as "nothing happened, press it again".
+                  2. It absorbs taps. Covering the card's whole content area means no archetype's
+                     own SUBMIT can be pressed while a request is out, without this file reaching
+                     into eight separate surfaces to disable eight separate buttons -- every
+                     archetype gets the behaviour from one place, and a ninth would inherit it.
+                This is the visible half of the fix; `submitGateRef` is the half that actually
+                guarantees single submission, and it would still hold if this overlay were
+                removed. Deliberately no text: the wait is normally sub-second, and wording shown
+                to a child on every single answer is a pedagogical question this does not open
+                (ESCALATIONS.md section 4's own routing). */}
+            {submitting ? (
+              <View accessibilityLabel="Checking your answer" style={styles.submittingOverlay}>
+                <ActivityIndicator color={accent} size="large" />
+              </View>
+            ) : null}
         </View>
       </View>
     </SafeAreaView>
@@ -525,6 +583,20 @@ const styles = StyleSheet.create({
   // Fixed percentages of the card's own height (not of leftover space): 7% between the card's top
   // and the question, 5% between SUBMIT and the card's bottom.
   taskContentSpacerBottom: { height: '5%' },
+  // Covers the whole panel, including its own SUBMIT row, so no archetype's button is reachable
+  // while a submission is out. Translucent rather than opaque: the child keeps sight of the
+  // question they just answered, which matters more here than a clean scrim.
+  submittingOverlay: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderRadius: radius.lg,
+    bottom: 0,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
   taskContentSpacerTop: { height: '7%' },
   // Fills whatever height is left between the two spacers. The surface's own root now stretches to
   // this height and spaces its children `space-between` (ordered-value-sequence-surface.tsx's

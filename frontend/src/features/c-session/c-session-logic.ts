@@ -177,3 +177,92 @@ export function classifySessionFailure(error: unknown): SessionFailureKind {
   if (error.kind === 'network' || error.kind === 'timeout') return 'network';
   return 'technical';
 }
+
+// --- submission re-entry gate -----------------------------------------------------------------
+
+export type SubmitGate = {
+  /** `true` if the caller may proceed; `false` if a submission is already in flight. */
+  tryEnter: () => boolean;
+  /** Releases the gate. Always call from a `finally`, or the surface locks permanently. */
+  release: () => void;
+  /** For rendering the in-flight indicator. Never used to decide whether to submit. */
+  isBusy: () => boolean;
+};
+
+/**
+ * A one-slot mutual-exclusion gate around `submit_action`.
+ *
+ * WHY THIS IS NOT REACT STATE. `setState` is asynchronous and batched: two taps dispatched in the
+ * same frame both read the pre-update value, both pass a `if (submitting) return` check, and both
+ * submit. The guard therefore has to be a synchronous mutable cell, which is what this closure is
+ * and what a `useRef` holding it provides. State is still set alongside it, but only to render the
+ * indicator -- never to decide whether a submission may proceed.
+ *
+ * WHAT IT PREVENTS, concretely. The second submission on one task instance is refused by the
+ * server with `task_already_terminal` (`task_service.py:573-576`), a 409, which
+ * `classifySessionFailure` routes to the technical-block screen. That refusal is correct and stays
+ * exactly as it is -- this gate does not soften it, and nothing here should ever be used to argue
+ * the backend guard is redundant. What the gate changes is whether a child can reach it by
+ * double-tapping SUBMIT while the first request is still in flight, which on a remote database
+ * (measured: ~200 ms per query against a hosted Postgres, versus ~0.2 ms locally, across the
+ * 15-25 queries one submission performs) is several seconds of an apparently dead button.
+ *
+ * A child seeing "Something changed on our end" after tapping twice reads it as the app breaking.
+ * The backend was right; the interface simply let them ask twice.
+ */
+export function createSubmitGate(): SubmitGate {
+  let busy = false;
+  return {
+    tryEnter: () => {
+      if (busy) return false;
+      busy = true;
+      return true;
+    },
+    release: () => {
+      busy = false;
+    },
+    isBusy: () => busy,
+  };
+}
+
+// --- duplicate submission ---------------------------------------------------------------------
+
+/** The backend's own discriminator for a resubmission against an already-terminated instance. */
+const TASK_ALREADY_TERMINAL = 'task_already_terminal';
+
+/**
+ * Is this 409 the benign "you already answered this" case, rather than a real session failure?
+ *
+ * DELIBERATELY NOT PART OF `classifySessionFailure`. That function reads `error.kind` and nothing
+ * else, on purpose, so that two differently-caused 409s cannot reach the screen differently -- its
+ * own header says so. Widening it to sniff envelopes would dismantle exactly the property it was
+ * written to guarantee. This is a separate, narrower question asked at one call site (the submit
+ * catch in `c-session-screen.tsx`) about one specific structured detail, and every 409 it does not
+ * recognise still falls through to `classifySessionFailure` unchanged.
+ *
+ * WHY THE DETAIL IS TRUSTWORTHY HERE, when the gate refusals' 409s are not distinguishable: the
+ * unsigned-parameter and non-active-session refusals raise a BARE `ConflictError` with no details
+ * at all (`task_service.py:375`, `:389`), whereas this one is raised with an explicit structured
+ * body -- `[{"location": ["c_task_instance_id"], "type": "task_already_terminal"}]`
+ * (`task_service.py:664-666`). The distinction is a real difference in what the server sends, not
+ * an inference drawn from a message string.
+ *
+ * WHAT IT IMPLIES, and why the caller may show a correct-answer panel on the strength of it:
+ * `completed_correct` is the ONLY terminal reason wired in the backend -- Phase 6a's T1 ruling,
+ * with the other eight explicitly fail-closed and documented as not built (`terminal_event.py`'s
+ * own header, T1-1/T1-5). An instance can therefore only be terminal because the child already
+ * answered it correctly. If a second terminal reason is ever wired, THIS ASSUMPTION BREAKS and
+ * this function must be revisited before that lands.
+ *
+ * This does not soften the backend guard in any way. The server still refuses the duplicate, still
+ * writes nothing, and still scores nothing; the only thing that changes is that the child sees the
+ * outcome of the answer they already got right instead of "Something changed on our end".
+ */
+export function isDuplicateSubmissionConflict(error: unknown): boolean {
+  if (!(error instanceof ApiClientError)) return false;
+  if (error.kind !== 'conflict') return false;
+  const details = error.envelope?.error?.details;
+  if (!details) return false;
+  const entries = Array.isArray(details) ? details : [details];
+  return entries.some((entry) => entry?.type === TASK_ALREADY_TERMINAL);
+}
