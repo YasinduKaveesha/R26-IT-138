@@ -2485,3 +2485,163 @@ paired with the response body at the moment each screenshot was taken.
 | 3 | C-NP-01 | Wrong then correct -- attempt_number 1,2 confirmed; scaffold C0->C1 confirmed |
 | 4 | C-TC-03 | Completed correct, attempt 1 |
 | 5 | C-TC-02 | **HELD -- fail-closed frame confirmed live** (support code = request_id `cc01411d-...`) |
+
+## 2026-08-27 -- NOT a CONNECT step: the entire test suite shares the dev database, and one test cycle wipes it completely
+
+Traced from a real symptom the owner reported: a real onboarding account
+(`yassdevnew@gmail.com`), previously assigned to a classroom, no longer had that assignment after
+"the server was restarted." The owner's own working theory was a recent, uncommitted frontend
+change (`secure-storage.ts`, persisting the web session in `localStorage` in development so a page
+refresh doesn't sign the developer out). That theory was checked first and ruled out:
+`auth-context.tsx:139`'s `authorizeSession` calls the backend live on every load
+(`getAuthorizedLearner`) -- classroom membership is never cached client-side in any form the
+persisted session could make stale. The persisted session affects only whether the browser
+remembers a JWT across a refresh; it cannot be the cause of a stale classroom answer, because
+there is no classroom answer read from anywhere but a live query.
+
+**The real cause, verified directly, not inferred:**
+
+`tests/test_be2_persistence.py:148` downgrades the schema to migration `20260722_0001` --
+`empty_infrastructure_baseline`, confirmed by reading the migration file directly: its `upgrade()`
+creates nothing. Every real table in this project -- `app_user` (created at `0004`), `classroom`
+and `classroom_membership` (`0723_0001`), every Component B table, every Component C table -- is
+created strictly AFTER `0001`. So this one test's downgrade-then-reupgrade cycle drops and
+recreates the ENTIRE application schema empty. This is the same mechanism CONNECT Step 6 already
+found and documented for `c_runtime_bundle_records` specifically -- the blast radius is not one
+table, it is every table in the project.
+
+And it does not run against an isolated test database. Checked exhaustively: every one of the 13
+test files defining an `isolated_database()` helper (`test_be2_bundle_integrity.py`,
+`test_be2_persistence.py`, `test_be4a` through `test_be4f`, `test_c3a`, `test_c3b`, `test_c4`,
+`test_c4b`, `test_learner_activation_path.py`) reads `get_settings().database_url` -- the
+application's own connection string, not a distinct test database. `app/core/config.py`'s default
+(`postgresql://upadya:local-development-only@db:5432/upadya`) and `compose.yaml`'s `DATABASE_URL`
+default are identical. There is no `conftest.py` anywhere under `tests/`, no `.env.test`, no
+docker-compose test override, no environment-variable seam of any kind separating test runs from
+the dev database. Checked for one directly; none exists. This is not a CONNECT-introduced defect --
+it appears to be true of this test suite's design from its first migration onward.
+
+**Consequence, stated plainly:** any full `pytest` run against the dev environment -- including
+several run during CONNECT itself, and by extension any run before it -- destroys every real
+account, every classroom membership, every learner profile, and all Component B/C runtime data in
+the shared database, then leaves behind whatever residue that same run's own fixtures wrote (the
+`c_runtime_bundle_records` table alone was found holding 49 `test-<uuid>` rows earlier in CONNECT).
+`yassdevnew@gmail.com`'s lost classroom assignment is consistent with this, not with the auth
+change.
+
+**Not fixed this entry.** This is materially larger in scope than anything CONNECT's seven-family
+ruling covers, and deserves its own remediation plan rather than a fix folded into an unrelated
+work order. Options for a real fix, not evaluated further here: point test runs at a distinct
+`DATABASE_URL` (same Postgres server, a separate database name -- since `get_settings()` already
+just reads an env var, this may need zero Python changes) versus something more invasive; either
+way, the six migration-reversibility tests themselves are proving something real (migrations
+reverse cleanly) and should not be altered or removed -- the defect is which database they prove it
+against, not that they exist.
+
+**Operational note for anyone running this suite before this is fixed:** a full `pytest` run
+against the dev environment will destroy any real account or classroom data currently in it. This
+happened multiple times during CONNECT's own verification steps.
+
+**Also done this entry (unrelated, owner-ruled, mechanical):** `frontend/src/auth/secure-storage.ts`
+reverted to its exact pre-change (memory-only) content -- confirmed via `git diff` showing zero
+difference against `HEAD`. The refresh-persistence tradeoff was reconsidered on its own terms and
+ruled out; it was not implicated in the finding above, but held pending a decision per `HANDOVER.md`
+§7, and that decision is now made.
+
+Owner: whoever owns test infrastructure / CI for this project. No recommendation between the
+options above; no fix attempted.
+
+## 2026-08-27 (same day, follow-up) -- the fix implemented and verified: `api-test` / `upadya_test`
+
+The finding above stopped short of a fix, pending an owner decision on scope. The owner then
+reported the actual symptom directly: signing in to a real, previously-onboarded account
+(`yassdevnew@gmail.com`) produced a request to join a classroom again, as if the account were new.
+Traced to this same defect, not to any login/signup code: `signInWithEmail` (`auth-context.tsx:254`)
+only ever calls `auth.signInWithPassword` -- it cannot silently create an account -- and the
+onboarding routing (`:158`, `if (!authorizedUser.learnerProfile || !membershipApproved) status =
+'onboarding'`) is a live, unconditional read of the backend's current classroom-membership state on
+every load; nothing is cached client-side that a session-persistence change could make stale.
+Confirmed directly: at the time this was investigated, every row in `app_users` (160 total, "REAL"
+and "TEST" `source_class` alike) carried a `created_at_utc` inside the same four-minute window --
+proof the table had been wholly repopulated by test runs, not by organic use across sessions. The
+account's original membership was destroyed by a full suite run, most likely one of CONNECT's own.
+
+**Fixed.** `backend/compose.yaml` gained a second service, `api-test` -- identical to `api` except
+`DATABASE_URL` points at a new, separate database, `upadya_test` (same Postgres server, created once
+via `CREATE DATABASE upadya_test OWNER upadya;`). No Python code changed: every `isolated_database()`
+helper and Alembic's own `env.py` already read `get_settings().database_url`, which reads
+`DATABASE_URL` from the environment, so pointing that one variable elsewhere was sufficient.
+`profiles: ["test"]` keeps `api-test` from ever starting under a plain `docker compose up`.
+
+**Verified, not asserted:**
+- Ran `test_be2_persistence.py` (the deepest-downgrading reversibility test, to `20260722_0001`,
+  before every real table exists) against `api-test`: `3 passed`.
+- Queried the DEV database (`upadya`) immediately before and after that run:
+  `app_users`/`classrooms`/`classroom_memberships`/`c_runtime_bundle_records` counts were
+  **160 / 49 / 25 / 51, bit-for-bit identical, both times.** The dev database was not touched.
+- Queried `upadya_test` afterward: it had its own independent rows, created fresh by that same
+  test run -- proof the isolation is real in both directions, not merely that the dev DB happened
+  to be skipped.
+- Ran the FULL backend suite (all 654 non-skipped tests, including all six migration-
+  reversibility cycles, not just the one deepest-downgrading test above) against `api-test`:
+  `1 failed, 654 passed, 76 skipped` -- the failure is the same pinned `auth.py` leeway
+  consequence (`test_invalid_tokens_fail_closed[expired]`), unrelated and unchanged. Re-queried the
+  dev database immediately afterward: `160 / 49 / 25 / 51`, bit-for-bit identical to before the run
+  and to the single-test check above. The fix holds under the full suite, not only a narrow probe.
+
+**The canonical test invocation is now `docker compose run --rm --no-deps api-test python -m
+pytest -q`.** `HANDOVER.md` §6.1 and a new §6.7 record this; the old `--no-deps api` form was left
+working deliberately (nothing errors if someone types it from habit) but now runs against the dev
+database again, with the same consequence as before. `CONNECT-work-order.md` and
+`CONNECT-builder-prompt.md` were given dated correction notes rather than silently rewritten --
+those documents' own historical instructions genuinely used `api`, and that is what actually ran.
+
+Not touched, and outside this fix's scope: re-provisioning `yassdevnew@gmail.com`'s classroom
+membership itself. That is a one-time data restoration, not a defect; the owner can re-run the
+join-code flow for that account whenever convenient.
+
+## 2026-08-27 -- Component B start/resume was live-broken by the same shared-database defect, in a different table
+
+Traced from a real symptom: pressing "Resume Adventure" produced a 409 on `POST
+.../opportunities`, reproducibly, for a specific session. Root-caused, not guessed:
+
+`app/application/opportunity_selection.py`'s `resolve_bundle_and_catalogue` raises
+`ConflictError` (-> 409) unless the session's pinned `runtime_bundle_record_id` resolves to a
+`bundle_version` present in the hardcoded `_ENGINEERING_TEST_BUNDLES` map -- which recognizes
+exactly one value, `"be3b-test-fixture-1.0"`. The stuck session's bundle_version was
+`bundle-120c8ad3-dc45-4272-be82-dbea6147ef1a` -- a synthetic, test-generated name.
+
+**This is not one bad session -- it was live-blocking every new Component B session.**
+`b_runtime_bundle_records` held 16 rows: one real (`be3b-test-fixture-1.0`) and 15 test-residue
+rows (`bundle-<uuid>`/`unmapped-bundle-<uuid>`, created in the same few-minute window as the
+`app_users`/`classroom_memberships` residue documented in this file's 2026-08-27 entry above --
+same defect, different table). 14 of those 15 residue rows carried `approval_status: APPROVED`,
+`publication_state: PUBLISHED` -- identical to the real bundle -- and
+`RuntimeBundleRecordRepository.find_current_approved_published()` (`app/infrastructure/
+repositories.py:63-78`) explicitly tie-breaks on **most recently created**. Since residue rows
+were created after the real one, **any session started from this point forward would have been
+pinned to a fake bundle and 409ed on its first question** -- confirmed by checking: 14 separate
+`b_sessions` rows, all still `state=active`, each referencing a different one of the 15 residue
+bundles.
+
+**Fixed, not deleted** -- provenance rows stay, only their eligibility changed:
+1. Abandoned all 15 `b_sessions` rows (the originally-reported one plus 14 more) that referenced
+   a non-real bundle -- confirmed test churn, not real use (same abandoned-in-bulk judgement as
+   the account/classroom residue).
+2. `UPDATE b_runtime_bundle_records SET publication_state='DRAFT', approval_status='UNRESOLVED'`
+   for every row except `be3b-test-fixture-1.0` -- blocked once by
+   `enforce_b_runtime_bundle_integrity()` (a real, correct guard: "runtime bundle referenced by an
+   active session must remain eligible") until step 1 completed, which is the right order and
+   confirms the guard is doing its job.
+3. Verified: exactly one row now satisfies `publication_state='PUBLISHED' AND
+   approval_status='APPROVED'`, and zero active sessions reference anything else.
+
+**Not yet done, and worth naming:** this is a data-hygiene fix on the CURRENT shared dev database,
+not a schema or code change. It stops the bleeding for existing residue, but does not itself
+prevent new residue from appearing -- that prevention is `api-test`/`upadya_test` (this file's
+prior 2026-08-27 entry), which should mean tests stop writing here going forward. If this
+recurs, the first thing to check is whether some test run still executed against `api` (the dev
+DB) rather than `api-test`.
+
+Owner: same as the prior finding -- whoever owns test infrastructure/CI. No code changed; this
+entry is a cleanup record, not a fix to review.
