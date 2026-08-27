@@ -242,7 +242,7 @@ After any full test run against a database you then intend to use, re-run first-
 | Backend changes appear to have no effect | Nothing is bind-mounted, and a running container keeps its old image | `docker compose build api` then `docker compose up -d --force-recreate api` |
 | A learner surface shows "This one isn't ready" | Expected for three deliberately held templates (`C-SF-02`, `C-TC-02`, `C-CC-04`) — the safety design working, not a defect | No action; see `backend/buildLog2.md` |
 
-## Project history
+## Project history uu
 
 `backend/buildLog1.md` and `backend/buildLog2.md` are the durable, append-only build record for
 this project — every batch of work, every finding, every owner ruling is recorded there in the
