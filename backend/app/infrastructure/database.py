@@ -48,17 +48,22 @@ _LIBPQ_ONLY_QUERY_KEYS = frozenset(
     {"sslmode", "sslrootcert", "sslcert", "sslkey", "sslpassword", "channel_binding"}
 )
 
-# libpq's `prefer`/`allow` negotiate opportunistically; asyncpg's `ssl=True` insists. Anything
-# stricter than `require` still maps to `True` here: asyncpg performs no CA or hostname
-# verification without an explicit SSLContext, so claiming `verify-full` would overstate what is
-# actually enforced. Recorded rather than silently downgraded.
+# asyncpg accepts libpq's own sslmode vocabulary verbatim (asyncpg >= 0.26), so each mode is
+# passed straight through and keeps its exact libpq meaning.
+#
+# DO NOT "simplify" this to `ssl=True`. That is not a synonym for `require`: `ssl=True` builds a
+# default SSLContext, which verifies the certificate chain AND the hostname, whereas libpq's
+# `require` means "encrypt, do not verify". Mapping `require` onto `True` silently applies a
+# stricter policy than the connection string asked for, and against Supabase's pooler it fails
+# outright with `[SSL: CERTIFICATE_VERIFY_FAILED]` -- an error that reads like a credential or
+# region problem and sends you looking in the wrong place entirely. Found exactly that way.
 _SSLMODE_TO_ASYNCPG_SSL: dict[str, Any] = {
-    "disable": False,
-    "allow": "prefer",
+    "disable": "disable",
+    "allow": "allow",
     "prefer": "prefer",
-    "require": True,
-    "verify-ca": True,
-    "verify-full": True,
+    "require": "require",
+    "verify-ca": "verify-ca",
+    "verify-full": "verify-full",
 }
 
 _TRANSACTION_POOLER_PORT = 6543
