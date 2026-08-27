@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import {
+  ActivityIndicator,
   Animated,
   Platform,
   Pressable,
@@ -18,6 +20,7 @@ import { createComponentBApi } from '@/src/api/component-b-api';
 import { useAuth } from '@/src/auth/auth-context';
 import { AppText } from '@/src/components/app-text';
 import { readPublicConfig } from '@/src/config/env';
+import { useAdventureCharge } from '@/src/features/navigation/adventure-charge-context';
 import {
   combineHomeSessionState,
   derivePathNodeStates,
@@ -80,6 +83,7 @@ export function LearnerHomeScreen() {
   const insets = useSafeAreaInsets();
   const compact = height < 760;
   const { getAccessToken, me, profileName } = useAuth();
+  const { preparingPlay } = useAdventureCharge();
   // The personal-name fallback that used to sit at the end of this chain is gone: it was a real
   // person's name, so a child whose profile had not loaded yet was greeted as someone else.
   // 'Math Explorer' is the same neutral placeholder the prep screen uses. (The removed name is not
@@ -118,14 +122,15 @@ export function LearnerHomeScreen() {
     };
   }, [api, getAccessToken]);
 
-  // Once this screen has been visited and left AT ALL — the Play tab (LearnerTabBar's own
-  // `router.replace('/(learner)/play')`, which this screen has no other hook into), the hero
-  // button, a scroll-dismiss, anything — a later return should open straight at the session card,
-  // never back at the hero. `openBLearning` and handleGestureSettle's snap branch already set the
-  // same module flag for their own specific paths (and keep doing so, since dismissTriggeredRef
-  // and showContinuationFade still need to react within THIS mount); this cleanup-only effect is
-  // the catch-all that covers every OTHER way of leaving, so no future exit path can reintroduce
-  // "hero shows again after all" as a gap the way the Play tab just did.
+  // Once this screen has been visited and left AT ALL — the Play tab (LearnerTabBar's Play button,
+  // which this screen has no other hook into and which now goes straight into a Component C
+  // session, no game-hub menu in between), the hero button, a scroll-dismiss, anything — a later
+  // return should open straight at the session card, never back at the hero. `openBLearning` and
+  // handleGestureSettle's snap branch already set the same module flag for their own specific paths
+  // (and keep doing so, since dismissTriggeredRef and showContinuationFade still need to react
+  // within THIS mount); this cleanup-only effect is the catch-all that covers every OTHER way of
+  // leaving (including Component C's own X button, c-session-screen.tsx's `leaveSession`), so no
+  // future exit path can reintroduce "hero shows again after all" as a gap.
   useEffect(() => {
     return () => {
       heroDismissedThisAppSession = true;
@@ -134,10 +139,12 @@ export function LearnerHomeScreen() {
 
   const inProgress = sessionState.kind === 'in-progress';
   const nodeStates = derivePathNodeStates(sessionState, PATH_NODE_POSITIONS.length);
-  // Always through preparation, even when a session is already active: the prep screen performs
-  // its own resume check and offers "Resume Adventure" there, so the child never skips it. This is
-  // the HERO button only — see resumeCurrentQuestion for the "Your Session" card's own current-
-  // question control, which is a different control with a different job.
+  // Always through preparation: the prep screen performs its own resume check (and, as of the
+  // prefetch change in session-preparation-screen.tsx, fetches the first question there too, so
+  // the session screen it navigates to never shows its own loading phase) — both the hero button
+  // and the "Your Session" card's own current-question control below go through it, on owner
+  // instruction (2026-08-27) overriding this comment's own prior "jump straight into the session"
+  // reasoning, which is no longer what either button does.
   const openBLearning = () => {
     // Treated the same as scrolling past the hero (see handleGestureSettle's own dismiss branch):
     // once the child has used the hero's own call-to-action, a later return to this screen should
@@ -145,22 +152,9 @@ export function LearnerHomeScreen() {
     heroDismissedThisAppSession = true;
     router.push('/(learner)/prepare');
   };
-  // The "Your Session" card's current-question control. Unlike the hero button above, this is
-  // reached only when `sessionState.kind === 'in-progress'` already (derivePathNodeStates never
-  // marks a node 'current' otherwise — see its own doc comment), which means this screen has
-  // ALREADY confirmed, via a live GET .../summary read, exactly which session and which question
-  // is open. Routing that back through /prepare's own readiness check would be re-asking a
-  // question this screen already knows the answer to, and does so redundantly on every tap — so
-  // this jumps straight into the session the card is already showing, the same way the old,
-  // pre-"always through preparation" version of openBLearning used to for every entry point. The
-  // `sessionState.kind !== 'in-progress'` guard is belt-and-braces: TypeScript cannot narrow
-  // `sessionState` from `nodeStates` alone, but the two can never disagree in practice.
   const resumeCurrentQuestion = () => {
     if (sessionState.kind !== 'in-progress') return;
-    router.push({
-      params: { sessionId: sessionState.sessionId },
-      pathname: '/(learner)/session/[sessionId]',
-    });
+    router.push('/(learner)/prepare');
   };
   const scrollRef = useRef<ScrollView>(null);
   const dismissTriggeredRef = useRef(heroDismissedThisAppSession);
@@ -480,12 +474,29 @@ export function LearnerHomeScreen() {
           </Animated.View>
         )}
         <LearnerTabBar activeTab="home" playEnabled />
+
+        {preparingPlay ? (
+          <View pointerEvents="none" style={styles.preparingOverlay}>
+            <BlurView intensity={40} style={styles.preparingOverlay} tint="light" />
+            <ActivityIndicator color={colors.primary} size="large" style={styles.preparingSpinner} />
+          </View>
+        ) : null}
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  preparingOverlay: {
+    alignItems: 'center',
+    bottom: 0,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  preparingSpinner: { transform: [{ scale: 2 }] },
   buttonPressed: { borderBottomWidth: 0, transform: [{ translateY: 3 }] },
   dashboardSection: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm, paddingTop: 0, width: '100%' },
   dots: { flexDirection: 'row', gap: 2, marginTop: 2 },

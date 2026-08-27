@@ -26,6 +26,7 @@ import { ApiClientError } from '@/src/api/errors';
 import type { AttemptResponse } from '@/src/api/generated/openapi-types';
 import { useAuth } from '@/src/auth/auth-context';
 import { AppText } from '@/src/components/app-text';
+import { useAdventureCharge } from '@/src/features/navigation/adventure-charge-context';
 import { readPublicConfig } from '@/src/config/env';
 import {
   canAdvance,
@@ -120,6 +121,7 @@ const failureCopy: Record<SessionFailure, { title: string; detail: string }> = {
 
 export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
   const { getAccessToken } = useAuth();
+  const { awardForSession } = useAdventureCharge();
   const configResult = useMemo(() => readPublicConfig(), []);
   const api = useMemo(
     () => (configResult.config ? createComponentBApi(configResult.config) : null),
@@ -484,6 +486,14 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
       mountedRef.current = false;
     };
   }, [api, presentOpportunity]);
+
+  // Charges the adventure battery exactly once per genuinely completed Component B session --
+  // `phase.kind === 'completed'` is the same real, backend-driven completion state
+  // SessionResultsScreen renders from, not a client-side guess. awardForSession is idempotent per
+  // sessionId, so re-renders of this same completed screen never double-award.
+  useEffect(() => {
+    if (phase.kind === 'completed') awardForSession(sessionId);
+  }, [awardForSession, phase.kind, sessionId]);
 
   const goHome = useCallback(() => router.replace('/(learner)/home'), []);
 

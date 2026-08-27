@@ -30,6 +30,7 @@ import { ActivityIndicator, AppState, Pressable, StyleSheet, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createComponentCApi, getComponentCDevelopmentFixture } from '@/src/api/component-c-api';
+import { takeCSessionPrefetch } from '@/src/features/c-session/c-session-prefetch-cache';
 import { ApiClientError } from '@/src/api/errors';
 import type { CNextTaskResponse, CreateCSessionRequest } from '@/src/api/generated/openapi-types';
 import { useAuth } from '@/src/auth/auth-context';
@@ -108,7 +109,8 @@ const FAILURE_COPY: Record<'authentication' | 'network' | 'technical', { title: 
 };
 
 export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, me } = useAuth();
+  const subject = me?.principal.user_id ?? null;
   const configResult = useMemo(() => readPublicConfig(), []);
   // Null-safe by construction: createComponentCApi() with no config and no active fixture throws
   // (component-c-api.ts:145-147), and calling that inside useMemo during render would crash the
@@ -125,10 +127,6 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
   const backgroundedRef = useRef(false);
 
   const goHome = useCallback(() => router.replace('/(learner)/home'), []);
-  // Where the task screen's own exit control (the X, `leaveSession` below) returns to -- the Play
-  // hub, not the learner's home screen. A child pressing X mid-task is going back to pick a
-  // different game, not leaving the app's home area entirely.
-  const goToGameHub = useCallback(() => router.replace('/(learner)/play'), []);
 
   const routeFailure = useCallback((error: unknown) => {
     if (!mountedRef.current) return;
@@ -146,35 +144,42 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
     setPhase({ kind: 'failure', supportCode, copy: FAILURE_COPY[kind] });
   }, []);
 
+  // The half of `loadNextTask` that runs AFTER a task is in hand, regardless of whether it just
+  // came off the wire or arrived pre-fetched (see the cache check in `bootstrap()` below) -- split
+  // out so neither path can silently diverge on telemetry or fail-closed handling.
+  const presentTask = useCallback((task: CNextTaskResponse) => {
+    if (!mountedRef.current) return;
+    recordTaskOffered();
+    // Both fail-closed reasons (unresolvable template; resolved archetype with no registered
+    // surface) route to the same phase and support code here -- planTaskSurface keeps them
+    // distinguishable in its own return value so a test can prove they stay separate, even
+    // though the screen has no reason to render them differently.
+    const surfacePlan = planTaskSurface(task, resolveArchetypeSurface);
+    if (surfacePlan.kind === 'fail-closed') {
+      setPhase({ kind: 'fail-closed', supportCode: task.request_id });
+      return;
+    }
+    recordTaskStarted();
+    setPhase({
+      kind: 'task',
+      task: surfacePlan.task,
+      Surface: surfacePlan.Surface,
+      attempt: 0,
+      feedback: null,
+    });
+  }, []);
+
   const loadNextTask = useCallback(
     async (cSessionId: string, accessToken: string) => {
       if (!api) return;
       try {
         const task = await api.nextTask(cSessionId, accessToken);
-        if (!mountedRef.current) return;
-        recordTaskOffered();
-        // Both fail-closed reasons (unresolvable template; resolved archetype with no registered
-        // surface) route to the same phase and support code here -- planTaskSurface keeps them
-        // distinguishable in its own return value so a test can prove they stay separate, even
-        // though the screen has no reason to render them differently.
-        const surfacePlan = planTaskSurface(task, resolveArchetypeSurface);
-        if (surfacePlan.kind === 'fail-closed') {
-          setPhase({ kind: 'fail-closed', supportCode: task.request_id });
-          return;
-        }
-        recordTaskStarted();
-        setPhase({
-          kind: 'task',
-          task: surfacePlan.task,
-          Surface: surfacePlan.Surface,
-          attempt: 0,
-          feedback: null,
-        });
+        presentTask(task);
       } catch (error) {
         routeFailure(error);
       }
     },
-    [api, routeFailure],
+    [api, presentTask, routeFailure],
   );
 
   const handleSubmit = useCallback(
@@ -255,6 +260,28 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
 
   const bootstrap = useCallback(async () => {
     if (!api) return;
+    // A prefetch started on Home's own Play press (requestPlay, adventure-charge-context.tsx) has
+    // already settled by the time navigation lands here (that press awaits it before navigating),
+    // so this never shows its own 'loading' phase for a request Home already made -- the blur
+    // overlay on Home IS the loading state, for the entire wait. A miss (nothing cached: a deep
+    // link straight to /c-session, or the prefetch itself resolved 'not ready'/failed) falls
+    // through to the full bootstrap below, unchanged.
+    if (subject) {
+      const prefetch = takeCSessionPrefetch(subject);
+      if (prefetch) {
+        try {
+          const result = await prefetch;
+          if (result) {
+            cSessionIdRef.current = result.cSessionId;
+            presentTask(result.task);
+            return;
+          }
+        } catch {
+          // Falls through -- the normal bootstrap below is the real fallback, not a second attempt
+          // at whatever failed here.
+        }
+      }
+    }
     setPhase({ kind: 'loading' });
     try {
       const accessToken = await getAccessToken();
@@ -277,14 +304,19 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
     } catch (error) {
       routeFailure(error);
     }
-  }, [api, getAccessToken, grade, loadNextTask, routeFailure, sessionMode]);
+  }, [api, getAccessToken, grade, loadNextTask, presentTask, routeFailure, sessionMode, subject]);
 
   // Leaving is never conditional on the background `abandonSession` cleanup call succeeding -- a
   // child pressing X wants to leave the task NOW, and stranding them on a "Something went wrong"
   // screen because that cleanup call failed (which, under the development fixture, it always does
   // by design -- 10.0b-i/-fix) is a worse outcome than a session the server cleans up some other
   // way. The call is still attempted, for the real-backend case where it matters, but its result
-  // (success or failure) never changes where this takes the child: the Play hub, always.
+  // (success or failure) never changes where this takes the child: home, always -- the same
+  // destination every other exit path on this screen already uses (`goHome`), landing on the
+  // "Your Session" card rather than the hero, via the SAME catch-all Home already relies on for
+  // "any way of leaving Home" (learner-home-screen.tsx's own unmount effect). There is no
+  // game-hub menu to return to any more -- removed on owner instruction (2026-08-27); Play
+  // navigates straight into Component C and X now returns straight to home the same way.
   const leaveSession = useCallback(async () => {
     const cSessionId = cSessionIdRef.current;
     if (cSessionId && api) {
@@ -297,8 +329,8 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
         // Swallowed on purpose -- see the comment above this function.
       }
     }
-    goToGameHub();
-  }, [api, getAccessToken, goToGameHub]);
+    goHome();
+  }, [api, getAccessToken, goHome]);
 
   useEffect(() => {
     mountedRef.current = true;
