@@ -2645,3 +2645,72 @@ DB) rather than `api-test`.
 
 Owner: same as the prior finding -- whoever owns test infrastructure/CI. No code changed; this
 entry is a cleanup record, not a fix to review.
+
+## 2026-08-27 -- Production branch cleaned: process docs removed, two spec docs relocated
+
+On the new `Production` branch (cut from `C_backend`), on owner instruction: removed the
+process/status documentation that had accumulated at the repo root and stopped being current the
+moment it was written (matching this file's own repeated finding about status documents decaying
+-- HANDOVER.md's Component C equivalent, §6.5). Removed, not relocated (all tracked, all
+superseded by this file and its Component C counterpart):
+`Component_B_BE4_Sequencing_Plan.md`, `Component_B_Backend_Overview.md`,
+`Component_B_Backend_Work_Order.md`, `Component_B_Measurement_And_Parity_Review.md`,
+`Component_B_Build_Structure.html`. Also removed, untracked planning drafts and stray artefacts
+that had never been part of any commit: `Component_B_Build_Plan.md`, `Component_B_Item_Review.md`,
+`backend/BEplan.md`, `hub.png` (unreferenced, per HANDOVER's own note), `.playwright-mcp/`
+(browser-automation logs), and an empty stray directory literally named `backend;C`.
+
+**`backend.md` and `frontend.md` (1585 and 1310 lines) were MOVED, not deleted** -- owner ruling:
+these are substantial, still-referenced technical specs (frontend.md's own content was read
+directly during this session to resolve a real behaviour question), not stale status documents,
+so they do not belong in the same removal bucket as the Component B planning docs above. They now
+live one directory up, in `Upadya/` (outside this git repository, exactly where `Upadya/`'s own
+non-repo planning documents already live), and remain fully intact there.
+
+**Deliberately kept, checked individually rather than swept up by "remove .md files":**
+`buildLog.md`/`buildLog1.md`/`buildLog2.md` (this file and its predecessors -- the durable record
+itself, explicit owner instruction); `backend/packaging/component_{b,c}_internal/IMPORT_POLICY.md`
+(a real, enforced architecture-boundary rule, not process documentation); `backend/scripts/README.md`
+and `backend/migrations/README.md` (functional usage docs for those folders); `frontend/README.md`,
+`frontend/CLAUDE.md`, `frontend/AGENTS.md` (the last two are active AI-tool configuration, not
+documentation about the product, and `AGENTS.md`'s Expo-v54 instruction is genuinely followed
+during this project's own work); `backend/tests/fixtures/runtime_bundle/test_catalogue.md`,
+`backend/tests/fixtures/runtime_bundle_c/test_catalogue_c.md`, and
+`backend/provenance/R26-IT-138_Component_C_Game_Task_Catalogue_v1.0.md` -- all three are DATA the
+test suite and the live Component C bundle actually parse at runtime despite the `.md` extension;
+deleting any of them would have broken the test suite or the production gate CONNECT spent seven
+steps opening.
+
+Root `README.md` rewritten from a one-line description into a real project README: architecture
+overview, the two-component split, how to run backend (docker compose, including the `api-test`
+isolation from this file's own prior entry) and frontend (npm/expo), and a pointer to this file and
+its predecessor as the durable project history.
+
+Owner: Yasindu. No code changed; this is a documentation/repository-hygiene entry only.
+
+## 2026-08-27 -- README expanded; `requirements.txt` found stale and wrong, not yet removed
+
+Added to `README.md`, on owner instruction: the two `dev_fixture_learner.py` commands (mint-invite,
+approve-pending) with the host-not-container / port note already established in this file; a
+no-Docker backend setup path (venv, `requirements.lock`, local Postgres, `alembic upgrade head`,
+`uvicorn` directly); and Expo SDK version (`~54.0.35`, confirmed from `frontend/package.json`) as
+an explicit prerequisite.
+
+**Checked, on request, whether `requirements.txt` and `package.json` are correct before pointing
+the README at them.** `package.json` is clean: 31 dependencies, 5 dev dependencies, zero
+local/relative/`file:`/`link:` paths -- `npm install` alone is a complete, reproducible setup.
+
+**`requirements.txt` is stale and wrong**, confirmed against what actually ships: it pins
+`upadya_component_b_live_engine-0.1.0+be3...`, while `requirements.in`/`requirements.lock` (and
+`Dockerfile`'s own `COPY`) pin `+bf5` -- an older engine build. It is missing the Component C
+engine wheel (`prabathi_component_c_live_engine...+c3...`) entirely, and missing `alembic`,
+`asyncpg`, `sqlalchemy[asyncio]`, and `pyjwt[crypto]` outright -- a install from this file cannot
+open a database connection, run a migration, or import Component C's adapter. The README now
+points explicitly at `requirements.lock` (hash-verified, matches the Docker image exactly) and
+names `requirements.txt` as the one not to use, rather than silently working around it.
+
+**Not removed.** This is a from-scratch abandoned file, not the kind of stale status document the
+2026-08-27 cleanup entry above already reasoned through -- flagging rather than deleting, since
+removing a dependency manifest is a different class of change than removing a planning document,
+and it wasn't asked for. Owner: confirm whether `requirements.txt` should be deleted outright or
+regenerated from `requirements.in` to match `requirements.lock`.
