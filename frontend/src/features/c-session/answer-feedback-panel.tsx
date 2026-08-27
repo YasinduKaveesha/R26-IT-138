@@ -32,8 +32,20 @@
 // and renders one of two fixed states; it holds no state of its own about the task, the payload,
 // or scoring, matching `DigitKeypad`'s and `UnitStepper`'s own "holds no state of its own" doctrine
 // for a stateless, caller-driven primitive.
+//
+// VISUAL TREATMENT matches Component B's own per-question outcome popup
+// (live-session-screen.tsx's `outcomePopup`/`outcomeIcon`/`outcomeCorrect`/`outcomeIncorrect`)
+// exactly on request: same BlurView technique, same icon choice (checkmark / heart-outline), same
+// success/accentRed colouring, same ZoomIn entrance. This is a STYLING match only -- it changes
+// nothing about which text is shown (still the neutral, non-punitive copy flagged above) and
+// nothing about placement: this panel still renders INSTEAD OF the archetype surface, never
+// alongside it, so the double-submission guarantee this file's own docstring opens with is
+// completely unaffected by how it looks.
 
+import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { Pressable, StyleSheet, View } from 'react-native';
+import Animated, { ZoomIn } from 'react-native-reanimated';
 
 import { AppText } from '@/src/components/app-text';
 import { HIT_SLOP } from '@/src/features/c-session/motor-constants';
@@ -50,13 +62,26 @@ export type AnswerFeedbackPanelProps = {
 export function AnswerFeedbackPanel({ matched, onNext, onTryAgain, scaffoldLevel }: AnswerFeedbackPanelProps) {
   return (
     <View style={styles.container}>
-      <View style={styles.messageBlock}>
-        <AppText style={styles.messageText} variant="title">
-          {matched ? 'Nice work!' : "Let's try that again."}
-        </AppText>
-        {!matched ? (
-          <AppText style={styles.scaffoldText}>{`Support level: ${scaffoldLevel}`}</AppText>
-        ) : null}
+      <View style={styles.popupCenter}>
+        <BlurView intensity={40} style={styles.popupBackdrop} tint="light" />
+        <Animated.View
+          entering={ZoomIn.duration(280).springify().damping(14)}
+          style={[styles.popup, matched ? styles.popupCorrect : styles.popupIncorrect]}>
+          <View style={[styles.popupIcon, matched ? styles.popupIconCorrect : styles.popupIconIncorrect]}>
+            <Ionicons color={colors.primaryForeground} name={matched ? 'checkmark' : 'heart-outline'} size={30} />
+          </View>
+          <AppText
+            align="center"
+            style={[styles.popupTitle, matched ? styles.popupTextCorrect : styles.popupTextIncorrect]}
+            variant="title">
+            {matched ? 'Nice work!' : "Let's try that again."}
+          </AppText>
+          {!matched ? (
+            <AppText
+              align="center"
+              style={[styles.scaffoldText, styles.popupTextIncorrect]}>{`Support level: ${scaffoldLevel}`}</AppText>
+          ) : null}
+        </Animated.View>
       </View>
       <Pressable
         accessibilityLabel={matched ? 'Next question' : 'Try again'}
@@ -94,11 +119,32 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: spacing.lg,
   },
-  messageBlock: { gap: spacing.smPlus },
-  // Half of typography.fontSize.title / lineHeight.title, matching every surface's own promptText
-  // sizing exactly (e.g. `value-report-surface.tsx:223`) -- this panel occupies the same visual
-  // role a question does, so it uses the same size rather than inventing a new one.
-  messageText: { color: colors.textPrimary, fontSize: 20, lineHeight: 23 },
+  // Every value below mirrors live-session-screen.tsx's own outcomePopup/outcomeIcon/outcomeCorrect
+  // /outcomeIncorrect/outcomeText styles exactly, on request -- same blur intensity/tint, same
+  // glow-via-shadow technique (no solid card background of its own), same icon circle size, same
+  // success/accentRed colours.
+  popup: {
+    alignItems: 'center',
+    borderRadius: radius.lg,
+    elevation: 10,
+    gap: spacing.xs,
+    justifyContent: 'center',
+    padding: spacing.md,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 50,
+    width: '80%',
+  },
+  popupBackdrop: { bottom: 0, left: 0, position: 'absolute', right: 0, top: 0 },
+  popupCenter: { alignItems: 'center', flex: 1, justifyContent: 'center', position: 'relative' },
+  popupCorrect: { shadowColor: '#e9f8f1' },
+  popupIncorrect: { shadowColor: colors.secondarySoft },
+  popupIcon: { alignItems: 'center', borderRadius: radius.pill, height: 56, justifyContent: 'center', width: 56 },
+  popupIconCorrect: { backgroundColor: colors.success },
+  popupIconIncorrect: { backgroundColor: colors.accentRed },
+  popupTextCorrect: { color: colors.success },
+  popupTextIncorrect: { color: colors.accentRed },
+  popupTitle: { fontFamily: typography.fonts.display, fontSize: typography.fontSize.subtitle, lineHeight: typography.lineHeight.subtitle },
   pressed: { opacity: 0.85 },
-  scaffoldText: { color: colors.textSecondary, fontFamily: typography.fonts.body, fontSize: typography.fontSize.sm },
+  scaffoldText: { fontFamily: typography.fonts.body, fontSize: typography.fontSize.sm },
 });
