@@ -63,7 +63,10 @@ export function DigitKeypad({ disabled = false, onDelete, onDigit }: DigitKeypad
         <View key={rowIndex} style={styles.row}>
           {row.map((cell, cellIndex) => {
             if (cell === null) {
-              return <View key={cellIndex} style={styles.keySpacer} />;
+              // A distinct namespace from `cell`'s own keys below, not a bare `cellIndex`: row 4 is
+              // `[null, '0', 'delete']` -- React string-coerces keys for comparison, so a spacer
+              // keyed by its numeric index 0 collides with the very next cell's digit key '0'.
+              return <View key={`spacer-${cellIndex}`} style={styles.keySpacer} />;
             }
             if (cell === 'delete') {
               return (
