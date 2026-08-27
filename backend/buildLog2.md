@@ -2714,3 +2714,103 @@ names `requirements.txt` as the one not to use, rather than silently working aro
 removing a dependency manifest is a different class of change than removing a planning document,
 and it wasn't asked for. Owner: confirm whether `requirements.txt` should be deleted outright or
 regenerated from `requirements.in` to match `requirements.lock`.
+
+## 2026-08-27 -- Component C submit UX: an in-flight gate, and `task_already_terminal` treated as benign
+
+Two frontend-only fixes, raised by the owner after playing a real session against the Supabase-
+hosted database. Neither touches the backend; `git diff --stat` over `app/application`,
+`app/domain`, `app/api` and `migrations/` is empty for this batch.
+
+### What was actually wrong -- measured, not guessed
+
+Against the hosted database, submitting felt dead for several seconds and then frequently showed
+the technical-block screen ("Something changed on our end"). Latency, measured from inside the api
+container against both databases in the same run:
+
+| | connect | `select 1` median | min | max |
+|---|---:|---:|---:|---:|
+| Supabase (`ap-southeast-1`, session pooler) | 1754.4 ms | **203.2 ms** | 156.3 | 334.5 |
+| Local Docker Postgres | 41.3 ms | **0.2 ms** | 0.1 | 0.5 |
+
+`submit_action` performs on the order of 15-25 queries (row lock, event count, payload validation,
+evaluation, three-to-four event writes, summary derivation, policy decision, scaffold event). At
+~200 ms per round trip that is several seconds of an apparently unresponsive SUBMIT, so the child
+taps again; the second request is refused by the T1-4 guard with `task_already_terminal`
+(`task_service.py:664-666`), a 409, which `classifySessionFailure` routes to the technical-block
+screen.
+
+**The data was never corrupted, and the backend was never wrong.** The gameplay tables for that
+session were checked directly: 26 events across 6 instances (5 complete x 5 events + 1 offered),
+`attempt_number` 1 throughout, five `completed_correct` terminal events, five summaries -- exactly
+consistent, with no duplicate writes. The duplicate submissions wrote nothing, which is the guard
+working as designed. What was wrong was that a correct backend refusal was being shown to a child
+as an application failure.
+
+### Fix 1 -- the submit-in-flight gate
+
+`createSubmitGate()` (`c-session-logic.ts`): a one-slot mutual-exclusion cell, `tryEnter` /
+`release` / `isBusy`. `c-session-screen.tsx` holds one per mounted screen in a `useRef` and takes
+it in `submitFromSurface` **before the first `await`**, releasing in `finally`.
+
+**It is a ref, not `useState`, and the placement is load-bearing.** `setState` is asynchronous and
+batched: two taps dispatched in the same frame both read the pre-update value, both pass a
+`if (submitting) return` check, and both submit. A guard taken after any `await` reopens the same
+race at the suspension point. A `useState` implementation passes a naive sequential test and fails
+the concurrent one, which is why the test drives two overlapping callers rather than two sequential
+calls.
+
+A separate `submitting` state drives an overlay inside the task panel (`ActivityIndicator` in the
+family accent, over a translucent scrim). The overlay does two jobs: it tells the child the answer
+is being processed, and it absorbs taps -- covering the card means no archetype's own SUBMIT is
+reachable while a request is out, **without this file reaching into eight surfaces to disable eight
+separate buttons**. The gate alone still guarantees single submission if the overlay were removed.
+
+### Fix 2 -- `task_already_terminal` handled as the benign duplicate
+
+`isDuplicateSubmissionConflict(error)` (`c-session-logic.ts`), consulted at exactly one call site:
+the catch in `handleSubmit`. On a match the existing `feedback` field is set to
+`{ matched: true, scaffoldLevel: prev.task.scaffold_state }` -- the same field, the same
+`AnswerFeedbackPanel`, the same child-initiated "Next" to advance. No parallel flow.
+
+**`classifySessionFailure` was NOT widened, deliberately.** Its own header states it reads
+`error.kind` and nothing else so that two differently-caused 409s cannot reach the screen
+differently; teaching it to sniff envelopes would dismantle the property it exists to guarantee.
+The narrowing therefore lives at the call site, and every 409 the predicate does not positively
+recognise still falls through to `classifySessionFailure` unchanged. A test asserts that function
+still routes *every* 409 -- including this one -- to `technical-block`, so a later "simplification"
+of the two into one fails loudly.
+
+**Why the detail is trustworthy here, when the gate refusals' 409s are not:** the unsigned-parameter
+and non-active-session refusals raise a BARE `ConflictError` with no details at all
+(`task_service.py:375`, `:389`); this one is raised with an explicit structured body,
+`[{"location": ["c_task_instance_id"], "type": "task_already_terminal"}]`. The distinction is a
+real difference in what the server sends, not an inference from a message string. A test pins the
+bare-409 case to `technical-block` precisely so the two never blur.
+
+**The assumption `matched: true` rests on, recorded because it is load-bearing and could silently
+break:** `completed_correct` is the ONLY wired terminal reason (Phase 6a T1; the other eight are
+explicitly fail-closed and documented as not built in `terminal_event.py`'s own header, T1-1/T1-5).
+An instance can therefore only be terminal because the child already answered correctly. **If a
+second terminal reason is ever wired, this inference breaks and `isDuplicateSubmissionConflict`'s
+call site must be revisited before that lands.**
+
+### Verification
+
+- `npx tsc --noEmit` -- exit 0.
+- `npm run test:contract` -- **1341 tests, 1341 pass, 0 fail.**
+- **Reconciled by measurement, not by arithmetic on a documented number.** The suite was re-run
+  with the two new files removed, giving **1327**; 1327 + 6 (gate) + 8 (duplicate) = 1341.
+  `HANDOVER.md`'s long-standing `1324` was stale -- measured at `4916d04`, before the
+  sign-in/welcome/adventure-charge batches -- and has been corrected there with a note, since §6.5
+  had already warned about exactly this row.
+- Backend logic untouched: `git diff --stat` over `app/application`, `app/domain`, `app/api`,
+  `migrations/` is empty. `task_already_terminal` is still raised at `task_service.py:665`.
+- Fix 1 intact after Fix 2: the gate take/release and the overlay are all still present and
+  covered.
+
+### Not done, deliberately
+
+The fail-closed frame's own wording is still engineer-facing ("This one isn't ready" plus a visible
+UUID), and the technical-block screen's copy is unchanged. Both remain child-facing copy questions
+routed to pedagogical sign-off per `ESCALATIONS.md` section 4, not to whoever is holding the
+builder pen. Nothing in this batch changes any wording shown to a child.
