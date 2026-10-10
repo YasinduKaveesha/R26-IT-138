@@ -14,12 +14,10 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/src/auth/auth-context';
 import { AppText } from '@/src/components/app-text';
 import { LearnerHeaderBar } from '@/src/features/navigation/learner-header-bar';
-import { LearnerTabBar } from '@/src/features/navigation/learner-tab-bar';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
 import { firstNameOf } from '@/src/utils/display-name';
 
@@ -80,7 +78,7 @@ export function LearnerProfileScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <View style={styles.mobileCanvas}>
         <LearnerHeaderBar compact={compact} displayName={firstNameOf(displayName)} />
 
@@ -117,9 +115,8 @@ export function LearnerProfileScreen() {
           </Pressable>
         </View>
 
-        <LearnerTabBar activeTab="profile" playEnabled />
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

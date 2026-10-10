@@ -48,6 +48,7 @@ import { accentForGameFamily } from '@/src/features/c-session/game-family-accent
 import { HIT_SLOP, TOKEN_SPACING, TOKEN_TOUCH_TARGET_SIZE } from '@/src/features/c-session/motor-constants';
 import { JumpAccumulator } from '@/src/features/c-session/primitives/jump-accumulator';
 import { UnitStepper } from '@/src/features/c-session/primitives/unit-stepper';
+import { TaskPromptCard } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
 
 // Two-line-tall, bottom-aligned label block, same mechanism `value-report-surface.tsx` uses so a
@@ -88,12 +89,13 @@ function LineTraversalScene({ accent, onSubmit, spec }: LineTraversalSceneProps)
 
   return (
     <View style={styles.container}>
-      <AppText style={styles.promptText} variant="title">
-        {spec.promptText}
-      </AppText>
-
-      {spec.payloadValues.length > 0 && (
-        <View style={styles.payloadRow}>
+      {/* Question and items in one card; the controls below stay on the ground. */}
+      <TaskPromptCard>
+        <AppText style={styles.promptText} variant="title">
+          {spec.promptText}
+        </AppText>
+        {spec.payloadValues.length > 0 && (
+          <View style={styles.payloadRow}>
           {spec.payloadValues.map((payloadValue, index) => (
             <View key={`${payloadValue.key}-${index}`} style={styles.payloadColumn}>
               <View style={styles.payloadLabelBlock}>
@@ -102,10 +104,11 @@ function LineTraversalScene({ accent, onSubmit, spec }: LineTraversalSceneProps)
               <View style={styles.payloadToken}>
                 <AppText style={styles.payloadTokenText}>{payloadValue.value}</AppText>
               </View>
-            </View>
-          ))}
-        </View>
-      )}
+              </View>
+            ))}
+          </View>
+        )}
+      </TaskPromptCard>
 
       <UnitStepper
         forwardSteps={jumps.length}

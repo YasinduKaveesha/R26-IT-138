@@ -1,9 +1,10 @@
 """SQLAlchemy repositories for the twelve neutral BE2 tables."""
 
+from datetime import datetime
 from typing import Generic, Sequence, TypeVar
 from uuid import UUID
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence_models import (
@@ -44,6 +45,31 @@ class AppUserRepository(SqlAlchemyNeutralRepository[AppUser]):
 
     async def find_by_subject(self, subject: str) -> AppUser | None:
         return await self.session.scalar(select(AppUser).where(AppUser.supabase_subject == subject))
+
+    async def find_with_learner_link_by_subject(
+        self, subject: str
+    ) -> tuple[AppUser, AppUserLearnerLink | None] | None:
+        """The app user and its learner link in ONE round trip.
+
+        Every authenticated learner request resolves the principal the same way: look the user up
+        by Supabase subject, then look its learner link up by user id. As two awaits that is two
+        sequential round trips before any real work begins, which against a remote database is
+        pure latency (~65ms each against ap-southeast-1) on every single request.
+
+        The join is OUTER so the three outcomes callers must distinguish stay distinguishable:
+        no row at all (unknown user), a row with no link (user exists, not yet a learner), and a
+        row with a link. Returning `None` vs `(user, None)` preserves exactly that, so callers
+        keep raising the same not-found/forbidden errors they raised with two queries.
+        """
+        result = await self.session.execute(
+            select(AppUser, AppUserLearnerLink)
+            .outerjoin(AppUserLearnerLink, AppUserLearnerLink.user_id == AppUser.user_id)
+            .where(AppUser.supabase_subject == subject)
+        )
+        row = result.first()
+        if row is None:
+            return None
+        return row[0], row[1]
 
 
 class LearnerRepository(SqlAlchemyNeutralRepository[Learner]):
@@ -520,18 +546,39 @@ class ClassroomInviteRepository(SqlAlchemyNeutralRepository[ClassroomInvite]):
     async def find_by_token_hash(self, token_hash: str) -> ClassroomInvite | None:
         return await self.session.scalar(select(ClassroomInvite).where(ClassroomInvite.token_hash == token_hash))
 
-    async def find_live_by_classroom(self, classroom_id: UUID) -> ClassroomInvite | None:
+    async def find_live_by_classroom(self, classroom_id: UUID, now: datetime) -> ClassroomInvite | None:
         """The classroom's one live join code, if it has one.
 
         A classroom has at most one non-revoked invite: the code is created with the
         classroom, never expires and is never rotated, so minting a second would leave two
         codes resolving to the same room with only one of them readable by the teacher.
+
+        "Live" has to mean the same thing here as it does at redemption, and it did not. This
+        filtered on `revoked_at_utc` alone, while `resolve_invite` and `request_membership` both
+        additionally reject an invite whose `expires_at_utc` has passed. Permanent join codes
+        carry `expires_at_utc = NULL`, but every invite minted BEFORE they landed carries a real
+        24h expiry and was never revoked -- so for those classrooms this reported a live code that
+        no learner could redeem, `create_invite` declined to mint a replacement
+        (`token_already_issued=True, invite_token=None`), and the only existing code's plaintext
+        had been discarded at creation. The classroom was left permanently unable to issue a
+        usable join code, with no recovery path through the API.
+
+        `order_by` + `limit(1)` because the "at most one" invariant is aspirational, not enforced
+        by a constraint: databases predating this already hold several unrevoked rows per
+        classroom, and an unordered `scalar()` over them picks an arbitrary one.
         """
         return await self.session.scalar(
-            select(ClassroomInvite).where(
+            select(ClassroomInvite)
+            .where(
                 ClassroomInvite.classroom_id == classroom_id,
                 ClassroomInvite.revoked_at_utc.is_(None),
+                or_(
+                    ClassroomInvite.expires_at_utc.is_(None),
+                    ClassroomInvite.expires_at_utc > now,
+                ),
             )
+            .order_by(ClassroomInvite.created_at_utc.desc(), ClassroomInvite.classroom_invite_id.desc())
+            .limit(1)
         )
 
     async def get_owned(self, classroom_invite_id: UUID, teacher_profile_id: UUID) -> ClassroomInvite | None:
@@ -757,6 +804,27 @@ class TaskInstanceRepository(SqlAlchemyNeutralRepository[TaskInstanceRecord]):
             select(TaskInstanceRecord).where(TaskInstanceRecord.item_opportunity_id == item_opportunity_id)
         )
 
+    async def map_by_opportunities(
+        self, item_opportunity_ids: Sequence[UUID]
+    ) -> dict[UUID, TaskInstanceRecord]:
+        """`find_by_opportunity` for a whole session in one round trip.
+
+        Session finalisation needs the instance for every opportunity it is aggregating. Asking
+        one opportunity at a time is an N+1 that costs a full network round trip per question --
+        the single `POST .../complete` that ends a session issued 34 statements where a
+        mid-session one issues 18. The mapping is 1:1 (`uq_b_task_instances_opportunity`), so a
+        dict keyed by opportunity id loses nothing, and a missing key means exactly what a `None`
+        from `find_by_opportunity` meant.
+        """
+        if not item_opportunity_ids:
+            return {}
+        rows = await self.session.scalars(
+            select(TaskInstanceRecord).where(
+                TaskInstanceRecord.item_opportunity_id.in_(item_opportunity_ids)
+            )
+        )
+        return {row.item_opportunity_id: row for row in rows}
+
 
 class PresentationTokenRepository(SqlAlchemyNeutralRepository[PresentationTokenRecord]):
     model_type = PresentationTokenRecord
@@ -808,6 +876,28 @@ class AttemptRepository(SqlAlchemyNeutralRepository[AttemptRecord]):
         )
         return list(result)
 
+    async def map_for_opportunities(
+        self, item_opportunity_ids: Sequence[UUID]
+    ) -> dict[UUID, list[AttemptRecord]]:
+        """`list_for_opportunity` for a whole session in one round trip.
+
+        Ordering is the load-bearing part: the per-opportunity lists must come out ordered by
+        ``attempt_index`` exactly as `list_for_opportunity` returns them, because the aggregation
+        summary is derived from that order. Ordering by opportunity id first keeps each group
+        contiguous, and `attempt_index` second reproduces the per-group order verbatim.
+        """
+        if not item_opportunity_ids:
+            return {}
+        rows = await self.session.scalars(
+            select(AttemptRecord)
+            .where(AttemptRecord.item_opportunity_id.in_(item_opportunity_ids))
+            .order_by(AttemptRecord.item_opportunity_id, AttemptRecord.attempt_index)
+        )
+        grouped: dict[UUID, list[AttemptRecord]] = {}
+        for row in rows:
+            grouped.setdefault(row.item_opportunity_id, []).append(row)
+        return grouped
+
 
 class SkillStateTransitionRepository(SqlAlchemyNeutralRepository[SkillStateTransitionRecord]):
     """No update/delete method is defined here by design — transitions are immutable (BEplan
@@ -844,6 +934,22 @@ class HintEventRepository(SqlAlchemyNeutralRepository[HintEventRecord]):
         return await self.session.scalar(
             select(func.count()).select_from(HintEventRecord).where(HintEventRecord.item_opportunity_id == item_opportunity_id)
         )
+
+    async def count_by_opportunities(self, item_opportunity_ids: Sequence[UUID]) -> dict[UUID, int]:
+        """`count_for_opportunity` for a whole session in one round trip.
+
+        A GROUP BY returns no row for an opportunity with no hints, where
+        `count_for_opportunity` would have returned 0 -- so callers must read this with a
+        `.get(id, 0)` default rather than indexing it.
+        """
+        if not item_opportunity_ids:
+            return {}
+        result = await self.session.execute(
+            select(HintEventRecord.item_opportunity_id, func.count())
+            .where(HintEventRecord.item_opportunity_id.in_(item_opportunity_ids))
+            .group_by(HintEventRecord.item_opportunity_id)
+        )
+        return {opportunity_id: count for opportunity_id, count in result.all()}
 
 
 class SessionAggregateResultRepository(SqlAlchemyNeutralRepository[SessionAggregateResultRecord]):

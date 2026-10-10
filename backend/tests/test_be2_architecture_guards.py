@@ -162,6 +162,9 @@ EXPECTED_ROUTES = {
     ("/api/v1/b/sessions/{session_id}/abandon", ("POST",)),
     # BE4b (BEplan §9 BE4.2) — the one authorized adaptive-selection route.
     ("/api/v1/b/sessions/{session_id}/opportunities", ("POST",)),
+    # 2026-09-27 — the learner-presentation acknowledgement that anchors the answering clock at
+    # the render rather than at selection (owner ruling; app/domain/b_presentation_ack.py).
+    ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/presented", ("POST",)),
     # BE4c (BEplan §9 BE4.3 + BE4.4) — the one authorized attempt-submission route.
     ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/responses", ("POST",)),
     # BE4d (BEplan §9 BE4.5) — the one authorized governed-hint-request route.
@@ -169,6 +172,9 @@ EXPECTED_ROUTES = {
     # BE4e (BEplan §9 BE4.6) — the two authorized next-or-complete / SAFE-standing routes.
     ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/complete", ("POST",)),
     ("/api/v1/b/sessions/{session_id}/summary", ("GET",)),
+    # 2026-09-21 -- the learner's own per-skill BKT state, read-only, for the Play prep card
+    # (product-owner ruling; app/domain/b_skill_state.py).
+    ("/api/v1/b/learner/skill-states", ("GET",)),
     # Phase 4b — the four authorized Component C session-lifecycle routes (create/start, resume,
     # abandon, complete). See AUTHORIZED_C_SESSION_LIFECYCLE_OPERATIONS below.
     ("/api/v1/c/sessions", ("POST",)),
@@ -198,6 +204,9 @@ AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS = {
 }
 AUTHORIZED_B_OPPORTUNITY_SELECTION_OPERATIONS = {
     ("/api/v1/b/sessions/{session_id}/opportunities", ("POST",)),
+}
+AUTHORIZED_B_PRESENTATION_ACK_OPERATIONS = {
+    ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/presented", ("POST",)),
 }
 AUTHORIZED_B_ATTEMPT_SUBMISSION_OPERATIONS = {
     ("/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/responses", ("POST",)),
@@ -271,6 +280,7 @@ def test_no_session_question_answer_or_scientific_route_exists() -> None:
         if (
             route in AUTHORIZED_B_SESSION_LIFECYCLE_OPERATIONS
             or route in AUTHORIZED_B_OPPORTUNITY_SELECTION_OPERATIONS
+            or route in AUTHORIZED_B_PRESENTATION_ACK_OPERATIONS
             or route in AUTHORIZED_B_ATTEMPT_SUBMISSION_OPERATIONS
             or route in AUTHORIZED_B_HINT_REQUEST_OPERATIONS
             or route in AUTHORIZED_B_SESSION_COMPLETION_OPERATIONS
@@ -286,6 +296,14 @@ def test_openapi_contains_exactly_the_two_authorized_b_session_completion_operat
     assert AUTHORIZED_B_SESSION_COMPLETION_OPERATIONS <= _current_routes()
     non_completion_routes = {route for route in EXPECTED_ROUTES if route not in AUTHORIZED_B_SESSION_COMPLETION_OPERATIONS}
     assert _current_routes() - AUTHORIZED_B_SESSION_COMPLETION_OPERATIONS == non_completion_routes
+
+
+def test_openapi_contains_exactly_the_one_authorized_b_presentation_ack_operation() -> None:
+    """The clock-anchoring route is one route, and adding a second would fail here first."""
+    assert len(AUTHORIZED_B_PRESENTATION_ACK_OPERATIONS) == 1
+    assert AUTHORIZED_B_PRESENTATION_ACK_OPERATIONS <= _current_routes()
+    non_ack_routes = {route for route in EXPECTED_ROUTES if route not in AUTHORIZED_B_PRESENTATION_ACK_OPERATIONS}
+    assert _current_routes() - AUTHORIZED_B_PRESENTATION_ACK_OPERATIONS == non_ack_routes
 
 
 def test_openapi_contains_exactly_the_one_authorized_b_attempt_submission_operation() -> None:

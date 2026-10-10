@@ -1,13 +1,17 @@
 import { router } from 'expo-router';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { LearnerSkillStateItem } from '@/src/api/generated/openapi-types';
+import { createComponentBApi } from '@/src/api/component-b-api';
 import { useAuth } from '@/src/auth/auth-context';
+import { readPublicConfig } from '@/src/config/env';
 import {
   putCSessionPrefetch,
   takeCSessionPrefetch,
 } from '@/src/features/c-session/c-session-prefetch-cache';
 import { prefetchCSessionBootstrap } from '@/src/features/c-session/c-session-prefetch';
 import { PlayPrepCard } from '@/src/features/home/play-prep-card';
+import { PlayAdventurePopup } from '@/src/features/navigation/play-adventure-popup';
 import {
   ADVENTURE_CHARGE_MAX_LEVEL,
   awardAdventureCharge,
@@ -37,8 +41,10 @@ type AdventureChargeContextValue = {
    * prefetch still navigates, into c-session's own bootstrap). The prep card's "Start Game"
    * button waits for this. */
   playPrepReady: boolean;
-  /** Play's own press handler: opens the prep card only at maxLevel, otherwise shows the pill. */
+  /** Play's own press handler: opens the prep card only at maxLevel, otherwise shows the popup. */
   requestPlay: () => void;
+  /** Closes the "Play Adventure" popup before its own timer does -- a tap on its backdrop. */
+  dismissPill: () => void;
   /** The prep card's "Start Game" button: navigates into the prefetched Component C session. */
   startPreparedGame: () => void;
   /** The prep card's close control: drops the prep state and discards the pending prefetch. */
@@ -60,7 +66,13 @@ export function AdventureChargeProvider({ children }: { children: React.ReactNod
   const [pillVisible, setPillVisible] = useState(false);
   const [preparingPlay, setPreparingPlay] = useState(false);
   const [playPrepReady, setPlayPrepReady] = useState(false);
+  // The learner's real per-skill BKT state for the prep card's bars (2026-09-21 ruling: shown as
+  // bar length only). Fetched fresh on every Play press so it reflects the session just finished,
+  // never cached across presses. Null until it lands or if it fails -- the card draws empty bars
+  // and "Start Game" never waits on it.
+  const [prepSkillStates, setPrepSkillStates] = useState<readonly LearnerSkillStateItem[] | null>(null);
   const preparedGradeRef = useRef<number | null>(null);
+  const skillStatesRequestRef = useRef(0);
   const pillTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -113,6 +125,25 @@ export function AdventureChargeProvider({ children }: { children: React.ReactNod
       preparedGradeRef.current = grade;
       setPlayPrepReady(false);
       setPreparingPlay(true);
+      // Skill bars: best-effort and independent of the game prefetch. A stale response from a
+      // dismissed-then-reopened card is dropped by the request counter, so bars never show a
+      // previous press's answer. Failure of any kind (network, 404 for a learner with no B
+      // history yet, invalid shape) leaves the bars empty -- that is a valid state, not an error
+      // the child should see.
+      setPrepSkillStates(null);
+      const requestNumber = ++skillStatesRequestRef.current;
+      void (async () => {
+        try {
+          const accessToken = await getAccessToken();
+          if (!accessToken) return;
+          const { config } = readPublicConfig();
+          if (!config) return;
+          const response = await createComponentBApi(config).getLearnerSkillStates(accessToken);
+          if (skillStatesRequestRef.current === requestNumber) setPrepSkillStates(response.skill_states);
+        } catch {
+          // Bars stay empty.
+        }
+      })();
       const prefetch = prefetchCSessionBootstrap(grade, getAccessToken);
       if (subject) putCSessionPrefetch(subject, prefetch);
       void prefetch.catch(() => null).finally(() => setPlayPrepReady(true));
@@ -122,6 +153,12 @@ export function AdventureChargeProvider({ children }: { children: React.ReactNod
     if (pillTimerRef.current) clearTimeout(pillTimerRef.current);
     pillTimerRef.current = setTimeout(() => setPillVisible(false), PILL_VISIBLE_MS);
   }, [getAccessToken, grade, level, subject]);
+
+  const dismissPill = useCallback(() => {
+    if (pillTimerRef.current) clearTimeout(pillTimerRef.current);
+    pillTimerRef.current = null;
+    setPillVisible(false);
+  }, []);
 
   const startPreparedGame = useCallback(() => {
     const preparedGrade = preparedGradeRef.current;
@@ -137,6 +174,8 @@ export function AdventureChargeProvider({ children }: { children: React.ReactNod
   const dismissPlayPrep = useCallback(() => {
     setPreparingPlay(false);
     setPlayPrepReady(false);
+    setPrepSkillStates(null);
+    skillStatesRequestRef.current += 1;
     preparedGradeRef.current = null;
     // Discard the cached prefetch so a later entry re-bootstraps from scratch. Any session the
     // prefetch already created on the backend is simply resumed by c-session's own bootstrap.
@@ -151,12 +190,14 @@ export function AdventureChargeProvider({ children }: { children: React.ReactNod
       preparingPlay,
       playPrepReady,
       requestPlay,
+      dismissPill,
       startPreparedGame,
       dismissPlayPrep,
       awardForSession,
     }),
     [
       awardForSession,
+      dismissPill,
       dismissPlayPrep,
       level,
       pillVisible,
@@ -170,11 +211,15 @@ export function AdventureChargeProvider({ children }: { children: React.ReactNod
   return (
     <AdventureChargeContext.Provider value={value}>
       {children}
+      {/* The not-yet-charged prompt. Global, and a sibling of the prep card below, because its
+          blur has to cover the whole page -- see play-adventure-popup.tsx. */}
+      {pillVisible ? <PlayAdventurePopup onDismiss={dismissPill} /> : null}
       {preparingPlay ? (
         <PlayPrepCard
           onDismiss={dismissPlayPrep}
           onStart={startPreparedGame}
           ready={playPrepReady}
+          skillStates={prepSkillStates}
         />
       ) : null}
     </AdventureChargeContext.Provider>

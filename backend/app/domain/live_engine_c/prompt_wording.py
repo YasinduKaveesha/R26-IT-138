@@ -118,112 +118,112 @@ class PromptWordingVariant:
 # digit; no banned technical term; within the length/readability bound; does not name which of a
 # labelled-choice answer set is correct.
 PROMPT_TEXT_BY_TEMPLATE: Mapping[str, tuple[PromptWordingVariant, ...]] = {
-    "C-BT-01": (PromptWordingVariant(None, None, "Show this number using tens and ones."),),
+    "C-BT-01": (PromptWordingVariant(None, None, "Make this number with tens and ones."),),
     "C-BT-02": (
-        PromptWordingVariant(None, None, "Show this number using hundreds, tens, and ones."),
+        PromptWordingVariant(None, None, "Make this number with hundreds, tens and ones."),
     ),
     "C-BT-03": (
         PromptWordingVariant(
-            None, None, "Trade ten ones for one ten. Write how many tens and ones you have now."
+            None, None, "Change ten ones into one ten. Write your tens and ones now."
         ),
     ),
     "C-BT-04": (
         PromptWordingVariant(
-            None, None, "Break one ten into ten ones. Write how many tens and ones you have now."
+            None, None, "Change one ten into ten ones. Write your tens and ones now."
         ),
     ),
     "C-CC-01": (
         PromptWordingVariant(
-            None, None, "Select every object one time. Then write how many you selected."
+            None, None, "Tap each thing one time. Then write how many."
         ),
     ),
-    "C-CC-02": (PromptWordingVariant(None, None, "Put this many objects in the box."),),
+    "C-CC-02": (PromptWordingVariant(None, None, "Put this many things in the box."),),
     "C-CC-03": (
-        PromptWordingVariant(None, None, "Count the objects. Then choose the number that matches."),
+        PromptWordingVariant(None, None, "Count the things. Then pick the number."),
     ),
     "C-CC-04": (
         PromptWordingVariant(
             None,
             None,
-            "Look at the objects before and after. Is the amount the same, or has it changed?",
+            "Look before and after. Is it the same or changed?",
         ),
     ),
     "C-EG-01": (
         PromptWordingVariant(
-            None, None, "Build the groups shown, with the same number in each group."
+            None, None, "Make the groups. Put the same number in each."
         ),
     ),
     "C-EG-02": (
-        PromptWordingVariant("direction", "build", "Build the array shown."),
+        PromptWordingVariant("direction", "build", "Make the rows of squares shown."),
         PromptWordingVariant(
-            "direction", "read", "Tell how many rows, columns, and squares the array has."
+            "direction", "read", "How many rows? How many in each row? How many squares in all?"
         ),
     ),
-    "C-EG-03": (PromptWordingVariant(None, None, "Find the total for the equal groups shown."),),
-    "C-JB-01": (PromptWordingVariant(None, None, "Join the two groups. Write the total."),),
+    "C-EG-03": (PromptWordingVariant(None, None, "How many are in all the groups?"),),
+    "C-JB-01": (PromptWordingVariant(None, None, "Put the two groups together. How many?"),),
     "C-JB-02": (
         PromptWordingVariant(
             None,
             None,
-            "Start at the larger number and count on. Write where you land and each jump.",
+            "Start at the bigger number and count on. Write each jump and where you stop.",
         ),
     ),
     "C-JB-03": (PromptWordingVariant(None, None, "Add the two numbers."),),
     "C-JB-04": (
         PromptWordingVariant(
-            None, None, "Add the two numbers. Say whether you traded ones for a ten."
+            None, None, "Add the two numbers. Did you change ten ones into a ten?"
         ),
     ),
     "C-MCL-01": (
-        PromptWordingVariant(None, None, "Choose the number that matches the amount shown."),
+        PromptWordingVariant(None, None, "Which number shows how many?"),
     ),
     "C-MCL-02": (
-        PromptWordingVariant(None, None, "Choose which side has more, or say if they are equal."),
+        PromptWordingVariant(None, None, "Which side has more? Or are they the same?"),
     ),
     "C-MCL-03": (
         PromptWordingVariant(
-            None, None, "Compare the two numbers. Choose less than, greater than, or equal."
+            None, None, "Less than, more than, or the same?"
         ),
     ),
-    "C-MCL-04": (PromptWordingVariant(None, None, "Move the marker to the target spot on the line."),),
-    "C-NP-01": (PromptWordingVariant(None, None, "Write what comes next in the pattern."),),
-    "C-NP-02": (PromptWordingVariant(None, None, "Write what comes just before."),),
+    "C-MCL-04": (PromptWordingVariant(None, None, "Move the marker to the right spot."),),
+    "C-NP-01": (PromptWordingVariant(None, None, "What comes next?"),),
+    "C-NP-02": (PromptWordingVariant(None, None, "What comes just before?"),),
     "C-NP-03": (
-        PromptWordingVariant(None, None, "Keep counting the same way. Write what comes next."),
+        PromptWordingVariant(None, None, "Keep counting the same way. What comes next?"),
     ),
     "C-NP-04": (
         PromptWordingVariant(
-            "direction", "ascending", "Put the numbers in order, from smallest to largest."
+            "direction", "ascending", "Put these in order. Small to big."
         ),
         PromptWordingVariant(
-            "direction", "descending", "Put the numbers in order, from largest to smallest."
+            "direction", "descending", "Put these in order. Big to small."
         ),
     ),
     "C-SF-01": (
-        PromptWordingVariant(None, None, "Share the total equally. Write how many each person gets."),
+        PromptWordingVariant(None, None, "Share them equally. How many does each one get?"),
     ),
     "C-SF-02": (
         PromptWordingVariant(
-            None, None, "Split the total into equal groups of the size shown. Write the groups you made."
+            None, None, "Make equal groups of this size. Show the groups you made."
         ),
     ),
-    "C-SF-03": (PromptWordingVariant(None, None, "Split the number in half. Write the answer."),),
+    "C-SF-03": (PromptWordingVariant(None, None, "Split the number in half."),),
     "C-TC-01": (
-        PromptWordingVariant(None, None, "Take away the amount shown. Write how many are left."),
+        PromptWordingVariant(None, None, "Take away this many. How many are left?"),
     ),
     "C-TC-02": (
         PromptWordingVariant(
-            None, None, "Compare the two numbers. Write how many more or how many fewer."
+            None, None, "How many more? Or how many fewer?"
         ),
     ),
     "C-TC-03": (
-        PromptWordingVariant(None, None, "Subtract the second number from the first. Write the answer."),
+        PromptWordingVariant(None, None, "Take the second number away from the first."),
     ),
     "C-TC-04": (
         PromptWordingVariant(
             None,
             None,
-            "Subtract the second number from the first. Say whether you traded a ten for ones.",
+            "Take the second number away from the first. Did you change a ten into ones?",
         ),
     ),
 }

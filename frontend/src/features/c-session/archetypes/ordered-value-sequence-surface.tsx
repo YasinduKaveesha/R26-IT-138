@@ -31,6 +31,7 @@ import { HIT_SLOP } from '@/src/features/c-session/motor-constants';
 import { BooleanToggle } from '@/src/features/c-session/primitives/boolean-toggle';
 import { DigitKeypad } from '@/src/features/c-session/primitives/digit-keypad';
 import { ValueTokenRow } from '@/src/features/c-session/primitives/value-token-row';
+import { TaskPromptCard } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
 
 export function OrderedValueSequenceSurface({ onSubmit, task }: ArchetypeSurfaceProps) {
@@ -73,9 +74,13 @@ function EntrySceneSurface({ onSubmit, spec }: EntrySceneSurfaceProps) {
 
   return (
     <View style={styles.container}>
-      <AppText style={styles.promptText} variant="title">
-        {spec.promptText}
-      </AppText>
+      {/* The card holds the question alone here: what sits below it is the answer
+          surface itself -- the child drags or taps it -- not something they only look at. */}
+      <TaskPromptCard>
+        <AppText style={styles.promptText} variant="title">
+          {spec.promptText}
+        </AppText>
+      </TaskPromptCard>
       <ValueTokenRow
         blanks={spec.blanks}
         entryValues={entryValues}
@@ -122,9 +127,13 @@ function ArrangeSceneSurface({ onSubmit, spec }: ArrangeSceneSurfaceProps) {
   return (
     <View style={styles.arrangeContainer}>
       <View style={styles.arrangeTopBlock}>
-        <AppText style={styles.promptText} variant="title">
-          {spec.promptText}
-        </AppText>
+        {/* The card holds the question alone here: what sits below it is the answer
+            surface itself -- the child drags or taps it -- not something they only look at. */}
+        <TaskPromptCard>
+          <AppText style={styles.promptText} variant="title">
+            {spec.promptText}
+          </AppText>
+        </TaskPromptCard>
         <View style={styles.arrangeRowWrapper}>
           <ValueTokenRow mode="reorder" onChangeOrder={setOrder} values={order} />
         </View>

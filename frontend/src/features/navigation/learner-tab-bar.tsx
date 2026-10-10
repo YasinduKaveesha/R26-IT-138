@@ -2,16 +2,29 @@ import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
+import {
+  LEARNER_TAB_BAR_HEIGHT,
+  LEARNER_TAB_BAR_HEIGHT_COMPACT,
+  LEARNER_TAB_BAR_MARGIN_BOTTOM,
+} from '@/src/features/navigation/chrome-metrics';
+import { artwork } from '@/src/utils/artwork';
 import { useAdventureCharge } from '@/src/features/navigation/adventure-charge-context';
 import { colors, radius, spacing } from '@/src/theme/tokens';
 
 const tabArtwork = {
-  play: require('../../../assets/images/tabs/game.png'),
-  playSelected: require('../../../assets/images/tabs/game-selected.png'),
-  home: require('../../../assets/images/tabs/home.png'),
-  homeSelected: require('../../../assets/images/tabs/home-selected.png'),
-  profile: require('../../../assets/images/tabs/profile.png'),
-  profileSelected: require('../../../assets/images/tabs/profile-selected.png'),
+  play: artwork.tabGame,
+  playSelected: artwork.tabGameSelected,
+  home: artwork.tabHome,
+  homeSelected: artwork.tabHomeSelected,
+  profile: artwork.tabProfile,
+  profileSelected: artwork.tabProfileSelected,
+};
+
+// Re-exported; the values live in chrome-metrics.ts. See that file.
+export {
+  LEARNER_TAB_BAR_HEIGHT,
+  LEARNER_TAB_BAR_HEIGHT_COMPACT,
+  LEARNER_TAB_BAR_MARGIN_BOTTOM,
 };
 
 type LearnerTab = 'home' | 'play' | 'profile';
@@ -29,31 +42,33 @@ export function LearnerTabBar({
   const { requestPlay } = useAdventureCharge();
 
   return (
-    <View style={[styles.bottomNav, compact && styles.bottomNavCompact]}>
-      <TabItem
-        active={activeTab === 'play'}
-        accessibilityHint={playEnabled ? 'Opens adaptive games' : 'Adaptive games will be available with Component C'}
-        disabled={!playEnabled}
-        label="Play"
-        onPress={requestPlay}
-        selectedSource={tabArtwork.playSelected}
-        source={tabArtwork.play}
-      />
-      <TabItem
-        active={activeTab === 'home'}
-        label="Home"
-        onPress={() => router.replace('/(learner)/home')}
-        pressWhenActive={activeHomePressEnabled}
-        selectedSource={tabArtwork.homeSelected}
-        source={tabArtwork.home}
-      />
-      <TabItem
-        active={activeTab === 'profile'}
-        label="Profile"
-        onPress={() => router.replace('/(learner)/profile')}
-        selectedSource={tabArtwork.profileSelected}
-        source={tabArtwork.profile}
-      />
+    <View style={styles.dock}>
+      <View style={[styles.bottomNav, compact && styles.bottomNavCompact]}>
+        <TabItem
+          active={activeTab === 'play'}
+          accessibilityHint={playEnabled ? 'Opens adaptive games' : 'Adaptive games will be available with Component C'}
+          disabled={!playEnabled}
+          label="Play"
+          onPress={requestPlay}
+          selectedSource={tabArtwork.playSelected}
+          source={tabArtwork.play}
+        />
+        <TabItem
+          active={activeTab === 'home'}
+          label="Home"
+          onPress={() => router.replace('/(learner)/home')}
+          pressWhenActive={activeHomePressEnabled}
+          selectedSource={tabArtwork.homeSelected}
+          source={tabArtwork.home}
+        />
+        <TabItem
+          active={activeTab === 'profile'}
+          label="Profile"
+          onPress={() => router.replace('/(learner)/profile')}
+          selectedSource={tabArtwork.profileSelected}
+          source={tabArtwork.profile}
+        />
+      </View>
     </View>
   );
 }
@@ -114,6 +129,10 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
   },
   bottomNavCompact: { height: 61 },
+  // Kept as the bar's own wrapper. The "Play Adventure" pill briefly rendered inside it, anchored
+  // to this edge; it is now AdventureChargeProvider's full-screen popup instead, because blurring
+  // the page behind it is not something the bar can do to what is drawn above it.
+  dock: { position: 'relative' },
   navArtwork: { borderRadius: radius.lg, height: '100%', width: '100%' },
   navItem: {
     alignItems: 'center',

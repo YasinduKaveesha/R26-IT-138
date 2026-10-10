@@ -55,7 +55,7 @@ def _provenance(resource_type: str, resource_id: UUID, request_id: str, operatio
         "resource_type": resource_type,
         "resource_id": resource_id,
         "source_class": "REAL",
-        "source_system": "upadya-api",
+        "source_system": "studentapp-api",
         "environment": "live-endpoint",
         "schema_revision": SCHEMA_REVISION,
     }

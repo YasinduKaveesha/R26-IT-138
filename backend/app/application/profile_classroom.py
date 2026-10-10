@@ -25,7 +25,7 @@ def fingerprint(body: dict[str, object]) -> str:
 
 
 def provenance(user_id: UUID, request_id: str, operation: str, resource_type: str, resource_id: UUID) -> dict[str, object]:
-    return {"actor_user_id": user_id, "request_id": request_id, "operation_or_event_type": operation, "reason_code": "AUTHORIZED_PROFILE_CLASSROOM_COMMAND", "resource_type": resource_type, "resource_id": resource_id, "source_class": "REAL", "source_system": "upadya-api", "environment": "live-endpoint", "schema_revision": SCHEMA_REVISION}
+    return {"actor_user_id": user_id, "request_id": request_id, "operation_or_event_type": operation, "reason_code": "AUTHORIZED_PROFILE_CLASSROOM_COMMAND", "resource_type": resource_type, "resource_id": resource_id, "source_class": "REAL", "source_system": "studentapp-api", "environment": "live-endpoint", "schema_revision": SCHEMA_REVISION}
 
 
 class ProfileClassroomService:

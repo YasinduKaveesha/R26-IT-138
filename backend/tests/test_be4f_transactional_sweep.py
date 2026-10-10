@@ -831,7 +831,7 @@ def test_public_payloads_and_structured_logs_carry_no_forbidden_fields_across_ev
     bundle_record = asyncio.run(_ensure_engineering_test_bundle())
     learner = f"learner-be4f-privacy-scan-{uuid4()}"
 
-    caplog.set_level(logging.INFO, logger="upadya.http")
+    caplog.set_level(logging.INFO, logger="studentapp.http")
     client = client_for(learner, bundle_record=bundle_record)
     responses: list[tuple[str, dict]] = []
     try:

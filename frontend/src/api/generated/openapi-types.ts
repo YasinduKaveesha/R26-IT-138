@@ -81,10 +81,25 @@ export interface ClassroomCreateRequest {
   "name"?: string | null;
 }
 
+/**
+ * The classroom name, typed by the teacher, as the confirmation for deleting it.
+ */
+export interface ClassroomDeleteRequest {
+  "confirmation_name": string;
+}
+
+export interface ClassroomDeleteResponse {
+  "classroom_id": string;
+  "deleted_at_utc": string;
+  "removed_membership_count": number;
+  "request_id": string;
+  "row_version": number;
+}
+
 export interface ClassroomLearnerListItem {
   "learner_id": string;
   "membership_id": string;
-  "membership_state": "PENDING" | "APPROVED" | "REJECTED";
+  "membership_state": "PENDING" | "APPROVED" | "REJECTED" | "REMOVED";
   "name": string | null;
 }
 
@@ -159,7 +174,7 @@ export interface HintRequestResponse {
 export interface InviteCreateResponse {
   "classroom_invite_id": string;
   "created_at_utc": string;
-  "expires_at_utc": string;
+  "expires_at_utc"?: string | null;
   "invite_token": string | null;
   "request_id": string;
   "token_already_issued": boolean;
@@ -191,7 +206,7 @@ export interface LearnerMembershipListItem {
   "grade": "GRADE_2" | "GRADE_3";
   "membership_id": string;
   "requested_at_utc": string;
-  "state": "PENDING" | "APPROVED" | "REJECTED";
+  "state": "PENDING" | "APPROVED" | "REJECTED" | "REMOVED";
 }
 
 export interface LearnerMembershipListResponse {
@@ -209,6 +224,17 @@ export interface LearnerProfileResponse {
   "user_id": string;
 }
 
+export interface LearnerSkillStateItem {
+  "observation_count": number;
+  "p_l": number;
+  "skill_id": string;
+}
+
+export interface LearnerSkillStatesResponse {
+  "request_id": string;
+  "skill_states": (LearnerSkillStateItem)[];
+}
+
 export interface MembershipDecisionResponse {
   "classroom_id": string;
   "classroom_membership_id": string;
@@ -216,7 +242,7 @@ export interface MembershipDecisionResponse {
   "learner_id": string;
   "request_id": string;
   "row_version": number;
-  "state": "PENDING" | "APPROVED" | "REJECTED";
+  "state": "PENDING" | "APPROVED" | "REJECTED" | "REMOVED";
 }
 
 export interface MembershipRequestListItem {
@@ -225,7 +251,7 @@ export interface MembershipRequestListItem {
   "learner_id": string;
   "learner_name": string | null;
   "requested_at_utc": string;
-  "state": "PENDING" | "APPROVED" | "REJECTED";
+  "state": "PENDING" | "APPROVED" | "REJECTED" | "REMOVED";
 }
 
 export interface MembershipRequestListResponse {
@@ -240,7 +266,7 @@ export interface MembershipRequestResponse {
   "grade": "GRADE_2" | "GRADE_3";
   "request_id": string;
   "requested_at_utc": string;
-  "state": "PENDING" | "APPROVED" | "REJECTED";
+  "state": "PENDING" | "APPROVED" | "REJECTED" | "REMOVED";
 }
 
 export interface OpportunityAdvanceResponse {
@@ -285,6 +311,13 @@ export interface OpportunityPresentationResponse {
   "response_format": string;
   "server_timeout_deadline_utc": string;
   "skill_id": string;
+}
+
+export interface PresentationAckResponse {
+  "anchored": boolean;
+  "item_opportunity_id": string;
+  "request_id": string;
+  "server_timeout_deadline_utc": string;
 }
 
 export interface ProfileCreateRequest {
@@ -360,6 +393,13 @@ export type ContractOperation = {
 
 export const CONTRACT_OPERATIONS: readonly ContractOperation[] = [
   {
+    "method": "GET",
+    "path": "/api/v1/b/learner/skill-states",
+    "operationId": "get_learner_skill_states_api_v1_b_learner_skill_states_get",
+    "request": null,
+    "response": "LearnerSkillStatesResponse"
+  },
+  {
     "method": "POST",
     "path": "/api/v1/b/sessions/{session_id}/abandon",
     "operationId": "abandon_session_api_v1_b_sessions__session_id__abandon_post",
@@ -386,6 +426,13 @@ export const CONTRACT_OPERATIONS: readonly ContractOperation[] = [
     "operationId": "complete_opportunity_api_v1_b_sessions__session_id__opportunities__item_opportunity_id__complete_post",
     "request": null,
     "response": "OpportunityAdvanceResponse"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/presented",
+    "operationId": "acknowledge_presentation_api_v1_b_sessions__session_id__opportunities__item_opportunity_id__presented_post",
+    "request": null,
+    "response": "PresentationAckResponse"
   },
   {
     "method": "POST",
@@ -498,6 +545,13 @@ export const CONTRACT_OPERATIONS: readonly ContractOperation[] = [
     "operationId": "request_membership_api_v1_classroom_memberships_requests_post",
     "request": "InviteTokenRequest",
     "response": "MembershipRequestResponse"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/classrooms/{classroom_id}/delete",
+    "operationId": "delete_classroom_api_v1_classrooms__classroom_id__delete_post",
+    "request": "ClassroomDeleteRequest",
+    "response": "ClassroomDeleteResponse"
   },
   {
     "method": "POST",

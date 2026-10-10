@@ -46,6 +46,7 @@ import { accentForGameFamily } from '@/src/features/c-session/game-family-accent
 import { ANIMATION_DURATION_MS, HIT_SLOP, TOKEN_SPACING, TOKEN_TOUCH_TARGET_SIZE } from '@/src/features/c-session/motor-constants';
 import { DigitKeypad } from '@/src/features/c-session/primitives/digit-keypad';
 import { ObjectPool } from '@/src/features/c-session/primitives/object-pool';
+import { TaskPromptCard } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
 
 // C-CC-02's target_n token, enlarged 60% over the plain TOKEN_TOUCH_TARGET_SIZE (2026-08-26
@@ -213,9 +214,13 @@ function SelectAndCountScene({ accent, onSubmit, spec, totalKey }: SelectAndCoun
   if (!usesStagedFlow) {
     return (
       <View style={styles.container}>
-        <AppText style={styles.promptText} variant="title">
-          {spec.promptText}
-        </AppText>
+        {/* The card holds the question alone here: what sits below it is the answer
+            surface itself -- the child drags or taps it -- not something they only look at. */}
+        <TaskPromptCard>
+          <AppText style={styles.promptText} variant="title">
+            {spec.promptText}
+          </AppText>
+        </TaskPromptCard>
 
         <ObjectPool accent={accent} objectIds={spec.objectIds} onToggle={handleToggle} scrollable={false} selectedIds={selectedIds} />
 
@@ -228,9 +233,13 @@ function SelectAndCountScene({ accent, onSubmit, spec, totalKey }: SelectAndCoun
 
   return (
     <View style={styles.container}>
-      <AppText style={styles.promptText} variant="title">
-        {spec.promptText}
-      </AppText>
+      {/* The card holds the question alone here: what sits below it is the answer
+          surface itself -- the child drags or taps it -- not something they only look at. */}
+      <TaskPromptCard>
+        <AppText style={styles.promptText} variant="title">
+          {spec.promptText}
+        </AppText>
+      </TaskPromptCard>
 
       {phase === 'selecting' && (
         <>
@@ -315,9 +324,13 @@ function PlaceIntoBoxScene({ accent, onSubmit, spec }: PlaceIntoBoxSceneProps) {
 
   return (
     <View style={[styles.container, styles.placeIntoBoxContainer]}>
-      <AppText style={styles.promptText} variant="title">
-        {spec.promptText}
-      </AppText>
+      {/* The card holds the question alone here: what sits below it is the answer
+          surface itself -- the child drags or taps it -- not something they only look at. */}
+      <TaskPromptCard>
+        <AppText style={styles.promptText} variant="title">
+          {spec.promptText}
+        </AppText>
+      </TaskPromptCard>
 
       {spec.targetValue !== null && (
         <View style={styles.answerRow}>
