@@ -49,6 +49,7 @@ import { HIT_SLOP, TOKEN_SPACING, TOKEN_TOUCH_TARGET_SIZE } from '@/src/features
 import { UnitStepper } from '@/src/features/c-session/primitives/unit-stepper';
 import { TaskPromptCard } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { TASK_SURFACE_PADDING } from '@/src/features/c-session/task-layout';
 
 const PAYLOAD_LABEL_LINE_HEIGHT = Math.round(typography.lineHeight.sm);
 const PAYLOAD_LABEL_BLOCK_HEIGHT = PAYLOAD_LABEL_LINE_HEIGHT * 2;
@@ -160,7 +161,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.lg,
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    padding: TASK_SURFACE_PADDING,
   },
   targetHint: {
     fontFamily: typography.fonts.bold,

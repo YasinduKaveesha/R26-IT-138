@@ -53,6 +53,7 @@ import Animated, { ZoomIn } from 'react-native-reanimated';
 import { AppText } from '@/src/components/app-text';
 import { HIT_SLOP } from '@/src/features/c-session/motor-constants';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { TASK_SURFACE_PADDING } from '@/src/features/c-session/task-layout';
 
 export type AnswerFeedbackPanelProps = {
   matched: boolean;
@@ -128,7 +129,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    padding: TASK_SURFACE_PADDING,
   },
   // Every value below mirrors live-session-screen.tsx's own outcomePopup/outcomeIcon/outcomeCorrect
   // /outcomeIncorrect/outcomeText styles exactly, on request -- same blur intensity/tint, same

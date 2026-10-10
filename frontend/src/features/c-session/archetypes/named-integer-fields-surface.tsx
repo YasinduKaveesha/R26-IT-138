@@ -70,6 +70,7 @@ import {
 } from '@/src/features/c-session/primitives/named-field-row';
 import { taskPromptCardStyle } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { TASK_SURFACE_PADDING } from '@/src/features/c-session/task-layout';
 
 // A SMALLER, FIXED SIZE THAN `value-report-surface.tsx`'s own payload token, DELIBERATELY (2026-08-26
 // correction, found by the owner testing C-BT-02: the wider `* 1.6` size wraps a 4-column row --
@@ -308,7 +309,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.lg,
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    padding: TASK_SURFACE_PADDING,
   },
   // Same row shape as `payloadRow` below -- kept as its own name only so this file's JSX reads
   // clearly ("the fields row"), not because the styling itself differs.

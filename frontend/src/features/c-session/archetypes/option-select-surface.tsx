@@ -36,6 +36,7 @@ import { ObjectQuantityDisplay } from '@/src/features/c-session/primitives/objec
 import { OptionChoiceRow } from '@/src/features/c-session/primitives/option-choice-row';
 import { TaskPromptCard } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { TASK_SURFACE_PADDING } from '@/src/features/c-session/task-layout';
 
 // Matches value-report-surface.tsx's own payload-token sizing exactly (2026-08-26 user request:
 // token 60% larger, label 50% larger than the shared TOKEN_* constants) -- reused for visual
@@ -194,7 +195,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.lg,
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    padding: TASK_SURFACE_PADDING,
   },
   payloadColumn: {
     alignItems: 'center',

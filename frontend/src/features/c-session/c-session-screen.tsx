@@ -71,6 +71,7 @@ import {
   recordTechnicalIssue,
 } from '@/src/features/c-session/telemetry';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { TASK_PANEL_PADDING } from '@/src/features/c-session/task-layout';
 
 /**
  * The task's own DIFFICULTY level as a child-facing chip (owner instruction, 2026-10-10).
@@ -1022,7 +1023,8 @@ const styles = StyleSheet.create({
     borderWidth: 4,
     elevation: 5,
     maxHeight: '90%',
-    padding: spacing.smPlus,
+    // The panel's half of TASK_CONTENT_INSET; the surfaces supply the rest.
+    padding: TASK_PANEL_PADDING,
     position: 'relative',
     shadowColor: colors.foreground,
     shadowOffset: { width: 0, height: 4 },

@@ -33,6 +33,7 @@ import { DigitKeypad } from '@/src/features/c-session/primitives/digit-keypad';
 import { ValueTokenRow } from '@/src/features/c-session/primitives/value-token-row';
 import { TaskPromptCard } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { TASK_SURFACE_PADDING } from '@/src/features/c-session/task-layout';
 
 export function OrderedValueSequenceSurface({ onSubmit, task }: ArchetypeSurfaceProps) {
   const spec = useMemo(() => resolveOrderedValueSequenceSpec(task), [task]);
@@ -234,7 +235,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.lg,
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    padding: TASK_SURFACE_PADDING,
   },
   // The arrange (NP-04) scene's own layout, scoped apart from `container`/`promptText` above
   // (still used unchanged by the entry scene, NP-01..03) -- 2026-08-26 correction, found by the
@@ -248,7 +249,7 @@ const styles = StyleSheet.create({
   arrangeContainer: {
     flex: 1,
     gap: spacing.lg / 2,
-    padding: spacing.lg,
+    padding: TASK_SURFACE_PADDING,
   },
   // Groups the prompt and the token row at a small, fixed gap, with a small top margin so the
   // prompt sits slightly lower than the very top edge (2026-08-26 request).

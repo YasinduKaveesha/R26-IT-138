@@ -50,6 +50,7 @@ import { JumpAccumulator } from '@/src/features/c-session/primitives/jump-accumu
 import { UnitStepper } from '@/src/features/c-session/primitives/unit-stepper';
 import { TaskPromptCard } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { TASK_SURFACE_PADDING } from '@/src/features/c-session/task-layout';
 
 // Two-line-tall, bottom-aligned label block, same mechanism `value-report-surface.tsx` uses so a
 // label that happens to wrap does not sit its token lower than a one-line label's token.
@@ -147,7 +148,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.lg,
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    padding: TASK_SURFACE_PADDING,
   },
   payloadColumn: {
     alignItems: 'center',

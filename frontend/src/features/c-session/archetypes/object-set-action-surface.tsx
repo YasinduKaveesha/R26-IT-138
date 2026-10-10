@@ -48,6 +48,7 @@ import { DigitKeypad } from '@/src/features/c-session/primitives/digit-keypad';
 import { ObjectPool } from '@/src/features/c-session/primitives/object-pool';
 import { TaskPromptCard } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { TASK_SURFACE_PADDING } from '@/src/features/c-session/task-layout';
 
 // C-CC-02's target_n token, enlarged 60% over the plain TOKEN_TOUCH_TARGET_SIZE (2026-08-26
 // request) -- matching value-report-surface.tsx's own PAYLOAD_TOKEN_SIZE precedent exactly. No
@@ -448,7 +449,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.lg,
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    padding: TASK_SURFACE_PADDING,
   },
   // Overrides `container`'s own `justifyContent: 'space-between'` for the place-into-box scene only
   // (2026-08-26 request): the box is now unbounded and grows with `placed.length`

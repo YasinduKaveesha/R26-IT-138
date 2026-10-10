@@ -37,6 +37,7 @@ import { BooleanToggle } from '@/src/features/c-session/primitives/boolean-toggl
 import { DigitKeypad } from '@/src/features/c-session/primitives/digit-keypad';
 import { TaskPromptCard } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { TASK_SURFACE_PADDING } from '@/src/features/c-session/task-layout';
 
 // The payload tokens are a passive, read-only display -- not a touch target -- so sizing them apart
 // from TOKEN_TOUCH_TARGET_SIZE does not reopen the motor-constancy question that constant exists to
@@ -182,7 +183,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.lg,
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    padding: TASK_SURFACE_PADDING,
   },
   payloadColumn: {
     // `flex: 1` on every column -- given values AND the answer alike -- so the row divides itself

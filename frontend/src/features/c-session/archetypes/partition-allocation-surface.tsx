@@ -45,6 +45,7 @@ import { HIT_SLOP, TOKEN_SPACING, TOKEN_TOUCH_TARGET_SIZE } from '@/src/features
 import { ValueTokenRow } from '@/src/features/c-session/primitives/value-token-row';
 import { taskPromptCardStyle } from '@/src/features/c-session/task-prompt-card';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
+import { TASK_SURFACE_PADDING } from '@/src/features/c-session/task-layout';
 
 // Reproduced from `named-integer-fields-surface.tsx`'s own payload-token sizing (itself reproduced
 // from `value-report-surface.tsx`), for the same stated reason: a payload token is a read-only
@@ -145,7 +146,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.lg,
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    padding: TASK_SURFACE_PADDING,
   },
   // Reduced by a further 2/3 from spacing.lg / 4 (2026-08-26 request), so the given-value token
   // sits close under the prompt.
