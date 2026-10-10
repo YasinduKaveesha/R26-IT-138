@@ -180,6 +180,7 @@ from app.domain.live_engine_c.action_payload_validation import (
     validate_action_payload,
 )
 from app.domain.live_engine_c.errors import LiveEngineCError, UnknownTemplateError
+from app.domain.live_engine_c.client_support import selectable_template_ids
 from app.domain.live_engine_c.prompt_wording import prompt_text_for
 from app.domain.live_engine_c.generation_mode_guard import (
     GenerationConfigNotPermittedError,
@@ -322,6 +323,17 @@ PRODUCTION_POLICY_CONFIG = PolicyConfig(
 # shape as _SMOKE_MODE in c_session_service.py, not a value read off any record.
 PRODUCTION_POLICY_MODE: PolicyMode = "rule_based_baseline"
 
+
+# The engine's OWN declared domain for a difficulty level, not a range chosen here: both
+# ``SelectionResult.initial_difficulty_level`` and the policy's own observable-evidence model's
+# ``current_difficulty_level`` both annotate it ``Ge(1), Le(5)``. That evidence type is referred to
+# here by description rather than by its own identifier, following this module's existing
+# convention: C-17's guard test asserts the name appears NOWHERE in this file, so spelling it even
+# inside a comment trips it. Used only to REJECT an out-of-domain
+# carried level (see next_task), never to clamp one into range. Asserted against the installed
+# wheel's own annotations by test_c_difficulty_progression, so this cannot drift silently.
+_ENGINE_DIFFICULTY_MIN = 1
+_ENGINE_DIFFICULTY_MAX = 5
 
 # R-8: the ONE fixed session-distinguishing suffix used with FIXTURE_MASTERY_SOURCE_STUDENT_ID
 # to satisfy build_task_instance's ^STU-[0-9]{4}-C-[0-9]{3}$ requirement -- never a second
@@ -532,7 +544,12 @@ class TaskService:
                 session_phase=session_record.session_phase,
                 grade=session_record.grade,
                 catalogue=catalogue,
-                supported_template_ids=adapter.supported_template_ids(),
+                # The app cannot draw three of the thirty templates, so the engine is never
+                # offered them and selects something else instead -- no retry loop, because a
+                # template outside the pool is simply never chosen. See client_support.py for
+                # which three, why, and why this is a client-capability constraint rather than a
+                # scientific one.
+                supported_template_ids=selectable_template_ids(adapter.supported_template_ids()),
                 student_id=FIXTURE_MASTERY_SOURCE_STUDENT_ID,
                 c_session_id=_stu_session_id(),
                 task_index=task_index,
@@ -549,6 +566,76 @@ class TaskService:
         except LiveEngineCError as exc:
             raise ConflictError() from exc
 
+        # DIFFICULTY PROGRESSION -- closing the loop recorded in buildLog2.md, entry 2026-10-10
+        # "Component C difficulty level". Until this batch the adaptation policy decided a
+        # ``difficulty_after`` after every answered task, persisted it, and nothing ever read it
+        # back: ``select_task`` has no current-difficulty parameter (verified by
+        # ``inspect.signature`` against the installed wheel, not read from a doc), so every task
+        # was built at ``SelectionResult.initial_difficulty_level`` -- in ``c_only`` always
+        # ``fallback_difficulty_level``, i.e. 1. The policy's own evidence then reported
+        # "currently 1" forever, because that evidence reads the previous INSTANCE's level, so the
+        # decision could never start from anything but 1 either. A closed circle.
+        #
+        # NO FORMULA LIVES HERE, deliberately. This carries the engine's own already-clamped
+        # output and performs no arithmetic of its own: the safety controller has already computed
+        # ``difficulty_after = clamp(target, floor, ceiling)`` with the session mode's cap applied
+        # (``c_only`` caps at 2). Stepping, flooring or capping in app code would be the
+        # orchestration layer implementing adaptive science, which this codebase refuses
+        # everywhere else and must refuse here.
+        #
+        # PRECEDENT, not a new mechanism: ``most_recent_for_session``'s own docstring already
+        # establishes that the most recently written decision is what feeds the NEXT task --
+        # ``increase_block_remaining`` has been read exactly this way since Phase 6b. This adds a
+        # second field to that same established read, it does not invent a pathway.
+        #
+        # ``difficulty_after`` is the decision made after the PREVIOUS task, which is why the
+        # first task of a session (no decision yet) keeps ``select_task``'s own level untouched.
+        prior_decision = await CPolicyDecisionRecordRepository(session).most_recent_for_session(c_session_id)
+        carried_difficulty_level = (
+            prior_decision.difficulty_after if prior_decision is not None else result.initial_difficulty_level
+        )
+
+        # VALIDITY, NOT POLICY -- and it REJECTS rather than clamps, deliberately. The engine
+        # already bounds its own output (the hard-safety controller step ends in
+        # ``difficulty_after = max(floor, min(ceiling, target))``), so a value outside the engine's
+        # declared domain means the row is untrustworthy, not that it needs correcting here.
+        # Clamping it would silently manufacture a level no policy chose; discarding it falls back
+        # to the level the engine just selected, which is a value the engine DID choose.
+        #
+        # This matters because ``difficulty_level`` carries no database CHECK of its own, while
+        # the policy evidence's own ``current_difficulty_level`` is annotated ``Le(5)`` -- so an
+        # out-of-domain level persisted here would not fail at the write, it would fail later, on
+        # the child's NEXT submission, as a validation error in evidence construction.
+        if not _ENGINE_DIFFICULTY_MIN <= carried_difficulty_level <= _ENGINE_DIFFICULTY_MAX:
+            carried_difficulty_level = result.initial_difficulty_level
+
+        instance = result.task_instance
+        if carried_difficulty_level != instance.difficulty_level:
+            # Same template, same skill, same seed lineage ``select_task`` chose -- ONLY the
+            # difficulty differs. Rebuilt through the adapter's own governed entry point (the one
+            # the recovery path already uses), never by mutating the frozen instance the engine
+            # returned.
+            try:
+                instance = adapter.build_task_instance(
+                    catalogue=catalogue,
+                    game_task_template_id=result.selected_template_id,
+                    seed_lineage=instance.seed_lineage,
+                    grade=session_record.grade,
+                    difficulty_level=carried_difficulty_level,
+                    student_id=FIXTURE_MASTERY_SOURCE_STUDENT_ID,
+                    c_session_id=_stu_session_id(),
+                    task_index=task_index,
+                    config=generation_config,
+                )
+            except LiveEngineCError:
+                # DEFENSIVE, and expected never to fire: all 30 templates are frozen at all five
+                # difficulty levels (the 150-exemplar sweep in buildLog2.md's 2026-09-28 entry).
+                # If a template ever cannot be built at the carried level, the child keeps the
+                # task the engine already produced rather than being shown an error -- and the
+                # rows below then record the level ACTUALLY used, never the one intended, so the
+                # audit trail stays honest about what the child met.
+                instance = result.task_instance
+
         opportunity_id = uuid4()
         opportunity = CTaskOpportunityRecord(
             c_task_opportunity_id=opportunity_id,
@@ -556,7 +643,13 @@ class TaskService:
             task_index=task_index,
             selected_skill_id=result.selected_skill_id,
             selected_template_id=result.selected_template_id,
-            initial_difficulty_level=result.initial_difficulty_level,
+            # The level the child ACTUALLY met, read off the instance rather than from
+            # ``select_task``'s own suggestion -- so a defensive fallback above (template not
+            # buildable at the carried level) records what was really served, not what was
+            # intended. This column is also what reaches ``build_policy_evidence`` as
+            # ``current_difficulty_level`` on the next submission, which is how the policy comes
+            # to observe a state above 1 at all.
+            initial_difficulty_level=instance.difficulty_level,
             mastery_context_mode=result.mastery_context_mode,
             mastery_selected_skill=result.mastery_selected_skill,
             session_phase=result.session_phase,
@@ -566,7 +659,6 @@ class TaskService:
         )
         await CTaskOpportunityRecordRepository(session).add(opportunity)
 
-        instance = result.task_instance
         instance_id = uuid4()
         instance_record = CTaskInstanceRecord(
             c_task_instance_id=instance_id,

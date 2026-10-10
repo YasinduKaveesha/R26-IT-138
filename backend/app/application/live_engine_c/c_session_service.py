@@ -55,7 +55,6 @@ from app.domain.live_engine_c.types import AttendanceStatus, Grade, SessionMode
 from app.infrastructure.live_engine_c.adapter import LiveEngineCAdapter
 from app.infrastructure.persistence_models import CSessionRecord
 from app.infrastructure.repositories import (
-    AppUserLearnerLinkRepository,
     AppUserRepository,
     CRuntimeBundleRecordRepository,
 )
@@ -109,10 +108,18 @@ def _fields(record: CSessionRecord) -> CSessionFields:
 
 
 async def _require_learner_id(session: AsyncSession, principal_user_id: str) -> UUID:
-    user = await AppUserRepository(session).find_by_subject(principal_user_id)
-    if user is None:
+    """The learner behind a principal, in one round trip.
+
+    DELIBERATELY NO `profile_type` CHECK, unlike Component B's equivalents. This function never had
+    one: it rejects an unknown subject and a subject with no learner link, and nothing else. The
+    join below changes the number of round trips and nothing about that -- adding the
+    LEARNER/ForbiddenError branch here would be an authorization change wearing a performance
+    change's clothes, which is not what this edit is.
+    """
+    found = await AppUserRepository(session).find_with_learner_link_by_subject(principal_user_id)
+    if found is None:
         raise ResourceNotFoundError()
-    link = await AppUserLearnerLinkRepository(session).find_by_user(user.user_id)
+    _user, link = found
     if link is None:
         raise ResourceNotFoundError()
     return link.learner_id

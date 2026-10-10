@@ -50,6 +50,12 @@ export type SessionPlan =
       kind: 'render';
       spec: RendererSpec;
       stem: string;
+      // The server's authored instruction sentence for templates whose stem is not a question on
+      // its own -- "Guess the next number." above a bare "2, 3, 4, __". Server-supplied and
+      // relayed verbatim, exactly like `stem`: the app never composes one (see the backend's
+      // app/domain/live_engine/prompt_instructions.py for why it is authored there). `null` for
+      // every template whose stem already states its own task, which is most of them.
+      instruction: string | null;
       // The whole prompt payload, carried through unmodified for FE-3g's visual registry to read.
       // `stem` above stays the only *text* taken from it; this is not a licence to render arbitrary
       // keys as prose. Nothing here inspects or transforms it — the registry decides what is
@@ -89,6 +95,19 @@ export function readPromptStem(prompt: Record<string, unknown>): string | null {
 }
 
 /**
+ * The server's authored instruction, when the template has one. Read exactly like `stem` -- a
+ * non-string or blank value is `null`, never a guess. A missing instruction is the normal case
+ * (most stems ask their own question) and is NOT an unrenderable item: unlike `stem`, this being
+ * absent never blocks the question, it just means there is no extra sentence to draw.
+ */
+export function readPromptInstruction(prompt: Record<string, unknown>): string | null {
+  const instruction = prompt.instruction;
+  if (typeof instruction !== 'string') return null;
+  const trimmed = instruction.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
  * `presented_choices` is passed to the registry — and from there to the screen — in the server's
  * order, untouched. The server sorts lexicographically, so a child may see 10, 3, 9; that is a
  * backend issue tracked separately, and re-sorting here would be the client transforming server
@@ -121,6 +140,7 @@ export function planPresentation(
     kind: 'render',
     spec,
     stem,
+    instruction: readPromptInstruction(presentation.prompt),
     promptPayload: presentation.prompt,
     skillLabel: formatSkillLabel(presentation.skill_id),
     skillId: presentation.skill_id,

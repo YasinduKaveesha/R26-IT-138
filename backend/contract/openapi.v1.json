@@ -396,6 +396,57 @@
         "title": "ClassroomCreateRequest",
         "type": "object"
       },
+      "ClassroomDeleteRequest": {
+        "additionalProperties": false,
+        "description": "The classroom name, typed by the teacher, as the confirmation for deleting it.",
+        "properties": {
+          "confirmation_name": {
+            "title": "Confirmation Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation_name"
+        ],
+        "title": "ClassroomDeleteRequest",
+        "type": "object"
+      },
+      "ClassroomDeleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "classroom_id": {
+            "format": "uuid",
+            "title": "Classroom Id",
+            "type": "string"
+          },
+          "deleted_at_utc": {
+            "format": "date-time",
+            "title": "Deleted At Utc",
+            "type": "string"
+          },
+          "removed_membership_count": {
+            "title": "Removed Membership Count",
+            "type": "integer"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "row_version": {
+            "title": "Row Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "classroom_id",
+          "deleted_at_utc",
+          "removed_membership_count",
+          "row_version",
+          "request_id"
+        ],
+        "title": "ClassroomDeleteResponse",
+        "type": "object"
+      },
       "ClassroomLearnerListItem": {
         "additionalProperties": false,
         "properties": {
@@ -413,7 +464,8 @@
             "enum": [
               "PENDING",
               "APPROVED",
-              "REJECTED"
+              "REJECTED",
+              "REMOVED"
             ],
             "title": "Membership State",
             "type": "string"
@@ -732,9 +784,17 @@
             "type": "string"
           },
           "expires_at_utc": {
-            "format": "date-time",
-            "title": "Expires At Utc",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the code stops resolving. NULL for a classroom join code, which does not expire: a teacher reads it aloud to a room and children write it down, so it stays valid until the classroom is deleted.",
+            "title": "Expires At Utc"
           },
           "invite_token": {
             "anyOf": [
@@ -762,7 +822,6 @@
           "classroom_invite_id",
           "invite_token",
           "token_already_issued",
-          "expires_at_utc",
           "created_at_utc",
           "request_id"
         ],
@@ -915,7 +974,8 @@
             "enum": [
               "PENDING",
               "APPROVED",
-              "REJECTED"
+              "REJECTED",
+              "REMOVED"
             ],
             "title": "State",
             "type": "string"
@@ -1010,6 +1070,55 @@
         "title": "LearnerProfileResponse",
         "type": "object"
       },
+      "LearnerSkillStateItem": {
+        "additionalProperties": false,
+        "properties": {
+          "observation_count": {
+            "minimum": 0.0,
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "p_l": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "P L",
+            "type": "number"
+          },
+          "skill_id": {
+            "title": "Skill Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_id",
+          "p_l",
+          "observation_count"
+        ],
+        "title": "LearnerSkillStateItem",
+        "type": "object"
+      },
+      "LearnerSkillStatesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "skill_states": {
+            "items": {
+              "$ref": "#/components/schemas/LearnerSkillStateItem"
+            },
+            "title": "Skill States",
+            "type": "array"
+          }
+        },
+        "required": [
+          "skill_states",
+          "request_id"
+        ],
+        "title": "LearnerSkillStatesResponse",
+        "type": "object"
+      },
       "MembershipDecisionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1045,7 +1154,8 @@
             "enum": [
               "PENDING",
               "APPROVED",
-              "REJECTED"
+              "REJECTED",
+              "REMOVED"
             ],
             "title": "State",
             "type": "string"
@@ -1108,7 +1218,8 @@
             "enum": [
               "PENDING",
               "APPROVED",
-              "REJECTED"
+              "REJECTED",
+              "REMOVED"
             ],
             "title": "State",
             "type": "string"
@@ -1192,7 +1303,8 @@
             "enum": [
               "PENDING",
               "APPROVED",
-              "REJECTED"
+              "REJECTED",
+              "REMOVED"
             ],
             "title": "State",
             "type": "string"
@@ -1402,6 +1514,36 @@
           "request_id"
         ],
         "title": "OpportunityPresentationResponse",
+        "type": "object"
+      },
+      "PresentationAckResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "anchored": {
+            "title": "Anchored",
+            "type": "boolean"
+          },
+          "item_opportunity_id": {
+            "title": "Item Opportunity Id",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "server_timeout_deadline_utc": {
+            "format": "date-time",
+            "title": "Server Timeout Deadline Utc",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_opportunity_id",
+          "server_timeout_deadline_utc",
+          "anchored",
+          "request_id"
+        ],
+        "title": "PresentationAckResponse",
         "type": "object"
       },
       "ProfileCreateRequest": {
@@ -1711,6 +1853,27 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/b/learner/skill-states": {
+      "get": {
+        "operationId": "get_learner_skill_states_api_v1_b_learner_skill_states_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearnerSkillStatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Learner Skill States",
+        "tags": [
+          "b-learner"
+        ]
+      }
+    },
     "/api/v1/b/sessions": {
       "post": {
         "operationId": "start_session_api_v1_b_sessions_post",
@@ -1886,6 +2049,7 @@
     },
     "/api/v1/b/sessions/{session_id}/opportunities": {
       "post": {
+        "description": "The question the child answers next, in the language they read.\n\n``Accept-Language`` rather than a new field or a stored profile column: it is the standard way\nto say this, it is a CORS-safelisted request header so the browser sends it without a preflight\nchange, and it needs no migration. An absent or unrecognised value resolves to English\n(``locales.DEFAULT_LOCALE``), so this is additive -- an older client that sends nothing keeps\nexactly the behaviour it has now.",
         "operationId": "select_opportunity_api_v1_b_sessions__session_id__opportunities_post",
         "parameters": [
           {
@@ -1896,6 +2060,22 @@
               "format": "uuid",
               "title": "Session Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Accept-Language"
             }
           }
         ],
@@ -2050,6 +2230,60 @@
           }
         },
         "summary": "Complete Opportunity",
+        "tags": [
+          "b-session-lifecycle"
+        ]
+      }
+    },
+    "/api/v1/b/sessions/{session_id}/opportunities/{item_opportunity_id}/presented": {
+      "post": {
+        "description": "The learner is now looking at this question -- start its answering clock here.\n\nNo idempotency key and no body, for the same reason `select_opportunity` has neither: the\noperation is intrinsically once-only (the first acknowledgement anchors, every later one is a\nno-op returning the same deadline), so a key would add a token to manage without adding a\nguarantee. 200 rather than 201: nothing is created, an existing row is anchored.",
+        "operationId": "acknowledge_presentation_api_v1_b_sessions__session_id__opportunities__item_opportunity_id__presented_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_opportunity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Opportunity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentationAckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acknowledge Presentation",
         "tags": [
           "b-session-lifecycle"
         ]
@@ -2817,6 +3051,70 @@
           }
         },
         "summary": "Get Classroom",
+        "tags": [
+          "profiles-and-classrooms"
+        ]
+      }
+    },
+    "/api/v1/classrooms/{classroom_id}/delete": {
+      "post": {
+        "operationId": "delete_classroom_api_v1_classrooms__classroom_id__delete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "classroom_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Classroom Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassroomDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassroomDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Classroom",
         "tags": [
           "profiles-and-classrooms"
         ]

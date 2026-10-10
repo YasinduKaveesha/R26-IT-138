@@ -61,3 +61,6 @@ Thumbs.db
 !/Component_B_Backend_Overview.md
 !/Component_B_Measurement_And_Parity_Review.md
 !/Component_B_Backend_Work_Order.md
+.playwright-mcp/
+.claude/
+CLAUDE.md

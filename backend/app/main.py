@@ -10,6 +10,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.b_learner import router as b_learner_router
 from app.api.routes.b_session import router as b_session_router
 from app.api.routes.c_session import router as c_session_router
 from app.api.routes.c_task import router as c_task_router
@@ -25,7 +26,7 @@ from app.infrastructure.database import dispose_database
 
 
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
-logger = logging.getLogger("upadya.http")
+logger = logging.getLogger("studentapp.http")
 
 
 def accepted_request_id(value: str | None) -> str:
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
     application.include_router(profile_classroom_router)
     application.include_router(classroom_membership_router)
     application.include_router(b_session_router)
+    application.include_router(b_learner_router)
     application.include_router(c_session_router)
     application.include_router(c_task_router)
     return application

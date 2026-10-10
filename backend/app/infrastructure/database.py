@@ -11,16 +11,26 @@ asyncpg and are normalised here rather than being left for whoever pastes it to 
    silently dropped. (asyncpg's own default is ``prefer``, which would negotiate TLS against a
    provider that requires it anyway -- but ``prefer`` does not *insist*, so a string that asked
    for ``require`` must keep asking for it.)
-2. A **transaction-mode connection pooler** (Supabase's port 6543, and the ``pooler`` hostnames)
-   multiplexes many clients onto few server connections, which breaks asyncpg's prepared-statement
-   cache -- the symptom is an intermittent ``prepared statement "__asyncpg_stmt_x__" does not
-   exist`` under concurrency, not a clean failure at startup. Both caches are disabled when a
-   pooler is detected: asyncpg's via ``statement_cache_size``, SQLAlchemy's via the dialect's own
+2. A **transaction-mode connection pooler** (Supabase's port 6543) multiplexes many clients onto
+   few server connections, which breaks asyncpg's prepared-statement cache -- the symptom is an
+   intermittent ``prepared statement "__asyncpg_stmt_x__" does not exist`` under concurrency, not
+   a clean failure at startup. Both caches are disabled when a transaction pooler is detected:
+   asyncpg's via ``statement_cache_size``, SQLAlchemy's via the dialect's own
    ``prepared_statement_cache_size`` URL parameter.
 
-Detection is by port and hostname only. A local Docker ``DATABASE_URL`` carries no query string and
-no pooler port, so it is passed through completely unchanged -- this note describes an addition,
-not a change to how local development already worked.
+   Detection is **by port only**, and that is load-bearing. It used to also treat any hostname
+   containing ``pooler.`` as transaction-mode, which is wrong: Supabase serves *session*-mode
+   Supavisor on port 5432 of that same ``...pooler.supabase.com`` hostname. Session mode gives
+   each client its own dedicated backend for the life of the connection, so prepared statements
+   are perfectly safe there -- and the hostname rule was silently disabling them for every
+   session-pooler deployment. The cost was not subtle: with the cache off, each statement needs a
+   PARSE round trip before it can execute, so every query paid two round trips instead of one.
+   Measured against ap-southeast-1 (~65ms RTT) that was ~148ms per repeated statement instead of
+   ~71ms, and the endpoints here issue 3-19 sequential statements each.
+
+A local Docker ``DATABASE_URL`` carries no query string and no pooler port, so it is passed
+through completely unchanged -- this note describes an addition, not a change to how local
+development already worked.
 
 ``pg_advisory_xact_lock`` (used for session/attempt idempotency across eight call sites) is
 transaction-scoped and therefore safe under transaction pooling. A session-scoped advisory lock
@@ -70,9 +80,13 @@ _TRANSACTION_POOLER_PORT = 6543
 
 
 def _is_transaction_pooler(host: str | None, port: int | None) -> bool:
-    if port == _TRANSACTION_POOLER_PORT:
-        return True
-    return bool(host and "pooler." in host.lower())
+    """True only for a transaction-mode pooler, which on Supabase means port 6543.
+
+    `host` is accepted and deliberately unused: a hostname cannot distinguish Supabase's
+    transaction pooler from its session pooler -- both live on `...pooler.supabase.com` -- and
+    only the port can. See the module docstring.
+    """
+    return port == _TRANSACTION_POOLER_PORT
 
 
 def async_database_url(database_url: str) -> str:
@@ -124,7 +138,19 @@ def asyncpg_connect_args(database_url: str) -> dict[str, Any]:
 _settings = get_settings()
 engine: AsyncEngine = create_async_engine(
     async_database_url(_settings.database_url),
-    pool_pre_ping=True,
+    # `pool_pre_ping` validates every checkout with a round trip to the server. Against a remote
+    # managed database that is the single most expensive thing in a short request: measured at
+    # ~280ms per request against ap-southeast-1, on requests whose real work was one SELECT.
+    # `pool_recycle` buys the same protection against provider-side idle disconnects by retiring
+    # connections on age instead, which costs nothing per request. Pre-ping stays available via
+    # DB_POOL_PRE_PING for a network where per-checkout validation is genuinely wanted.
+    pool_pre_ping=_settings.db_pool_pre_ping,
+    pool_recycle=_settings.db_pool_recycle_seconds,
+    # Explicit, and smaller than SQLAlchemy's defaults on purpose -- see Settings.db_pool_size:
+    # Supabase session mode allows 15 client connections per project in total, and the library
+    # default of 5+10 would let one process claim all of them.
+    pool_size=_settings.db_pool_size,
+    max_overflow=_settings.db_max_overflow,
     connect_args=asyncpg_connect_args(_settings.database_url),
 )
 session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
