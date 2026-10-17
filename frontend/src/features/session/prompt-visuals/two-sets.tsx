@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, View } from 'react-native';
 
 import type { TwoSetsVisual } from '@/src/features/session/prompt-visuals/types';
@@ -21,27 +22,23 @@ function SetPanel({ count, label }: { count: number; label: string }) {
   return (
     <View accessibilityLabel={label} style={styles.panel}>
       {Array.from({ length: count }).map((_, index) => (
-        <View
-          accessibilityLabel="Circle"
-          accessibilityRole="image"
-          accessible
-          key={index}
-          style={styles.object}
-        />
+        <View accessibilityLabel="Star" accessibilityRole="image" accessible key={index}>
+          <Ionicons color={colors.accentBlue} name="star" size={OBJECT_SIZE} />
+        </View>
       ))}
     </View>
   );
 }
 
 // Counts are deliberately absent from every label here. On "compare the two sets", announcing
-// "3 circles" and "5 circles" states which group is larger — that is the answer, read aloud. The
+// "3 stars" and "5 stars" states which group is larger — that is the answer, read aloud. The
 // objects are individually focusable and unnumbered instead, so a screen-reader user compares by
 // traversing each group, as a sighted child compares by looking. See object-set.tsx for the
 // broader limitation: a visual comparison construct may not be fully accessible by any labelling,
 // which is a study-design question rather than an implementation one.
 export function TwoSets({ visual }: { visual: TwoSetsVisual }) {
   return (
-    <View accessibilityLabel="Two groups of circles to compare" style={styles.row}>
+    <View accessibilityLabel="Two groups of stars to compare" style={styles.row}>
       <SetPanel count={visual.setA} label="First group" />
       <View style={styles.divider} />
       <SetPanel count={visual.setB} label="Second group" />
@@ -51,14 +48,6 @@ export function TwoSets({ visual }: { visual: TwoSetsVisual }) {
 
 const styles = StyleSheet.create({
   divider: { backgroundColor: colors.border, width: 2 },
-  object: {
-    backgroundColor: colors.accentBlue,
-    borderColor: colors.surface1,
-    borderRadius: OBJECT_SIZE / 2,
-    borderWidth: 1,
-    height: OBJECT_SIZE,
-    width: OBJECT_SIZE,
-  },
   panel: {
     alignContent: 'center',
     alignItems: 'center',

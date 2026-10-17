@@ -40,6 +40,7 @@
 // Ids are never rendered as text -- only positional state (selected / not) is visible, matching
 // `object-quantity-display.tsx`'s own "no digit, ever" doctrine for the adjacent primitive.
 
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -49,7 +50,7 @@ import {
   TOKEN_SPACING,
   TOKEN_TOUCH_TARGET_SIZE,
 } from '@/src/features/c-session/motor-constants';
-import { radius } from '@/src/theme/tokens';
+import { colors, radius } from '@/src/theme/tokens';
 
 // A LAYOUT bound on how many rows are visible before the pool scrolls internally, not a catalogue
 // constraint -- same "bound the display, not the data" doctrine `jump-accumulator.tsx`'s own
@@ -129,8 +130,13 @@ export function ObjectPool({ accent, disabled = false, objectIds, onToggle, scro
           isSelected && { backgroundColor: accent },
           disabled && styles.objectDisabled,
           pressed && !disabled && styles.pressed,
-        ]}
-      />
+        ]}>
+        <MaterialCommunityIcons
+          color={isSelected ? colors.surface1 : accent}
+          name={isSelected ? OBJECT_ICON_SELECTED : OBJECT_ICON_UNSELECTED}
+          size={Math.round(TOKEN_TOUCH_TARGET_SIZE * 0.62)}
+        />
+      </Pressable>
     );
   });
 
@@ -145,13 +151,33 @@ export function ObjectPool({ accent, disabled = false, objectIds, onToggle, scro
   );
 }
 
+// APPLES, not plain discs (owner request, 2026-10-18).
+//
+// SELECTION IS STILL UNMISTAKABLE, which is the only thing that made the old disc work: an
+// unselected object was a translucent accent fill and a selected one was solid. That contrast is
+// preserved by swapping the GLYPH rather than only the colour -- `food-apple-outline` when
+// unselected, the filled `food-apple` when selected -- so the state is carried by shape as well as
+// by fill, and does not depend on a child distinguishing two tints of one colour.
+//
+// AN ICON GLYPH, NOT AN EMOJI. An earlier attempt elsewhere in this codebase used an emoji and it
+// "did not render consistently and showed as a placeholder box" (unit-stepper.tsx's `targetDot`).
+// MaterialCommunityIcons ships its own font through `@expo/vector-icons`, already a dependency, so
+// the apple renders identically on web, iOS and Android.
+//
+// The touch target is UNCHANGED at TOKEN_TOUCH_TARGET_SIZE -- the Pressable still owns the box and
+// the icon sits inside it, so nothing about reachability moves.
+const OBJECT_ICON_SELECTED = 'food-apple' as const;
+const OBJECT_ICON_UNSELECTED = 'food-apple-outline' as const;
+
 const styles = StyleSheet.create({
   // Fill and border colour are both applied inline per-object, from the family accent -- see
   // hexToRgba/UNSELECTED_FILL_ALPHA above. No static colour here.
   object: {
+    alignItems: 'center',
     borderRadius: radius.pill,
     borderWidth: 2,
     height: TOKEN_TOUCH_TARGET_SIZE,
+    justifyContent: 'center',
     width: TOKEN_TOUCH_TARGET_SIZE,
   },
   objectDisabled: { opacity: 0.55 },
