@@ -30,13 +30,9 @@ function Panel({ count, label }: { count: number; label: string }) {
           <AppText style={styles.none}>empty</AppText>
         ) : (
           Array.from({ length: count }).map((_unused, index) => (
-            <View
-              accessibilityLabel="Circle"
-              accessibilityRole="image"
-              accessible
-              key={index}
-              style={styles.object}
-            />
+<View accessibilityLabel="Star" accessibilityRole="image" accessible key={index}>
+              <Ionicons color={colors.accentBlue} name="star" size={OBJECT_SIZE} />
+            </View>
           ))
         )}
       </View>
@@ -46,7 +42,7 @@ function Panel({ count, label }: { count: number; label: string }) {
 
 export function BeforeAfter({ visual }: { visual: BeforeAfterVisual }) {
   return (
-    <View accessibilityLabel="Two groups of circles, before and after" style={styles.row}>
+    <View accessibilityLabel="Two groups of stars, before and after" style={styles.row}>
       <Panel count={visual.before} label="Before" />
       <Ionicons color={colors.textMuted} name="arrow-forward" size={20} />
       <Panel count={visual.after} label="After" />
@@ -58,14 +54,6 @@ const OBJECT_SIZE = 18;
 
 const styles = StyleSheet.create({
   none: { color: colors.textMuted, fontSize: typography.fontSize.xs },
-  object: {
-    backgroundColor: colors.accentBlue,
-    borderColor: colors.surface1,
-    borderRadius: OBJECT_SIZE / 2,
-    borderWidth: 1,
-    height: OBJECT_SIZE,
-    width: OBJECT_SIZE,
-  },
   panel: {
     // Both panels are identical in size and styling so that only the number of objects can differ —
     // a panel that looked different for any other reason would be a cue about the answer.

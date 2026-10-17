@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, View } from 'react-native';
 
 import type { TakeAwayVisual } from '@/src/features/session/prompt-visuals/types';
@@ -19,19 +20,27 @@ export function TakeAway({ visual }: { visual: TakeAwayVisual }) {
   const remaining = visual.total - visual.removed;
 
   return (
-    <View accessibilityLabel="A group of circles, with some taken away" style={styles.tray}>
+    <View accessibilityLabel="A group of stars, with some taken away" style={styles.tray}>
       {Array.from({ length: visual.total }).map((_unused, index) => {
         const isRemoved = index >= remaining;
         return (
           <View
             // Individually focusable, unnumbered, and distinguishing only kept from taken away — the
             // same information a sighted child gets, with no quantity stated.
-            accessibilityLabel={isRemoved ? 'Circle, taken away' : 'Circle'}
+            accessibilityLabel={isRemoved ? 'Star, taken away' : 'Star'}
             accessibilityRole="image"
             accessible
             key={index}
             style={styles.slot}>
-            <View style={[styles.object, isRemoved && styles.objectRemoved]} />
+            {/* A star, not a disc (owner request, 2026-10-18). The TAKEN-AWAY treatment is
+                unchanged and still doubled up: the glyph fades AND keeps its strike, so "removed"
+                never depends on colour alone. */}
+            <Ionicons
+              color={isRemoved ? colors.borderStrong : colors.accentBlue}
+              name="star"
+              size={OBJECT_SIZE}
+              style={isRemoved ? styles.objectRemoved : undefined}
+            />
             {isRemoved ? <View style={styles.strike} /> : null}
           </View>
         );
@@ -43,19 +52,7 @@ export function TakeAway({ visual }: { visual: TakeAwayVisual }) {
 const OBJECT_SIZE = 28;
 
 const styles = StyleSheet.create({
-  object: {
-    backgroundColor: colors.accentBlue,
-    borderColor: colors.surface1,
-    borderRadius: OBJECT_SIZE / 2,
-    borderWidth: 2,
-    height: OBJECT_SIZE,
-    width: OBJECT_SIZE,
-  },
-  objectRemoved: {
-    backgroundColor: colors.surface3,
-    borderColor: colors.borderStrong,
-    opacity: 0.55,
-  },
+  objectRemoved: { opacity: 0.55 },
   slot: {
     alignItems: 'center',
     height: OBJECT_SIZE,

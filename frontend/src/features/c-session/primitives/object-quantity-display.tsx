@@ -55,6 +55,7 @@
 // uniform-and-neutral doctrine above; and the wrap-never-a-fixed-count discipline, for the same
 // representation-neutrality reason. What 10e should NOT reuse: this component itself.
 
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StyleSheet, View } from 'react-native';
 
 import { OBJECT_TOKEN_SIZE, OBJECT_TOKEN_SPACING } from '@/src/features/c-session/motor-constants';
@@ -80,8 +81,16 @@ export function ObjectQuantityDisplay({ count }: ObjectQuantityDisplayProps) {
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
           key={index}
-          style={styles.object}
-        />
+          style={styles.object}>
+          {/* Apples rather than plain discs (owner request, 2026-10-18). An icon glyph, never an
+              emoji -- see object-pool.tsx for why. The surrounding box keeps its size, so the
+              quantity-blind labelling and the layout are both untouched. */}
+          <MaterialCommunityIcons
+            color={colors.primary}
+            name="food-apple"
+            size={Math.round(OBJECT_TOKEN_SIZE * 0.66)}
+          />
+        </View>
       ))}
     </View>
   );
@@ -89,11 +98,13 @@ export function ObjectQuantityDisplay({ count }: ObjectQuantityDisplayProps) {
 
 const styles = StyleSheet.create({
   object: {
+    alignItems: 'center',
     backgroundColor: colors.primarySoft,
     borderColor: colors.border,
     borderRadius: radius.pill,
     borderWidth: 2,
     height: OBJECT_TOKEN_SIZE,
+    justifyContent: 'center',
     width: OBJECT_TOKEN_SIZE,
   },
   row: {
