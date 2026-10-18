@@ -55,11 +55,12 @@
 // uniform-and-neutral doctrine above; and the wrap-never-a-fixed-count discipline, for the same
 // representation-neutrality reason. What 10e should NOT reuse: this component itself.
 
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StyleSheet, View } from 'react-native';
 
 import { OBJECT_TOKEN_SIZE, OBJECT_TOKEN_SPACING } from '@/src/features/c-session/motor-constants';
-import { colors, radius } from '@/src/theme/tokens';
+import { AppText } from '@/src/components/app-text';
+import { pickCountableEmoji } from '@/src/utils/countable-emoji';
+
 
 // See the header's own "DEFENSE IN DEPTH" note -- kept numerically equal to, but independent of,
 // option-select-logic.ts's MAX_QUANTITY.
@@ -72,6 +73,10 @@ export type ObjectQuantityDisplayProps = {
 };
 
 export function ObjectQuantityDisplay({ count }: ObjectQuantityDisplayProps) {
+  // Seeded from the quantity itself -- this display has no id of its own, and `count` is the only
+  // stable thing it receives. Stable across re-renders, which is what matters; two questions that
+  // happen to show the same quantity will show the same fruit, which is harmless.
+  const emoji = pickCountableEmoji(`quantity-${count}`);
   const renderCount = Math.max(0, Math.min(count, RENDER_CAP));
 
   return (
@@ -82,14 +87,10 @@ export function ObjectQuantityDisplay({ count }: ObjectQuantityDisplayProps) {
           importantForAccessibility="no-hide-descendants"
           key={index}
           style={styles.object}>
-          {/* Apples rather than plain discs (owner request, 2026-10-18). An icon glyph, never an
-              emoji -- see object-pool.tsx for why. The surrounding box keeps its size, so the
-              quantity-blind labelling and the layout are both untouched. */}
-          <MaterialCommunityIcons
-            color={colors.primary}
-            name="food-apple"
-            size={Math.round(OBJECT_TOKEN_SIZE * 0.66)}
-          />
+          {/* The emoji IS the object -- no disc behind it (owner request, 2026-10-18). The box
+              keeps its size so the row's layout and the quantity-blind labelling above are both
+              untouched. */}
+          <AppText style={styles.glyphText}>{emoji}</AppText>
         </View>
       ))}
     </View>
@@ -97,12 +98,11 @@ export function ObjectQuantityDisplay({ count }: ObjectQuantityDisplayProps) {
 }
 
 const styles = StyleSheet.create({
+  glyphText: { fontSize: Math.round(OBJECT_TOKEN_SIZE * 0.72), lineHeight: Math.round(OBJECT_TOKEN_SIZE * 0.9) },
+  // Sized box, no disc: it reserves the same space the filled circle did so the row wraps
+  // identically, but draws nothing of its own.
   object: {
     alignItems: 'center',
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.border,
-    borderRadius: radius.pill,
-    borderWidth: 2,
     height: OBJECT_TOKEN_SIZE,
     justifyContent: 'center',
     width: OBJECT_TOKEN_SIZE,

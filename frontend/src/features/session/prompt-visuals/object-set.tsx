@@ -1,8 +1,8 @@
-import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/app-text';
 import type { ObjectSetVisual } from '@/src/features/session/prompt-visuals/types';
+import { labelForCountableEmoji, pickCountableEmoji } from '@/src/utils/countable-emoji';
 import { colors, radius, spacing, typography } from '@/src/theme/tokens';
 
 // A set of discrete countable objects — the `pictorial_objects` / `dot_sets` representation the
@@ -17,21 +17,12 @@ import { colors, radius, spacing, typography } from '@/src/theme/tokens';
 
 const OBJECT_SIZE = 30;
 
-// STARS, not plain circles (owner request, 2026-10-18).
-//
-// DRAWN AS AN ICON GLYPH, NOT AN EMOJI. An earlier attempt elsewhere in this codebase used an emoji
-// glyph and it "did not render consistently and showed as a placeholder box" (see
-// c-session/primitives/unit-stepper.tsx's `targetDot`). `Ionicons` is already a dependency, ships
-// its own font, and renders identically on web, iOS and Android -- so the shape a child counts can
-// never silently become a box on one platform.
-//
-// Everything the plain circle guaranteed still holds: the objects stay identical to one another,
-// ungrouped, unnumbered and individually focusable. A star is a different shape, not a different
-// amount of help.
-const OBJECT_ICON = 'star' as const;
-
-export function ObjectSet({ visual }: { visual: ObjectSetVisual }) {
+export function ObjectSet({ seed, visual }: { seed: string; visual: ObjectSetVisual }) {
   const objects = Array.from({ length: visual.count });
+  // One emoji for the whole set -- see utils/countable-emoji.ts. Identical objects are what keeps
+  // this a counting item rather than a sorting one.
+  const emoji = pickCountableEmoji(seed);
+  const emojiLabel = labelForCountableEmoji(emoji);
 
   return (
     <View
@@ -47,14 +38,14 @@ export function ObjectSet({ visual }: { visual: ObjectSetVisual }) {
       // that — the construct itself is visual. Whether those learners are in scope is a
       // study-design question for the research protocol owner, not something a label string can
       // settle.
-      accessibilityLabel="A group of stars to count"
+      accessibilityLabel="A group of objects to count"
       style={styles.tray}>
       {visual.count === 0 ? (
         <AppText style={styles.empty}>No objects</AppText>
       ) : (
         objects.map((_, index) => (
-          <View accessibilityLabel="Star" accessibilityRole="image" accessible key={index}>
-            <Ionicons color={colors.accentBlue} name={OBJECT_ICON} size={OBJECT_SIZE} />
+          <View accessibilityLabel={emojiLabel} accessibilityRole="image" accessible key={index}>
+            <AppText style={styles.glyph}>{emoji}</AppText>
           </View>
         ))
       )}
@@ -65,6 +56,7 @@ export function ObjectSet({ visual }: { visual: ObjectSetVisual }) {
 export const objectSetStyles = { OBJECT_SIZE };
 
 const styles = StyleSheet.create({
+  glyph: { fontSize: OBJECT_SIZE, lineHeight: Math.round(OBJECT_SIZE * 1.25) },
   empty: { color: colors.textSecondary, fontFamily: typography.fonts.bold },
 
   tray: {

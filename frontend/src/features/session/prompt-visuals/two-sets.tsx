@@ -1,7 +1,8 @@
-import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, View } from 'react-native';
 
 import type { TwoSetsVisual } from '@/src/features/session/prompt-visuals/types';
+import { AppText } from '@/src/components/app-text';
+import { labelForCountableEmoji, pickCountableEmoji } from '@/src/utils/countable-emoji';
 import { colors, radius, spacing } from '@/src/theme/tokens';
 
 // Two groups to compare at a glance — the `dot_sets` representation B-NS03 asks for.
@@ -18,12 +19,12 @@ import { colors, radius, spacing } from '@/src/theme/tokens';
 
 const OBJECT_SIZE = 22;
 
-function SetPanel({ count, label }: { count: number; label: string }) {
+function SetPanel({ count, emoji, emojiLabel, label }: { count: number; emoji: string; emojiLabel: string; label: string }) {
   return (
     <View accessibilityLabel={label} style={styles.panel}>
       {Array.from({ length: count }).map((_, index) => (
-        <View accessibilityLabel="Star" accessibilityRole="image" accessible key={index}>
-          <Ionicons color={colors.accentBlue} name="star" size={OBJECT_SIZE} />
+        <View accessibilityLabel={emojiLabel} accessibilityRole="image" accessible key={index}>
+          <AppText style={styles.glyph}>{emoji}</AppText>
         </View>
       ))}
     </View>
@@ -36,17 +37,22 @@ function SetPanel({ count, label }: { count: number; label: string }) {
 // traversing each group, as a sighted child compares by looking. See object-set.tsx for the
 // broader limitation: a visual comparison construct may not be fully accessible by any labelling,
 // which is a study-design question rather than an implementation one.
-export function TwoSets({ visual }: { visual: TwoSetsVisual }) {
+export function TwoSets({ seed, visual }: { seed: string; visual: TwoSetsVisual }) {
+  // BOTH panels get the SAME emoji. Different objects per side would turn "which group has more?"
+  // into a comparison of unlike things, which is a different question from the one being asked.
+  const emoji = pickCountableEmoji(seed);
+  const emojiLabel = labelForCountableEmoji(emoji);
   return (
-    <View accessibilityLabel="Two groups of stars to compare" style={styles.row}>
-      <SetPanel count={visual.setA} label="First group" />
+    <View accessibilityLabel="Two groups of objects to compare" style={styles.row}>
+      <SetPanel count={visual.setA} emoji={emoji} emojiLabel={emojiLabel} label="First group" />
       <View style={styles.divider} />
-      <SetPanel count={visual.setB} label="Second group" />
+      <SetPanel count={visual.setB} emoji={emoji} emojiLabel={emojiLabel} label="Second group" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  glyph: { fontSize: OBJECT_SIZE, lineHeight: Math.round(OBJECT_SIZE * 1.25) },
   divider: { backgroundColor: colors.border, width: 2 },
   panel: {
     alignContent: 'center',

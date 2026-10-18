@@ -1003,7 +1003,7 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
               counting, no comparing, no checking the child. */}
           {passiveVisual ? (
             <View style={styles.visual}>
-              <PromptVisual spec={passiveVisual} />
+              <PromptVisual seed={plan.itemOpportunityId} spec={passiveVisual} />
             </View>
           ) : null}
         </View>
