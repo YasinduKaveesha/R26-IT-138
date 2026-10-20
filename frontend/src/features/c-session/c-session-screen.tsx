@@ -50,6 +50,12 @@ import {
   planTaskSurface,
 } from '@/src/features/c-session/c-session-logic';
 import { AnswerFeedbackPanel } from '@/src/features/c-session/answer-feedback-panel';
+import { ChallengeCompleteScreen } from '@/src/features/c-session/challenge-complete-screen';
+import {
+  isRunComplete,
+  type ChallengeLength,
+  type ChallengeRunResult,
+} from '@/src/features/c-session/challenge-length';
 import { FailClosedFrame } from '@/src/features/c-session/fail-closed-frame';
 import { accentForGameFamily } from '@/src/features/c-session/game-family-accents';
 import {
@@ -146,6 +152,10 @@ export type CSessionScreenProps = {
   // value.
   grade?: number;
   sessionMode?: CreateCSessionRequest['session_mode'];
+  /** How long this run lasts, chosen by the child on c-prepare. Validated at the route boundary,
+   * so this is always a real value -- `endless` is the default and is exactly the behaviour that
+   * existed before the choice did. */
+  challenge: ChallengeLength;
 };
 
 type Phase =
@@ -168,7 +178,10 @@ type Phase =
   | { kind: 'fail-closed'; supportCode: string | null }
   | { kind: 'technical-block'; supportCode: string | null }
   | { kind: 'failure'; supportCode: string | null; copy: { title: string; detail: string } }
-  | { kind: 'not-ready' };
+  | { kind: 'not-ready' }
+  // A fixed-length run that reached its last task. Reachable only when `challenge` is 'challenge';
+  // an endless run has no terminal phase, by definition.
+  | { kind: 'run-complete'; taskCount: number; results: readonly ChallengeRunResult[] };
 
 /** The panel's warm ground, matching the Play hub's card so a game opens into the same object the
  *  menu showed. Only the colour BEHIND the card changes per family. */
@@ -210,7 +223,7 @@ const FAILURE_COPY: Record<'authentication' | 'network' | 'technical', { title: 
   technical: { title: 'Something went wrong', detail: 'Try again in a little while.' },
 };
 
-export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
+export function CSessionScreen({ challenge, grade, sessionMode }: CSessionScreenProps) {
   const { getAccessToken, me } = useAuth();
   const subject = me?.principal.user_id ?? null;
   const configResult = useMemo(() => readPublicConfig(), []);
@@ -224,6 +237,24 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
     return null;
   }, [configResult.config]);
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
+  /** Tasks this run has FINISHED (matched and advanced past), not tasks served. A ref rather than
+   * state because nothing renders it mid-run: reading it in advanceToNextTask must see the value
+   * the previous advance wrote, and a state update scheduled asynchronously would not guarantee
+   * that. It is deliberately NOT restored on resume -- see the note in challenge-length.ts on why
+   * `isRunComplete` compares with `>=`. */
+  const completedTasksRef = useRef(0);
+  /** One row per finished game, in play order, for the completion card's list. Refs for the same
+   * reason as the counter above: these are written from callbacks that must see the previous
+   * write, and nothing renders them until the run ends. */
+  const runResultsRef = useRef<ChallengeRunResult[]>([]);
+  const currentTaskNameRef = useRef('');
+  /** When the current question went on screen. The run card reports TIME rather than correctness,
+   * because a C task only advances once the answer matches -- see ChallengeRunResult's header. */
+  const currentTaskStartedAtRef = useRef(0);
+  /** The elapsed time captured at the moment the answer was ACCEPTED, so the clock stops there
+   * rather than running on through the feedback panel and the child's "Next" press. Null between
+   * questions. */
+  const acceptedElapsedMsRef = useRef<number | null>(null);
   const cSessionIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const backgroundedRef = useRef(false);
@@ -278,6 +309,14 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
       return;
     }
     recordTaskStarted();
+    // The name is captured HERE, while the task is in hand. Reading it at advance time instead
+    // would mean reaching for a task the screen has already moved past.
+    currentTaskNameRef.current = nameForGameFamily(task.game_family_id);
+    // THE CLOCK STARTS WHEN THE QUESTION IS PUT ON SCREEN, not when it was fetched: the first task
+    // is pre-fetched while the prep card is still up, and timing from the request would bill the
+    // child for a wait they never saw.
+    currentTaskStartedAtRef.current = Date.now();
+    acceptedElapsedMsRef.current = null;
     setPhase({
       kind: 'task',
       task: surfacePlan.task,
@@ -333,6 +372,15 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
         // nothing about correctness itself, it relays `result.response_matched` and
         // `result.scaffold_level` exactly as the server sent them.
         const outcome = planSubmissionOutcome(result);
+        // Recorded here rather than inside the state updater below: a `setPhase` callback can be
+        // invoked more than once, and a side effect written inside one would double-count.
+        //
+        // A WRONG ANSWER DOES NOT STOP THE CLOCK. The child stays on this same task and tries
+        // again, so the question is not over; only an accepted answer ends it, and the time then
+        // covers every attempt it took.
+        if (outcome.kind === 'advance') {
+          acceptedElapsedMsRef.current = Date.now() - currentTaskStartedAtRef.current;
+        }
         setPhase((prev) =>
           prev.kind === 'task'
             ? { ...prev, feedback: { matched: outcome.kind === 'advance', scaffoldLevel: result.scaffold_level } }
@@ -351,6 +399,9 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
         // file. It is not rendered on the matched branch anyway; AnswerFeedbackPanel shows the
         // support level only when `matched` is false.
         if (isDuplicateSubmissionConflict(error)) {
+          // The benign duplicate is an ACCEPTED answer too (see below), so it ends the question
+          // and stops the clock exactly as the success path does.
+          acceptedElapsedMsRef.current = Date.now() - currentTaskStartedAtRef.current;
           setPhase((prev) =>
             prev.kind === 'task'
               ? { ...prev, feedback: { matched: true, scaffoldLevel: prev.task.scaffold_state } }
@@ -446,8 +497,45 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
       routeFailure(new ApiClientError('unauthenticated', 'No access token is available.'));
       return;
     }
+
+    // COUNTED HERE, AND ONLY HERE. This callback fires on AnswerFeedbackPanel's "Next", which is
+    // reachable only after a MATCHED answer -- the one path on which a task is actually finished.
+    // Counting at submit instead would count wrong answers, and counting in loadNextTask would
+    // count the task the child is about to be GIVEN rather than the one they just completed.
+    const completed = completedTasksRef.current + 1;
+    completedTasksRef.current = completed;
+    runResultsRef.current = [
+      ...runResultsRef.current,
+      {
+        // Falls back to timing up to this press if no acceptance was recorded, so a row always
+        // carries a real duration rather than a zero that would quietly shrink the total.
+        ms: acceptedElapsedMsRef.current ?? Date.now() - currentTaskStartedAtRef.current,
+        name: currentTaskNameRef.current,
+      },
+    ];
+    acceptedElapsedMsRef.current = null;
+
+    if (isRunComplete(challenge, completed)) {
+      // The run the child asked for is over, so the session is told it is over. This is the first
+      // caller `completeSession` has ever had: until now a Component C session was simply left
+      // open when the child walked away, because nothing in the app had a reason to end one.
+      //
+      // BEST EFFORT, DELIBERATELY. If the call fails the child still sees their finished run --
+      // the request is bookkeeping (attendance), and a network error on it is not something to
+      // put in front of a seven-year-old who just completed ten games. A session left open by a
+      // failure is the same state every C session was in before this existed, and the next entry
+      // resumes it exactly as it always did.
+      try {
+        await api?.completeSession(cSessionId, { attendance_status: 'attended' }, accessToken);
+      } catch {
+        // Intentionally swallowed; see above.
+      }
+      setPhase({ kind: 'run-complete', results: runResultsRef.current, taskCount: completed });
+      return;
+    }
+
     await loadNextTask(cSessionId, accessToken);
-  }, [getAccessToken, loadNextTask, routeFailure]);
+  }, [api, challenge, getAccessToken, loadNextTask, routeFailure]);
 
   // The bridge from an archetype surface's own onSubmit (raw per-key values, no session/task
   // plumbing -- see ArchetypeSurfaceProps) to handleSubmit's full signature. Reads cSessionId from
@@ -627,6 +715,15 @@ export function CSessionScreen({ grade, sessionMode }: CSessionScreenProps) {
           Getting your session ready…
         </AppText>
       </ScreenShell>
+    );
+  }
+
+  if (phase.kind === 'run-complete') {
+    return (
+      // One way off this card: Back to Home (owner request). The "Play again" control that used
+      // to sit beside it is gone -- Play on the tab bar is the way into another run, and it goes
+      // through the length choice rather than silently repeating the last one.
+      <ChallengeCompleteScreen onExit={goHome} results={phase.results} taskCount={phase.taskCount} />
     );
   }
 

@@ -165,9 +165,14 @@ export function AdventureChargeProvider({ children }: { children: React.ReactNod
     if (preparedGrade === null) return;
     setPreparingPlay(false);
     setPlayPrepReady(false);
+    // Into the run-length choice, NOT straight into the game. The session the background prefetch
+    // created is untouched by the detour -- `c-session-prefetch-cache.ts` is a plain Map with no
+    // expiry, so the prefetched first task is still waiting when the child picks a length. A child
+    // who backs out of the choice leaves that session uncollected, exactly as dismissing this card
+    // already does.
     router.replace({
       params: { grade: String(preparedGrade), sessionMode: 'c_only' },
-      pathname: '/(learner)/c-session',
+      pathname: '/(learner)/c-prepare',
     });
   }, []);
 
