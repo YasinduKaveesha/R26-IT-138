@@ -56,6 +56,8 @@ import {
   loadPendingCommand,
   savePendingCommand,
 } from '@/src/features/session/session-command-store';
+import { skillBarChanges, type SkillBarChange } from '@/src/features/session/session-mastery-change';
+import { captureMasterySnapshot, readMasterySnapshot } from '@/src/features/session/session-mastery-snapshot';
 import { SessionResultsScreen } from '@/src/features/session/session-results-screen';
 import {
   accentForSkill,
@@ -753,6 +755,55 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
 
   const goHome = useCallback(() => router.replace('/(learner)/home'), []);
 
+  // --- RESULTS MASTERY BARS (owner decision, 2026-10-20) -------------------------------------
+  //
+  // This surface was deliberately non-evaluative; showing what moved reverses that, knowingly.
+  // See session-mastery-snapshot.ts and buildLog2.md's entry for the decision and its two costs.
+  const [masteryChanges, setMasteryChanges] = useState<readonly SkillBarChange[]>([]);
+
+  // PHOTOGRAPH THE STARTING STATE, once, as early as the screen can. The snapshot module ignores
+  // every call after the first for a session, so a remount or a crash-recovery resume cannot
+  // re-baseline it to a mid-session state and erase the child's own progress from the screen.
+  useEffect(() => {
+    let cancelled = false;
+    const capture = async () => {
+      if (!api) return;
+      try {
+        const response = await withToken((token) => api.getLearnerSkillStates(token));
+        if (!cancelled) captureMasterySnapshot(sessionId, response.skill_states);
+      } catch {
+        // Best effort. No snapshot simply means the results screen shows current mastery with no
+        // movement, which is a supported state -- never an error in front of a child.
+      }
+    };
+    void capture();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, sessionId, withToken]);
+
+  // Read the CURRENT state once the session is over, and compare. Deliberately not fetched earlier:
+  // the whole point is the value after the last answer was scored.
+  useEffect(() => {
+    if (phase.kind !== 'completed') return;
+    let cancelled = false;
+    const compare = async () => {
+      if (!api) return;
+      try {
+        const response = await withToken((token) => api.getLearnerSkillStates(token));
+        if (cancelled) return;
+        setMasteryChanges(skillBarChanges(readMasterySnapshot(sessionId), response.skill_states));
+      } catch {
+        // Leaving `masteryChanges` empty renders the bars at zero with no animation rather than
+        // an error. The counts above them are still true.
+      }
+    };
+    void compare();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, phase.kind, sessionId, withToken]);
+
   /**
    * Leaving a finished session. The stored active-session id has done its job; leaving it behind
    * would let a later launch offer "Resume" and then try to resume a session the server has already
@@ -796,7 +847,14 @@ export function LiveSessionScreen({ sessionId }: { sessionId: string }) {
     // The progress numbers come straight from the completion response — GET /summary is not called
     // (see component-b-api.ts's note on getSessionSummary). See SessionResultsScreen for why this
     // surface carries counts and nothing evaluative.
-    return <SessionResultsScreen onExit={() => void exitSession()} progress={phase.progress} />;
+    return (
+      <SessionResultsScreen
+        changes={masteryChanges}
+        onExit={() => void exitSession()}
+        onPlayAgain={() => router.replace('/(learner)/prepare')}
+        progress={phase.progress}
+      />
+    );
   }
 
   if (phase.kind === 'unrenderable' || phase.kind === 'failure') {

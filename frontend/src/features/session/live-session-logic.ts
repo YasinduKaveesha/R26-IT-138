@@ -222,8 +222,16 @@ export type ResultsView = { headline: string; detail: string };
  * The reason is governance, not minimalism. The backend deliberately withholds an evaluative
  * summary from the child-facing surface; a client that assembled one from responses it happened to
  * see would be synthesising exactly the thing that was withheld — a governance violation wearing
- * the costume of a helpful feature. A child who got everything wrong and a child who got everything
- * right see the identical screen, by design.
+ * the costume of a helpful feature.
+ *
+ * SCOPE NARROWED 2026-10-20, and the narrowing is the point. The owner has ruled that the results
+ * SCREEN may also draw per-skill mastery bars showing what moved during the session, so it is no
+ * longer true that two children see an identical screen. THIS FUNCTION's guarantee is unchanged
+ * and still enforced: the COPY — headline and detail — is byte-identical for every outcome
+ * history, carries no score, and never reads `outcomeHistory`. The bars are drawn from the
+ * server's own `p_l` values fetched separately (session-mastery-change.ts), never from responses
+ * this client observed, which is the distinction that keeps the original rule intact where it
+ * still applies. Do not derive anything evaluative from `outcomeHistory` here.
  *
  * Passing the history in and ignoring it makes that testable: a unit test asserts the copy is
  * byte-identical across every outcome history, which is the strongest available guard that nothing
