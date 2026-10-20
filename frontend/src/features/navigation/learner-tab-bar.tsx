@@ -61,9 +61,16 @@ export function LearnerTabBar({
           selectedSource={tabArtwork.homeSelected}
           source={tabArtwork.home}
         />
+        {/* Labelled "compD" (owner request), not "Profile". The ROUTE is unchanged -- this is the
+            same /(learner)/profile screen it has always been, and `activeTab` still keys off
+            'profile'. Only the word under the icon changed, so nothing that navigates here or
+            tests this tab needs to know about the rename.
+
+            The profile is still reachable by its own name: the "Hi, <name>!" greeting in the
+            header bar now goes to the same place. */}
         <TabItem
           active={activeTab === 'profile'}
-          label="Profile"
+          label="compD"
           onPress={() => router.replace('/(learner)/profile')}
           selectedSource={tabArtwork.profileSelected}
           source={tabArtwork.profile}

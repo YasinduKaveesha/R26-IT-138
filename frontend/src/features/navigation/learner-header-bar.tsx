@@ -20,7 +20,8 @@
 // so a change to the padding and a change to the number a caller subtracts cannot drift apart.
 // The game hub sizes its grid against the same pair.
 
-import { StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/app-text';
 import {
@@ -78,14 +79,35 @@ export function LearnerHeaderBar({
             slid the name back against the battery. */}
         <View style={styles.headerSpacer} />
 
-        <View style={styles.greeting}>
+        {/* THE GREETING IS THE WAY TO THE PROFILE (owner request). A child's own name is the most
+            recognisable thing on this screen, and tapping yourself to get to your own page is a
+            shorter path than finding it in the tab bar -- which matters more now that the tab is
+            no longer labelled "Profile".
+
+            `replace`, not `push`, so it behaves EXACTLY as pressing the profile tab does. A
+            `push` here would stack home underneath profile, and the two routes to the same screen
+            would then leave the back gesture doing different things depending on which one the
+            child happened to take.
+
+            This file's header calls it a presentation component, and that is about NAME
+            RESOLUTION -- it resolves no name of its own, and still does not. It already reads
+            AdventureChargeProvider, so it is not markup-only. Navigating is hardcoded rather than
+            taken as a prop because both callers (home and the game hub) want the same
+            destination; a prop would be two call sites of ceremony for one behaviour. */}
+        <Pressable
+          accessibilityHint="Opens your profile"
+          accessibilityLabel={`Hi, ${displayName}`}
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={() => router.replace('/(learner)/profile')}
+          style={({ pressed }) => [styles.greeting, pressed && styles.greetingPressed]}>
           <AppText style={[styles.greetingTitle, compact && styles.greetingTitleCompact]}>
             Hi,{' '}
             <AppText style={[styles.greetingName, compact && styles.greetingNameCompact]}>
               {displayName}!
             </AppText>
           </AppText>
-        </View>
+        </Pressable>
       </View>
     </View>
   );
@@ -110,6 +132,7 @@ const styles = StyleSheet.create({
   batteryNub: { backgroundColor: '#F4F4F6', borderRadius: 1, height: 12, width: 4 },
   brand: { alignItems: 'center', flexDirection: 'row', flexShrink: 1, gap: 3 },
   greeting: { alignItems: 'flex-end', flexShrink: 1, justifyContent: 'center' },
+  greetingPressed: { opacity: 0.6 },
   greetingName: { color: '#26A5FD', fontFamily: typography.fonts.heavy, fontSize: 33.75, lineHeight: 40.5 },
   greetingNameCompact: { fontSize: 28.35, lineHeight: 33.75 },
   greetingTitle: { fontFamily: typography.fonts.body, fontSize: 25, lineHeight: 30 },

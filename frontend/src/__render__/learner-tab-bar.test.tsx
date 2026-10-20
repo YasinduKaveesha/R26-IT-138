@@ -33,7 +33,9 @@ describe('LearnerTabBar', () => {
     const { getByLabelText } = await render(<LearnerTabBar activeTab="home" playEnabled />);
     expect(getByLabelText(/^Play tab/)).toBeTruthy();
     expect(getByLabelText(/^Home tab/)).toBeTruthy();
-    expect(getByLabelText(/^Profile tab/)).toBeTruthy();
+    // Labelled "compD", not "Profile" (owner request, 2026-10-20). The route and `activeTab` key
+    // are both unchanged -- only the word under the icon.
+    expect(getByLabelText(/^compD tab/)).toBeTruthy();
   });
 
   it('marks the active tab as selected and does not navigate away from it', async () => {
