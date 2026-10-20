@@ -56,7 +56,12 @@ def test_sequence_template_gains_an_instruction_and_its_stem_is_untouched() -> N
 def test_comparison_template_gets_its_own_wording_not_the_counting_one() -> None:
     """B-NS04's blank holds an operator, so "guess the next number" would be actively wrong."""
     presented = project(task_instance("B-NS04-COMPARE-NUMERALS", {"stem": "7 __ 9", "left": 7, "right": 9}))
-    assert presented.prompt[INSTRUCTION_PROMPT_KEY] == "Pick the right sign."
+    # "Tap the correct sign." since 2026-10-20 -- "right" was read as the DIRECTION on screens that
+    # have left/right layouts, and the Sinhala table already said නිවැරදි ("correct").
+    assert presented.prompt[INSTRUCTION_PROMPT_KEY] == "Tap the correct sign."
+    # The POINT of this test, asserted rather than implied: whatever the wording is, it must not be
+    # the counting instruction, because this blank holds an operator and not a number.
+    assert presented.prompt[INSTRUCTION_PROMPT_KEY] != INSTRUCTION_BY_TEMPLATE["B-CNT01-SEQ-CONTINUE"]
 
 
 def test_templates_whose_stem_already_asks_a_question_get_nothing_added() -> None:

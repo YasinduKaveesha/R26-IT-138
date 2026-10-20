@@ -149,11 +149,13 @@ from datetime import UTC, datetime
 from typing import Any, Mapping, Optional
 from uuid import UUID, uuid4
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.live_engine_c.adaptation_service import build_evidence_for_session, decide_and_persist_adaptation
 from app.application.live_engine_c.bundle_resolution import (
     assert_policy_config_matches_session_gate,
+    assert_q_policy_matches_session_gate,
     resolve_c_bundle_and_catalogue,
     resolve_evidence_window_config,
     resolve_safety_config,
@@ -164,14 +166,17 @@ from app.application.live_engine_c.c_session_service import (
     _require_learner_id,
 )
 from app.application.live_engine_c.mastery_fixture import (
+    FIXTURE_MASTERY_BY_SKILL,
     FIXTURE_MASTERY_SOURCE_INTERVENTION_SESSION_ID,
     FIXTURE_MASTERY_SOURCE_STUDENT_ID,
     fixture_b_mastery_payload_for_phase_4,
     fixture_b_provenance_for_phase_4,
 )
+from app.application.live_engine_c.q_policy import DEFAULT_FIRST_TRY, load_q_policy, state_of as q_state_of
 from app.application.live_engine_c.scaffold_service import decide_and_persist_scaffold_level
 from app.application.live_engine_c.session_lifecycle import _learner_session_state, _provenance
 from app.application.live_engine_c.summary_service import derive_and_persist_summary
+from app.application.live_engine_c.telemetry_validation import get_derivable_history_for_session
 from app.application.live_engine_c.terminal_event import write_completed_correct_terminal_event
 from app.core.errors import ActionPayloadRejectedError, ConflictError, ResourceNotFoundError
 from app.domain.c_task import CNextTaskResponse, CSubmitActionResult, CTaskFields
@@ -321,7 +326,15 @@ PRODUCTION_POLICY_CONFIG = PolicyConfig(
 # stores a per-session/per-instance policy_mode (verified: neither CSessionRecord nor
 # CTaskInstanceRecord carries one) -- this is a fixed, never-client-influenced constant, the same
 # shape as _SMOKE_MODE in c_session_service.py, not a value read off any record.
-PRODUCTION_POLICY_MODE: PolicyMode = "rule_based_baseline"
+PRODUCTION_POLICY_MODE: PolicyMode = "frozen_q_evaluation"
+#
+# LIVE-01 (supersedes the BATCH 2 paragraph above for the PRODUCTION mode): difficulty is now proposed by the
+# FROZEN, trained Q-learning policy (app/application/live_engine_c/q_policy.py, tables under
+# provenance/c_policy/, hash-verified at session start) -- Q proposes, the pinned safety layer disposes
+# (LiveEngineCAdapter.decide_with_proposed_action). The rule policy no longer decides in production but its
+# code path (decide_adaptation_with_safety_flags with "rule_based_baseline") is untouched and tested. No
+# per-child learning: frozen only (internal_reward stays NULL). Approval record:
+# provenance/component-c-q-policy-approval.json.
 
 
 # The engine's OWN declared domain for a difficulty level, not a range chosen here: both
@@ -451,10 +464,15 @@ class TaskService:
         generation_config: GenerationConfig,
         smoke_mode: bool,
     ) -> CNextTaskResponse:
-        student_id = await _require_learner_id(session, principal_user_id)
-        session_record = await CSessionRecordRepository(session).get_owned(c_session_id, student_id)
+        # PERF-01: user -> learner link -> owned session, read AND row-locked, in ONE round trip (was: the user/link
+        # lookup, the session read, and a separate SELECT ... FOR UPDATE below). The lock is the same session-row lock;
+        # it is now taken before the state check, which only matters for a request that is about to be refused anyway.
+        session_record = await CSessionRecordRepository(session).get_owned_for_subject(
+            c_session_id, principal_user_id, for_update=True
+        )
         if session_record is None:
             raise ResourceNotFoundError()
+        student_id = session_record.student_id
         if session_record.state != "active":
             raise ConflictError()
 
@@ -467,7 +485,7 @@ class TaskService:
         # and task_index is the SOLE seed-lineage-distinguishing element per this module's own
         # docstring, so a collision would silently draw the identical template twice) and any race
         # between the resume check below and the mint path.
-        await CSessionRecordRepository(session).lock_for_update(c_session_id)
+        # (PERF-01: the session row was locked by the read above.)
 
         try:
             assert_generation_config_permitted(generation_config, smoke_mode=smoke_mode)
@@ -476,14 +494,15 @@ class TaskService:
 
         adapter = LiveEngineCAdapter()
         try:
-            bundle, _catalogue_manifest, catalogue_checksum = resolve_c_bundle_and_catalogue(
+            # PERF-01: the catalogue is the one the resolution above already loaded from _CATALOGUE_PATH
+            # (it was parsed a second time here with the identical call).
+            bundle, catalogue, catalogue_checksum = resolve_c_bundle_and_catalogue(
                 bundle_path=_BUNDLE_PATH,
                 schema_path=_SCHEMA_PATH,
                 catalogue_path=_CATALOGUE_PATH,
                 require_approved=False,
             )
             selection_config = resolve_selection_config(bundle)
-            catalogue = adapter.load(_CATALOGUE_PATH)
         except LiveEngineCError as exc:
             raise ConflictError() from exc
 
@@ -736,23 +755,32 @@ class TaskService:
         scaffold_config: ScaffoldConfig,
         submission_spy: Optional[list] = None,
     ) -> CSubmitActionResult:
-        student_id = await _require_learner_id(session, principal_user_id)
-        session_record = await CSessionRecordRepository(session).get_owned(c_session_id, student_id)
+        # PERF-01: user -> learner link -> owned session in ONE round trip (was two). Unknown user, user without a
+        # learner link and a session the learner does not own were already the same ResourceNotFoundError.
+        session_record = await CSessionRecordRepository(session).get_owned_for_subject(c_session_id, principal_user_id)
         if session_record is None:
             raise ResourceNotFoundError()
+        student_id = session_record.student_id
 
         instance_repo = CTaskInstanceRecordRepository(session)
-        instance_record = await instance_repo.get_owned(c_task_instance_id, c_session_id)
+        # PERF-01: the instance is read AND row-locked in one round trip (was a read here and a separate
+        # lock_for_update further down). It is the same row lock, now taken before the checks below instead of after
+        # them: sequential behaviour is identical, a concurrent duplicate simply waits one step earlier.
+        instance_record = await instance_repo.get_owned(c_task_instance_id, c_session_id, for_update=True)
         if instance_record is None:
             raise ResourceNotFoundError()
 
         event_repo = CGameplayEventRecordRepository(session)
+        # PERF-01: ONE read of this instance's event stream (was four separate counting queries: terminal check, max
+        # index / timestamp, answer_submitted count, started check). Taken under the instance lock above, so it is as
+        # consistent as the separate reads were; everything those queries returned is derived from it below.
+        stream = list(await event_repo.list_ordered_for_instance(c_task_instance_id))
         # T1-4 (owner ruling): checked BEFORE evaluate() is ever called -- "A network retry or a
         # double-tap on a correct answer is an ordinary event, not an edge case, and Q4 left
         # action submission with no idempotency key -- so this check is the only thing standing
         # between a retry and a duplicated terminal write." A structured 409, never a second
         # scoring.
-        if await event_repo.has_terminal_for_instance(c_task_instance_id):
+        if any(e.event_type in event_repo._TERMINAL_EVENT_TYPES for e in stream):
             raise ConflictError(
                 details=[{"location": ["c_task_instance_id"], "type": "task_already_terminal"}]
             )
@@ -798,8 +826,9 @@ class TaskService:
         # have: without it, both could read the same existing_submitted_count and write the same
         # attempt_number, undercounting retries in exactly the way Family 3's condition ("each
         # retry must receive an incrementing attempt_number") exists to prevent.
-        await instance_repo.lock_for_update(c_task_instance_id)
-        max_index, max_timestamp = await event_repo.max_index_and_timestamp_for_instance(c_task_instance_id)
+        # (PERF-01: the lock was taken with the instance read above, and the stream was read once, above.)
+        max_index = max((e.event_index for e in stream), default=0) or 0
+        max_timestamp = max((e.event_timestamp_relative_ms for e in stream), default=0) or 0
         # CONNECT Step 5 (Family 3; ESCALATIONS.md §2 closed by this batch): attempt_number was
         # hardcoded to 1 on both events below. Derived here instead, from the count of this
         # instance's own existing answer_submitted events -- the SAME derivation
@@ -808,7 +837,7 @@ class TaskService:
         # written by this call share the same attempt_number (they are the same attempt) and their
         # event_index values stay consecutive, both already true of the existing max_index+1/+2
         # derivation above -- this adds one more shared value alongside it, not a second scheme.
-        attempt_number = await event_repo.count_answer_submitted_for_instance(c_task_instance_id) + 1
+        attempt_number = sum(1 for e in stream if e.event_type == "answer_submitted") + 1
 
         # Phase 6a, second LATENT DEFECT SINCE PHASE 5 found by the same exercise: no code path
         # anywhere ever wrote "game_task_started" (next_task writes only "game_task_offered").
@@ -816,7 +845,8 @@ class TaskService:
         # task_completed -- see CGameplayEventRecordRepository.has_started_for_instance's own
         # docstring. Guarded so a wrong-answer retry (still permitted; only a TERMINAL instance
         # is blocked by T1-4) never writes it twice.
-        if not await event_repo.has_started_for_instance(c_task_instance_id):
+        new_events: list = []     # PERF-01: inserted together in ONE statement (was one flush per event)
+        if not any(e.event_type == "game_task_started" for e in stream):
             started_event_id = uuid4()
             started_event = CGameplayEventRecord(
                 c_gameplay_event_id=started_event_id,
@@ -839,7 +869,7 @@ class TaskService:
                 config_checksum=_generation_config_checksum(generation_config),
                 **_provenance("c_gameplay_event", started_event_id, request_id, "c_task.started"),
             )
-            await event_repo.add(started_event)
+            new_events.append(started_event)
             max_index, max_timestamp = max_index + 1, max_timestamp + 1
 
         submitted_event_id = uuid4()
@@ -864,7 +894,7 @@ class TaskService:
             config_checksum=_generation_config_checksum(generation_config),
             **_provenance("c_gameplay_event", submitted_event_id, request_id, "c_task.action_submitted"),
         )
-        await event_repo.add(submitted_event)
+        new_events.append(submitted_event)
 
         evaluated_event_id = uuid4()
         evaluated_event = CGameplayEventRecord(
@@ -890,14 +920,18 @@ class TaskService:
             config_checksum=_generation_config_checksum(generation_config),
             **_provenance("c_gameplay_event", evaluated_event_id, request_id, "c_task.action_evaluated"),
         )
-        await event_repo.add(evaluated_event)
+        new_events.append(evaluated_event)
 
         # T1 (owner ruling): completed_correct is the ONLY terminal reason built this batch. See
         # terminal_event.py's module docstring for the full nine-reason mapping and T1-5's
         # statement of what remains unclosed.
         scaffold_level: ScaffoldLevel = "C0"
         if evaluation.is_correct:
-            await write_completed_correct_terminal_event(
+            # PERF-01: the terminal event is queued (not flushed) and goes in the SAME INSERT as the answer events; the
+            # stream state it needs (not terminal -- checked above under the lock; max index / timestamp after the
+            # queued answer events) is already known, so it does not re-query. The unique-terminal-index backstop
+            # (T1-3) is translated below around that one flush, as terminal_event.py translated it around its own.
+            terminal_event = await write_completed_correct_terminal_event(
                 session,
                 c_session_id=c_session_id,
                 c_task_instance_id=c_task_instance_id,
@@ -908,7 +942,23 @@ class TaskService:
                 generator_version=instance_record.generator_version,
                 config_checksum=_generation_config_checksum(generation_config),
                 request_id=request_id,
+                known_max_index=max_index + 2,
+                known_max_timestamp=max_timestamp + 2,
+                known_not_terminal=True,
+                defer_flush=True,
             )
+            new_events.append(terminal_event)
+        session.add_all(new_events)
+        try:
+            await session.flush()
+        except IntegrityError as exc:
+            if evaluation.is_correct and "uq_c_gameplay_events_at_most_one_terminal_per_instance" in str(exc.orig):
+                raise ConflictError(
+                    details=[{"location": ["c_task_instance_id"], "type": "task_already_terminal"}]
+                ) from exc
+            raise
+        full_stream = sorted([*stream, *new_events], key=lambda e: e.event_index)
+        if evaluation.is_correct:
             await derive_and_persist_summary(
                 session,
                 adapter=adapter,
@@ -918,6 +968,7 @@ class TaskService:
                 stu_session_id=_stu_session_id(),
                 game_task_instance_id=domain_instance.game_task_instance_id,
                 request_id=request_id,
+                records=full_stream,
             )
 
             # BATCH 2: decide_and_persist_adaptation's first live caller under app/ (v3.0 §11
@@ -1003,6 +1054,9 @@ class TaskService:
                 path=tuple(tuple(pair) for pair in instance_record.seed_lineage_path),
                 seed=instance_record.seed_lineage_seed,
             )
+            # PERF-01: the session's derivable history is read ONCE and shared by the evidence builder and the Q
+            # observation below (it used to be read twice, three queries each time).
+            session_history = await get_derivable_history_for_session(session, c_session_id=c_session_id)
             evidence = await build_evidence_for_session(
                 session,
                 adapter=adapter,
@@ -1016,6 +1070,47 @@ class TaskService:
                 current_difficulty_level=instance_record.difficulty_level,
                 prior_session_end_state=learner_state.prior_session_end_state,
                 evidence_window_config=adaptation_evidence_window_config,
+                history_records=session_history,
+            )
+            # LIVE-01: the frozen Q policy PROPOSES; the pinned safety layer DISPOSES (inside
+            # decide_with_proposed_action). The observation is built from persisted data only, with the same
+            # definitions the policy was trained on (rl_core.env.DifficultyEnv.obs): first-try = mean
+            # first_attempt_correct over the last 5 summaries of THIS session (0.5 if none), strain = the
+            # evidence's rolling strain, mastery = the selected skill's mastery for combined sessions (the
+            # fixture, mastery_fixture.py) and None for c_only, tasks_done = the number of summaries.
+            try:
+                q_policy = load_q_policy(session_record.session_mode)
+                assert_q_policy_matches_session_gate(
+                    q_policy.parameter_source_status,
+                    session_gated_parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
+                )
+            except LiveEngineCError as exc:
+                raise ConflictError() from exc
+            q_history = session_history
+            q_recent = [r.first_attempt_correct for r in q_history[-5:] if r.first_attempt_correct is not None]
+            q_observation = {
+                "difficulty": instance_record.difficulty_level,
+                "first_try": (sum(1.0 for x in q_recent if x) / len(q_recent)) if q_recent else DEFAULT_FIRST_TRY,
+                "strain": evidence.rolling_strain_score,
+                "mastery": (
+                    FIXTURE_MASTERY_BY_SKILL[instance_record.skill_id]
+                    if session_record.session_mode == "combined"
+                    else None
+                ),
+                "tasks_done": len(q_history),
+            }
+            q_allowed = adapter.preview_allowed_actions(
+                evidence=evidence,
+                current_difficulty_level=instance_record.difficulty_level,
+                safety_config=adaptation_safety_config,
+                selection_config=adaptation_selection_config,
+            )
+            q_action, q_rl_state = q_policy.propose(
+                q_state_of(
+                    q_observation["difficulty"], q_observation["first_try"], q_observation["strain"], q_observation["mastery"]
+                ),
+                q_allowed,
+                q_observation["tasks_done"],
             )
             await decide_and_persist_adaptation(
                 session,
@@ -1030,6 +1125,9 @@ class TaskService:
                 safety_config=adaptation_safety_config,
                 selection_config=adaptation_selection_config,
                 request_id=request_id,
+                proposed_action=q_action,
+                policy_version=f"{q_policy.policy_version}+{adapter.safety_controller_version()}",
+                rl_state=q_rl_state,
             )
         else:
             # Phase 7, Z5: the ORDINARY escalation path -- decided from the real, just-persisted
@@ -1092,6 +1190,7 @@ class TaskService:
                 scaffold_config=scaffold_config,
                 safety_forces_recovery=safety_forces_recovery,
                 request_id=request_id,
+                events=full_stream,
             )
 
         return CSubmitActionResult(

@@ -118,54 +118,54 @@ class PromptWordingVariant:
 # digit; no banned technical term; within the length/readability bound; does not name which of a
 # labelled-choice answer set is correct.
 PROMPT_TEXT_BY_TEMPLATE: Mapping[str, tuple[PromptWordingVariant, ...]] = {
-    "C-BT-01": (PromptWordingVariant(None, None, "Make this number with tens and ones."),),
+    "C-BT-01": (PromptWordingVariant(None, None, "How many tens and how many ones?"),),
     "C-BT-02": (
-        PromptWordingVariant(None, None, "Make this number with hundreds, tens and ones."),
+        PromptWordingVariant(None, None, "How many hundreds, tens and ones?"),
     ),
     "C-BT-03": (
         PromptWordingVariant(
-            None, None, "Change ten ones into one ten. Write your tens and ones now."
+            None, None, "Change ten ones into one ten. Now how many tens and ones?"
         ),
     ),
     "C-BT-04": (
         PromptWordingVariant(
-            None, None, "Change one ten into ten ones. Write your tens and ones now."
+            None, None, "Change one ten into ten ones. Now how many tens and ones?"
         ),
     ),
     "C-CC-01": (
         PromptWordingVariant(
-            None, None, "Tap each thing one time. Then write how many."
+            None, None, "Tap each one time. Then write how many there are."
         ),
     ),
-    "C-CC-02": (PromptWordingVariant(None, None, "Put this many things in the box."),),
+    "C-CC-02": (PromptWordingVariant(None, None, "Tap to put this many in the box."),),
     "C-CC-03": (
-        PromptWordingVariant(None, None, "Count the things. Then pick the number."),
+        PromptWordingVariant(None, None, "How many are there? Tap the number."),
     ),
     "C-CC-04": (
         PromptWordingVariant(
             None,
             None,
-            "Look before and after. Is it the same or changed?",
+            "Look at both pictures. Is the number the same or different?",
         ),
     ),
     "C-EG-01": (
         PromptWordingVariant(
-            None, None, "Make the groups. Put the same number in each."
+            None, None, "Make the groups. Put the same number in each group."
         ),
     ),
     "C-EG-02": (
         PromptWordingVariant("direction", "build", "Make the rows of squares shown."),
         PromptWordingVariant(
-            "direction", "read", "How many rows? How many in each row? How many squares in all?"
+            "direction", "read", "Write a number in each box."
         ),
     ),
-    "C-EG-03": (PromptWordingVariant(None, None, "How many are in all the groups?"),),
-    "C-JB-01": (PromptWordingVariant(None, None, "Put the two groups together. How many?"),),
+    "C-EG-03": (PromptWordingVariant(None, None, "How many are there in all the groups?"),),
+    "C-JB-01": (PromptWordingVariant(None, None, "How many are there in both groups?"),),
     "C-JB-02": (
         PromptWordingVariant(
             None,
             None,
-            "Start at the bigger number and count on. Write each jump and where you stop.",
+            "Use the jump buttons to add. What number do you stop at?",
         ),
     ),
     "C-JB-03": (PromptWordingVariant(None, None, "Add the two numbers."),),
@@ -175,7 +175,7 @@ PROMPT_TEXT_BY_TEMPLATE: Mapping[str, tuple[PromptWordingVariant, ...]] = {
         ),
     ),
     "C-MCL-01": (
-        PromptWordingVariant(None, None, "Which number shows how many?"),
+        PromptWordingVariant(None, None, "How many are there? Tap the number."),
     ),
     "C-MCL-02": (
         PromptWordingVariant(None, None, "Which side has more? Or are they the same?"),
@@ -185,11 +185,11 @@ PROMPT_TEXT_BY_TEMPLATE: Mapping[str, tuple[PromptWordingVariant, ...]] = {
             None, None, "Less than, more than, or the same?"
         ),
     ),
-    "C-MCL-04": (PromptWordingVariant(None, None, "Move the marker to the right spot."),),
-    "C-NP-01": (PromptWordingVariant(None, None, "What comes next?"),),
-    "C-NP-02": (PromptWordingVariant(None, None, "What comes just before?"),),
+    "C-MCL-04": (PromptWordingVariant(None, None, "Tap the buttons to go to the number."),),
+    "C-NP-01": (PromptWordingVariant(None, None, "What number comes next?"),),
+    "C-NP-02": (PromptWordingVariant(None, None, "What number comes just before this one?"),),
     "C-NP-03": (
-        PromptWordingVariant(None, None, "Keep counting the same way. What comes next?"),
+        PromptWordingVariant(None, None, "Keep counting the same way. What number comes next?"),
     ),
     "C-NP-04": (
         PromptWordingVariant(
@@ -200,14 +200,14 @@ PROMPT_TEXT_BY_TEMPLATE: Mapping[str, tuple[PromptWordingVariant, ...]] = {
         ),
     ),
     "C-SF-01": (
-        PromptWordingVariant(None, None, "Share them equally. How many does each one get?"),
+        PromptWordingVariant(None, None, "Share them equally. How many does each get?"),
     ),
     "C-SF-02": (
         PromptWordingVariant(
             None, None, "Make equal groups of this size. Show the groups you made."
         ),
     ),
-    "C-SF-03": (PromptWordingVariant(None, None, "Split the number in half."),),
+    "C-SF-03": (PromptWordingVariant(None, None, "What is half of this number?"),),
     "C-TC-01": (
         PromptWordingVariant(None, None, "Take away this many. How many are left?"),
     ),

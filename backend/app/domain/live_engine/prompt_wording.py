@@ -76,11 +76,11 @@ def _make_set(prompt: Mapping[str, Any]) -> str | None:
 
 
 def _quantity_numeral(prompt: Mapping[str, Any]) -> str | None:
-    return "Which number shows how many?"
+    return "How many are there? Tap the number."
 
 
 def _compare(prompt: Mapping[str, Any]) -> str | None:
-    return "Pick the right sign."
+    return "Tap the correct sign."
 
 
 def _order_numbers(prompt: Mapping[str, Any]) -> str | None:
@@ -93,55 +93,58 @@ def _order_numbers(prompt: Mapping[str, Any]) -> str | None:
 
 
 def _conservation(prompt: Mapping[str, Any]) -> str | None:
-    return "Is it the same or changed?"
+    return "Is the number the same or different?"
 
 
 def _identify_place(prompt: Mapping[str, Any]) -> str | None:
     if not _all_present(prompt, "n", "place"):
         return None
-    return f"In {_get(prompt, 'n')}, what is the {_get(prompt, 'place')} number?"
+    return f"What number is in the {_get(prompt, 'place')} box?"
 
 
 def _decompose_2d(prompt: Mapping[str, Any]) -> str | None:
     if not _all_present(prompt, "n"):
         return None
-    return f"Break {_get(prompt, 'n')} into tens and ones."
+    return "How many tens and how many ones?"
 
 
 def _decompose_3d(prompt: Mapping[str, Any]) -> str | None:
     if not _all_present(prompt, "n"):
         return None
-    return f"Break {_get(prompt, 'n')} into hundreds, tens and ones."
+    return "How many hundreds, tens and ones?"
 
 
 def _combine_sets(prompt: Mapping[str, Any]) -> str | None:
     if not _all_present(prompt, "set_a", "set_b"):
         return None
-    return f"Put {_get(prompt, 'set_a')} and {_get(prompt, 'set_b')} together. How many?"
+    return "How many are there in both groups?"
 
 
 def _count_on(prompt: Mapping[str, Any]) -> str | None:
     if not _all_present(prompt, "start", "jumps"):
         return None
-    return f"Start at {_get(prompt, 'start')}. Count on {_get(prompt, 'jumps')} more."
+    return (
+        f"Start at {_get(prompt, 'start')}. Count on {_get(prompt, 'jumps')} more. "
+        "What number do you stop at?"
+    )
 
 
 def _take_away(prompt: Mapping[str, Any]) -> str | None:
     if not _all_present(prompt, "total", "removed"):
         return None
-    return f"There are {_get(prompt, 'total')}. Take away {_get(prompt, 'removed')}. How many are left?"
+    return "Some are crossed out. How many are not crossed out?"
 
 
 def _equal_groups(prompt: Mapping[str, Any]) -> str | None:
     if not _all_present(prompt, "groups", "size"):
         return None
-    return f"{_get(prompt, 'groups')} groups. {_get(prompt, 'size')} in each group. How many?"
+    return f"{_get(prompt, 'groups')} groups. {_get(prompt, 'size')} in each group. How many in all?"
 
 
 def _array_total(prompt: Mapping[str, Any]) -> str | None:
     if not _all_present(prompt, "rows", "cols"):
         return None
-    return f"{_get(prompt, 'rows')} rows. {_get(prompt, 'cols')} in each row. How many?"
+    return f"{_get(prompt, 'rows')} rows. {_get(prompt, 'cols')} in each row. How many in all?"
 
 
 def _equal_sharing(prompt: Mapping[str, Any]) -> str | None:
@@ -151,7 +154,7 @@ def _equal_sharing(prompt: Mapping[str, Any]) -> str | None:
     # the mathematical content of the item: without the word, "share 22 between 2" permits 21 and 1
     # and the question stops being the question. It belongs with "tens", "ones" and "groups" in
     # rule 2's kept vocabulary, not with the register words this module strips.
-    return f"Share {_get(prompt, 'total')} equally between {_get(prompt, 'recipients')}. How many each?"
+    return f"Share {_get(prompt, 'total')} equally between {_get(prompt, 'recipients')}. How many does each get?"
 
 
 def _equal_grouping(prompt: Mapping[str, Any]) -> str | None:

@@ -188,6 +188,25 @@ class CSessionRecordRepository(SqlAlchemyNeutralRepository[CSessionRecord]):
             )
         )
 
+    async def get_owned_for_subject(
+        self, c_session_id: UUID, subject: str, *, for_update: bool = False
+    ) -> CSessionRecord | None:
+        """PERF-01: ``AppUserRepository.find_with_learner_link_by_subject`` + ``get_owned`` in ONE round trip.
+
+        The session owned by the learner linked to the Supabase subject, or ``None`` when ANY of unknown user, user
+        without a learner link, or no such session for that learner holds -- the three cases every caller already turned into
+        the same ``ResourceNotFoundError``. Inner joins (not outer) so ``for_update`` can lock the session row: Postgres refuses
+        ``FOR UPDATE`` on the nullable side of an outer join. ``for_update`` takes the SAME row lock ``lock_for_update`` takes."""
+        stmt = (
+            select(CSessionRecord)
+            .join(AppUserLearnerLink, AppUserLearnerLink.learner_id == CSessionRecord.student_id)
+            .join(AppUser, AppUser.user_id == AppUserLearnerLink.user_id)
+            .where(CSessionRecord.c_session_id == c_session_id, AppUser.supabase_subject == subject)
+        )
+        if for_update:
+            stmt = stmt.with_for_update(of=CSessionRecord)
+        return await self.session.scalar(stmt)
+
 
 class CLearnerLocalStateRepository(SqlAlchemyNeutralRepository[CLearnerLocalStateRecord]):
     model_type = CLearnerLocalStateRecord
@@ -226,11 +245,16 @@ class CTaskOpportunityRecordRepository(SqlAlchemyNeutralRepository[CTaskOpportun
 class CTaskInstanceRecordRepository(SqlAlchemyNeutralRepository[CTaskInstanceRecord]):
     model_type = CTaskInstanceRecord
 
-    async def get_owned(self, c_task_instance_id: UUID, c_session_id: UUID) -> CTaskInstanceRecord | None:
+    async def get_owned(
+        self, c_task_instance_id: UUID, c_session_id: UUID, *, for_update: bool = False
+    ) -> CTaskInstanceRecord | None:
         """Phase 5: ``c_task_instances`` carries no denormalized ``c_session_id`` (Phase 3a's own
         minimal-FK style, mirroring B) -- ownership is proven through the parent
-        ``c_task_opportunities`` row instead."""
-        return await self.session.scalar(
+        ``c_task_opportunities`` row instead.
+
+        PERF-01: ``for_update=True`` reads AND locks the instance row in one round trip -- the same row lock
+        ``lock_for_update`` takes (see its docstring for why the lock must precede the event counts)."""
+        stmt = (
             select(CTaskInstanceRecord)
             .join(CTaskOpportunityRecord, CTaskInstanceRecord.c_task_opportunity_id == CTaskOpportunityRecord.c_task_opportunity_id)
             .where(
@@ -238,6 +262,9 @@ class CTaskInstanceRecordRepository(SqlAlchemyNeutralRepository[CTaskInstanceRec
                 CTaskOpportunityRecord.c_session_id == c_session_id,
             )
         )
+        if for_update:
+            stmt = stmt.with_for_update(of=CTaskInstanceRecord)
+        return await self.session.scalar(stmt)
 
     async def lock_for_update(self, c_task_instance_id: UUID) -> None:
         """CONNECT Step 5 (supervisor ruling, closing the attempt_number race identified while

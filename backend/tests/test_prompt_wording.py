@@ -136,7 +136,11 @@ def test_the_same_question_is_asked_the_same_way_everywhere() -> None:
         simplified_stem_for("B-NS03-COMPARE-SETS", sample_prompt("B-NS03-COMPARE-SETS", 1)),
         INSTRUCTION_BY_TEMPLATE["B-NS04-COMPARE-NUMERALS"],
     }
-    assert comparison == {"Pick the right sign."}
+    # "Tap the correct sign." since 2026-10-20. "right" was read as the DIRECTION -- these screens
+    # have left/right layouts -- and the Sinhala table already said නිවැරදි ("correct"), so the
+    # English was the locale out of step. The ASSERTION is unchanged: both comparison templates
+    # must still ask the SAME question, whichever words it uses.
+    assert comparison == {"Tap the correct sign."}
 
     next_number = {INSTRUCTION_BY_TEMPLATE[t] for t in ("B-CNT01-SEQ-CONTINUE", "B-CNT06-SKIP-COUNT")}
     assert next_number == {"What number comes next?"}

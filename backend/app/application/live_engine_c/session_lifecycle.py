@@ -97,6 +97,7 @@ async def create_session(
     policy_parameter_source_status: str,
     scaffold_parameter_source_status: str,
     aggregation_parameter_source_status: str,
+    q_policy_parameter_source_status: str,
     smoke_mode: bool,
     request_id: str,
     mastery_by_skill: Optional[Mapping[str, float]] = None,
@@ -241,6 +242,13 @@ async def create_session(
     assert_code_gated_family_usable(
         family_name="aggregation_config",
         parameter_source_status=aggregation_parameter_source_status,
+        smoke_mode=smoke_mode,
+    )
+    # LIVE-01: the frozen Q policy is a new config consumer (production decides difficulty with it); same
+    # code-gated mechanism, status read from the hash-verified provenance/c_policy/MANIFEST.json.
+    assert_code_gated_family_usable(
+        family_name="q_policy_config",
+        parameter_source_status=q_policy_parameter_source_status,
         smoke_mode=smoke_mode,
     )
 

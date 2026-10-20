@@ -38,6 +38,7 @@ from app.application.live_engine_c.bundle_resolution import (
     resolve_safety_config,
     resolve_selection_config,
 )
+from app.application.live_engine_c.q_policy import load_q_policy
 from app.application.live_engine_c.mastery_fixture import (
     fixture_b_mastery_payload_for_phase_4,
     fixture_b_provenance_for_phase_4,
@@ -155,6 +156,9 @@ class CSessionService:
             # returned object is not itself threaded into create_session below -- only its
             # per-field field_statuses map is (X4's own gate re-checks them structurally).
             evidence_window_config = resolve_evidence_window_config(bundle)
+            # LIVE-01: the frozen Q table is loaded and hash-verified HERE, before any session row exists, so a
+            # missing or tampered artifact refuses the session up front (fail closed, no rule fallback).
+            q_policy = load_q_policy(session_mode)
         except LiveEngineCError as exc:
             raise ConflictError() from exc
 
@@ -204,6 +208,7 @@ class CSessionService:
                 policy_parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
                 scaffold_parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
                 aggregation_parameter_source_status=_APPROVED_CODE_GATED_PARAMETER_SOURCE_STATUS,
+                q_policy_parameter_source_status=q_policy.parameter_source_status,
                 smoke_mode=_SMOKE_MODE,
                 request_id=request_id,
                 mastery_by_skill=mastery_by_skill,

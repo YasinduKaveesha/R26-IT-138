@@ -46,7 +46,7 @@ INSTRUCTION_BY_TEMPLATE: Mapping[str, str] = {
     # "7 __ 9", answered by choosing <, > or =. The blank is an operator, not a number, so
     # anything about "the next number" would be actively wrong here. Worded identically to
     # B-NS03-COMPARE-SETS in prompt_wording.py, since it is the same question.
-    "B-NS04-COMPARE-NUMERALS": "Pick the right sign.",
+    "B-NS04-COMPARE-NUMERALS": "Tap the correct sign.",
 }
 
 # ** NOT REVIEWED. NOT ENABLED BY DEFAULT. ** First-draft Sinhala, same standing as the table in

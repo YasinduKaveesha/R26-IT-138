@@ -2,55 +2,55 @@
   "entries": [
     {
       "game_task_template_id": "C-BT-01",
-      "prompt_text": "Make this number with tens and ones.",
+      "prompt_text": "How many tens and how many ones?",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-BT-02",
-      "prompt_text": "Make this number with hundreds, tens and ones.",
+      "prompt_text": "How many hundreds, tens and ones?",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-BT-03",
-      "prompt_text": "Change ten ones into one ten. Write your tens and ones now.",
+      "prompt_text": "Change ten ones into one ten. Now how many tens and ones?",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-BT-04",
-      "prompt_text": "Change one ten into ten ones. Write your tens and ones now.",
+      "prompt_text": "Change one ten into ten ones. Now how many tens and ones?",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-CC-01",
-      "prompt_text": "Tap each thing one time. Then write how many.",
+      "prompt_text": "Tap each one time. Then write how many there are.",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-CC-02",
-      "prompt_text": "Put this many things in the box.",
+      "prompt_text": "Tap to put this many in the box.",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-CC-03",
-      "prompt_text": "Count the things. Then pick the number.",
+      "prompt_text": "How many are there? Tap the number.",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-CC-04",
-      "prompt_text": "Look before and after. Is it the same or changed?",
+      "prompt_text": "Look at both pictures. Is the number the same or different?",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-EG-01",
-      "prompt_text": "Make the groups. Put the same number in each.",
+      "prompt_text": "Make the groups. Put the same number in each group.",
       "variant_key": null,
       "variant_value": null
     },
@@ -62,25 +62,25 @@
     },
     {
       "game_task_template_id": "C-EG-02",
-      "prompt_text": "How many rows? How many in each row? How many squares in all?",
+      "prompt_text": "Write a number in each box.",
       "variant_key": "direction",
       "variant_value": "read"
     },
     {
       "game_task_template_id": "C-EG-03",
-      "prompt_text": "How many are in all the groups?",
+      "prompt_text": "How many are there in all the groups?",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-JB-01",
-      "prompt_text": "Put the two groups together. How many?",
+      "prompt_text": "How many are there in both groups?",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-JB-02",
-      "prompt_text": "Start at the bigger number and count on. Write each jump and where you stop.",
+      "prompt_text": "Use the jump buttons to add. What number do you stop at?",
       "variant_key": null,
       "variant_value": null
     },
@@ -98,7 +98,7 @@
     },
     {
       "game_task_template_id": "C-MCL-01",
-      "prompt_text": "Which number shows how many?",
+      "prompt_text": "How many are there? Tap the number.",
       "variant_key": null,
       "variant_value": null
     },
@@ -116,25 +116,25 @@
     },
     {
       "game_task_template_id": "C-MCL-04",
-      "prompt_text": "Move the marker to the right spot.",
+      "prompt_text": "Tap the buttons to go to the number.",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-NP-01",
-      "prompt_text": "What comes next?",
+      "prompt_text": "What number comes next?",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-NP-02",
-      "prompt_text": "What comes just before?",
+      "prompt_text": "What number comes just before this one?",
       "variant_key": null,
       "variant_value": null
     },
     {
       "game_task_template_id": "C-NP-03",
-      "prompt_text": "Keep counting the same way. What comes next?",
+      "prompt_text": "Keep counting the same way. What number comes next?",
       "variant_key": null,
       "variant_value": null
     },
@@ -152,7 +152,7 @@
     },
     {
       "game_task_template_id": "C-SF-01",
-      "prompt_text": "Share them equally. How many does each one get?",
+      "prompt_text": "Share them equally. How many does each get?",
       "variant_key": null,
       "variant_value": null
     },
@@ -164,7 +164,7 @@
     },
     {
       "game_task_template_id": "C-SF-03",
-      "prompt_text": "Split the number in half.",
+      "prompt_text": "What is half of this number?",
       "variant_key": null,
       "variant_value": null
     },

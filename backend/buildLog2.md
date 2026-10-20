@@ -3301,3 +3301,278 @@ the change is one function's worth of code to revise and the tests name exactly 
 change.
 
 Owner: Yasindu.
+
+
+---
+
+## 2026-10-20 — LIVE-01: the frozen Q-learning policy replaces the rule policy in production
+
+**What changed.** Component C's live difficulty decision is now proposed by the FROZEN, trained Q-learning policy
+(RL notebooks NB02/NB04, `component_c_rl/`); the pinned safety controller still disposes. `PRODUCTION_POLICY_MODE` is
+`"frozen_q_evaluation"` (was `"rule_based_baseline"`). The rule policy no longer decides anything in production; its
+code path (`decide_adaptation_with_safety_flags`) is untouched and still tested.
+
+**Approval (as reported).** Prabathi (Component C owner), reported by Yasindu, 2026-10-20 — recorded in
+`provenance/component-c-q-policy-approval.json`. `evidence_reference` is `"TO BE SUPPLIED BY YASINDU"`; no forum or
+document name was invented.
+
+**Decisions applied as given.** Frozen only (no per-child learning; `internal_reward` stays NULL). Fail closed: a missing
+or hash-mismatched table raises `QPolicyArtifactError` and the session refuses at start — there is no fallback to the rule.
+No DB migration (`frozen_q_evaluation` was already allowed by the `c_policy_decisions` CHECK and by `PolicyMode`). No
+frontend change. The c_only difficulty cap of 2 (approved bundle) is unchanged.
+
+**Files.**
+- `provenance/c_policy/` — `q_c_only.json`, `q_main.json`, `golden_vectors.json`, `MANIFEST.json` (sha256 of every
+  file), `.gitattributes` (`* -text`, so line-ending conversion cannot change a hash). Produced by
+  `component_c_rl/notebooks/NB04_live_policy_export.ipynb`. `Dockerfile` copies the directory; `.dockerignore` re-includes it.
+- `app/application/live_engine_c/q_policy.py` (new; imports nothing from `component_c_generator`): `load_q_policy`
+  (sha256-verified, cached after the first load), `state_of` (same buckets as `rl_core.agent`, plus mastery bucket 3 =
+  unknown for c_only), `QPolicy.propose`.
+- `app/infrastructure/live_engine_c/adapter.py` (still the ONLY importer of the generator): `preview_allowed_actions`,
+  `decide_with_proposed_action`, `safety_controller_version`; ports declared in `app/domain/live_engine_c/ports.py`.
+- `adaptation_service.decide_and_persist_adaptation`: optional `proposed_action / policy_version / rl_state`; without them it
+  takes the unchanged rule path.
+- `task_service.submit_action`: builds the Q observation from persisted data (first-try = mean `first_attempt_correct` over
+  the last 5 summaries, 0.5 if none; strain = `rolling_strain_score`; mastery = the selected skill's fixture mastery for
+  combined, `None` for c_only; tasks_done = number of summaries), previews the allowed actions, proposes, then
+  `decide_with_proposed_action`. `policy_version = "c-rl-q-v1+<SAFETY_CONTROLLER_VERSION>"`; `rl_state` JSONB holds
+  `{state, q_values, allowed, artifact_file, artifact_sha256}`.
+- `c_session_service.create` loads the table before any session row exists, so a bad artifact refuses the session up front.
+
+**Gate membership.** The Q policy is a new config consumer and was NOT covered by the session-start gate (the existing
+`policy_config` family gates the rule thresholds only). It is now wired in the same way as the other code-gated families:
+`create_session` gained a required `q_policy_parameter_source_status` argument and calls
+`assert_code_gated_family_usable(family_name="q_policy_config", ...)`; the status comes from the hash-verified
+`MANIFEST.json` (`APPROVED_FOR_PROVISIONAL_IMPLEMENTATION`, the same status the other code-gated families carry). A seam
+(`assert_q_policy_matches_session_gate`) re-checks at `submit_action` that the loaded artifact's status equals the
+session-gated one, mirroring `assert_policy_config_matches_session_gate`.
+
+**Equivalence proof.** `decide_with_proposed_action` composes the `AdaptationDecision` itself because the pinned
+`decide_adaptation` raises `QLearningDisabledError` for Q modes. `tests/test_live01_q_adapter.py` proves that for the same
+applied action the composed decision equals the pinned rule path field-for-field (decision_id, applied/overridden/reason,
+difficulty_after, strain bucket, increase block, session-start bucket, seed lineage) and the two safety flags match — except
+`policy_mode`, `policy_version`, `rl_state` — over 11 evidence cases; that safety still wins whatever Q proposes (checked
+against an independent call of the pinned `apply_safety`); and that Q never leaves the allowed set.
+
+**Tests.** Baseline before any change (full suite, rebuilt image, db running): 2 failed, 720 passed, 76 skipped — both
+failures are in `tests/test_be4f_transactional_sweep.py` (Component B, `'RESPONSE' == 'TIMEOUT'`), present before this
+change and untouched. After: 2 failed (the same two), 796 passed, 76 skipped. New: `tests/test_live01_q_policy.py`,
+`tests/test_live01_q_adapter.py` (76 tests incl. golden vectors, fail-closed, HTTP session refusal, gate, E2E).
+Existing tests changed deliberately: `test_c4_session_lifecycle.py`, `test_c5_task_serve_and_evaluate.py`,
+`test_c7_scaffolds_and_rewards.py` (+ `test_c6b_policy_and_safety.py` helper): pass the new required
+`q_policy_parameter_source_status` to `create_session`; `test_batch3_safety_forces_recovery_column.py::
+test_correct_answer_persists_the_real_safety_forces_recovery_flag`: its spy moved from the rule-path method to
+`decide_with_proposed_action`, the method production now calls. `test_c6b` ~L703 / ~L1022 needed no change — they test the
+adapter's pinned `decide_adaptation`, which still refuses Q modes.
+
+**Known limits (not fixed here).**
+- c_only is capped at level 2 by the approved bundle, so live Q chooses only between levels 1 and 2 until combined mode
+  with real B->C mastery exists. In simulation c_only leaves little room: greedy Q vs rule +0.0125 reward, +0.0345
+  first-try, −0.038 safety events; there is no mastery growth or boredom dropout in c_only.
+- Adaptation still runs only after a correct completion (`task_service.py`, the `is_correct` branch); in training Q decided
+  after every task. The first Q decisions of a session are forced holds (`min_tasks = 3`), so with correct-only adaptation
+  Q starts choosing once the session has 3 task summaries (tasks_done >= 3).
+- B mastery in combined mode is still the fixed fixture (`mastery_fixture.py`).
+- In the training simulation a forced hold (tasks_done < 3) is returned even if `hold` is not in the allowed set and safety
+  then disposes; `QPolicy.propose` keeps that behaviour so it matches the golden vectors.
+- The live container was not rebuilt or restarted (see the 2026-10-10 "Time's up" entry); a running dev API must be rebuilt
+  to pick this up.
+
+Owner: Yasindu.
+
+
+---
+
+## 2026-10-20 — LIVE-02: c_only oscillation fixed by retraining (q_c_only_v2)
+
+**Problem (live database after LIVE-01).** The c_only Q table bounced between levels for a child who succeeds:
+state `1,2,0,3` -> increase (1->2), state `2,2,0,3` -> decrease (2->1). Diagnosis from the table: Q(2,2,0,3) =
+[2.714, 2.076, 0] (decrease beat hold by 0.637), Q(1,2,0,3) = [0, 2.306, 3.126]; 179k / 251k visits, i.e. converged values.
+
+**Fix: training, not a hand-written rule.** In the simulator (`component_c_rl/rl_core/env.py`) boredom dropout was
+combined-only, so staying at a level the child masters was never costed in c_only. It now also runs in c_only on the
+learner's LATENT mastery (policy still sees mastery unknown); growth stays combined-only; DROP_A/B/C, reward weights, tau,
+state buckets, the safety controller and `q_main.json` are unchanged. Combined mode is pinned identical by a digest test. Rule
+c_only early-end rate with the change: 14.8%. Retrained with the NB04 settings (3,000 x 25, seed base 50,000, 16.0 min).
+Offline result (100 new c_only learners x 10 sessions, seeds 9,400,000+): v2 greedy at (2,2,0,3) = hold; flip rate (decisions that
+reverse the previous move) 0.747 (v1) -> 0.162 (v2), rule 0.003; level-2 share when first-try is high and strain low 0.49 -> 0.83
+(rule 0.89); reward v1 0.5071 / v2 0.5014 / rule 0.4973. Gate passed. v2 is NOT oscillation-free: about half of its moves still
+reverse the previous move.
+
+**Shipped.** `provenance/c_policy/q_c_only_v2.json` (sha256 `5893e91f8917cdabc72a5a9b737c93267f9a55b1b4acbea03353b491218f0e6b`,
+`artifact_version: "v2"`). `MANIFEST.json`: `q_c_only` -> v2; the v1 entry is kept as `q_c_only_v1` with
+`superseded_by: "q_c_only_v2.json"` and its file stays on disk (audit trail; no fallback to it); `q_main` untouched. Golden vectors
+regenerated for c_only (new sha256 `79df790f5ca21e1712f13922786e046d782e193fe6fabf9a85ee5d817ccaff1b`), combined rows
+byte-identical. No backend logic change: `load_q_policy("c_only")` resolves v2 through the manifest, so `rl_state.artifact_file /
+artifact_sha256` now show v2. `policy_version` stays `c-rl-q-v1+<safety version>` (the policy family); the artifact version
+is in `rl_state` and the manifest.
+
+**Tests.** New `tests/test_live02_c_only_v2.py`: manifest points c_only at v2 and keeps v1 as superseded; the greedy action at
+`2,2,0,3` is not decrease; v1 file kept only as the audit record; a tampered v2 fails closed (and there is no fallback to v1);
+backend E2E through `TaskService.submit_action`, every answer correct, 8 tasks: difficulty sequence **[1, 1, 1, 2, 2, 2, 2, 2]**
+(decisions: hold, hold, increase, then hold x5) — no alternation. `tests/test_live01_q_policy.py` updated for the v2 file name.
+Full suite after `docker compose build api` (db running): 2 failed, 801 passed, 76 skipped; the 2 failures are the same
+Component B `test_be4f_transactional_sweep` ones present before LIVE-01 (LIVE-01 result: 2 failed, 796 passed, 76 skipped).
+
+**Not done / not claimed.** The running dev API was NOT restarted or rebuilt — it still serves v1 until the Lead restarts it.
+The live database was not touched by the tests (they use `studentapp_test`).
+
+Owner: Yasindu.
+
+
+---
+
+## 2026-10-20 — PERF-01: fewer database round trips on Component C submit / next_task
+
+**Problem.** Against the remote dev database (~50 ms per round trip) submit took 1-3 s and next_task 1-1.6 s: the cost was the
+number of sequential statements, not computation. Goal: fewer round trips with IDENTICAL behaviour (same rows, same
+responses, same errors, same commit boundaries).
+
+**Measured first.** `tests/perf_helpers.py` (statement counter via `before_cursor_execute`, origin = the calling app/ frame,
+optional real sleep per statement) and `tests/perf_scenario.py` (a scripted c_only session through the real services: 8
+tasks, odd tasks a wrong answer then correct, even tasks correct first time; each call in its own session + commit like the
+routes). `tests/test_perf01_submit_benchmark.py` (`PERF=1`, `PERF_LATENCY_MS=50` to really sleep).
+Statements per call (BEGIN/COMMIT not counted), simulated at 50 ms each:
+
+| call | BEFORE | AFTER |
+|---|---|---|
+| submit, correct answer | 24 (min 24, max 25) = 1,225 ms | **11 = 550 ms** (-54 %) |
+| submit, wrong answer | 14 = 700 ms | **6 = 300 ms** (-57 %) |
+| next_task | 11 (10-11) = 550 ms | **9 = 450 ms** (-18 %) |
+
+Run with a real 50 ms sleep per statement the correct submit measured 606 ms wall (550 ms of sleeping plus ~55 ms of local
+CPU and profiler overhead); the simulated figure at 50 ms/statement is 550 ms. The baseline's biggest origins were
+`repositories.py:34` (every `add` = one INSERT round trip, 5.5 per correct submit), four separate counting queries over
+`c_gameplay_events` for the same instance, the session history read twice (3 queries each time:
+`telemetry_validation.py:297-299`), a repeat event-stream read by summary derivation and by the scaffold step, a separate
+instance lock, a separate user lookup and session read.
+
+**Changes (what each removed).**
+- `repositories.py` `CSessionRecordRepository.get_owned_for_subject` (new): user -> learner link -> owned session in ONE query
+  (was the user/link query + session read; the three not-found cases already were one `ResourceNotFoundError`). Used by
+  `submit_action` and `next_task`. -1 (submit), -2 (next_task, with the lock below).
+- `next_task`: `get_owned_for_subject(..., for_update=True)` takes the same session-row lock in the same query (was a separate
+  `SELECT ... FOR UPDATE`; now taken before the state check, which only matters for a request about to be refused).
+- `CTaskInstanceRecordRepository.get_owned(..., for_update=True)`: reads AND locks the instance row (was a read, then
+  `lock_for_update`). The lock is the same row lock, now taken before the terminal / validation checks instead of after them;
+  sequential behaviour is identical, a concurrent duplicate waits one step earlier. -1.
+- `submit_action`: ONE `list_ordered_for_instance` read replaces four queries (terminal check, max index / timestamp,
+  answer_submitted count, started check); all four values are derived from it in Python under the instance lock. -3.
+- `submit_action`: the started / submitted / evaluated (and, for a correct answer, terminal) events are queued and inserted in
+  ONE statement (was one INSERT each). The terminal event is built by `write_completed_correct_terminal_event` (new optional
+  `known_max_index / known_max_timestamp / known_not_terminal / defer_flush`; defaults keep the old behaviour and the old
+  tests) and added AFTER the answer events (insert order = add order, which the Phase 3b consecutive-event_index trigger
+  needs). The unique-terminal-index backstop (T1-3) is translated to the same `ConflictError` around that one flush. -2 (wrong),
+  -4 (correct, with the two terminal-event re-reads).
+- `derive_and_persist_summary(records=...)` and `decide_and_persist_scaffold_level(events=...)` (new optional): reuse the
+  stream `submit_action` already holds (its events plus the ones it just wrote) instead of re-reading it. -1 each.
+- `build_evidence_for_session(history_records=...)` (new optional) and `submit_action`: the session's derivable history is read
+  ONCE (through the same guarded `get_derivable_history_for_session`) and shared by the evidence builder and the Q observation
+  (it was read twice). -3.
+- `bundle_resolution.resolve_c_bundle_and_catalogue`: per-process cache (below); `next_task` reuses the catalogue that
+  resolution already loaded instead of parsing it a second time. Local CPU for next_task 193 ms -> 90 ms.
+
+**Caching.** Cached per process: the result of a SUCCESSFUL `resolve_c_bundle_and_catalogue` (runtime-bundle schema validation,
+every artifact checksum incl. the catalogue's, catalogue parse + checksum), keyed by the arguments and by each input file's
+(path, size, mtime). The first call after start-up does the full validation; a file that changes or goes missing is
+re-validated from scratch on the next call (stricter than "hash once"); a failure is never cached. The Q policy manifest and
+tables were already cached after the first sha256-verified load (LIVE-01): a tampered file present at start-up still raises
+`QPolicyArtifactError` and the session refuses (existing tamper tests unchanged and passing). The per-request gates are all
+still evaluated (`assert_generation_config_permitted`, the policy seam, the Q-policy status seam). The next_task comment that
+says the bundle resolution on the resume path "must not be optimized away" is honoured in intent: the resolution still runs on
+every call, it is now served from the validated cache unless a file changed.
+
+**Proof nothing changed.** `tests/fixtures/perf01_golden_session.json` was captured from the code BEFORE any change
+(`PERF_CAPTURE=1`; two further pre-change runs reproduced it) and `tests/test_perf01_row_equivalence.py` compares the same
+scripted session after the change: every row of every c_* table the session writes (c_task_opportunities, c_task_instances,
+c_gameplay_events 48 rows, c_task_opportunity_summaries, c_policy_decisions, c_safety_events, c_scaffold_events,
+c_task_opportunity_verdicts; UUID / timestamp / request-id columns excluded, UUIDs inside values renumbered) and all 20 API
+response bodies are identical. `tests/test_perf01_round_trips.py` keeps a statement budget per call type (<= 12 / 7 / 10) and
+tests the cache (same object on a hit, tampered catalogue fails closed, failures not cached). Full suite after
+`docker compose build api` (db running): 2 failed, 805 passed, 78 skipped; the 2 failures are the same Component B
+`test_be4f_transactional_sweep` ones present before LIVE-01 (LIVE-02 result: 2 failed, 801 passed, 76 skipped; the added
+tests are the 4 new PERF-01 tests that run by default plus 2 perf-marked ones skipped without `PERF=1`).
+
+**Remaining hotspots (left deliberately).** Correct submit (11): user+session join, instance read+lock, event stream, ONE INSERT
+for the events, INSERT summary, learner local state, the guarded history (opportunities, summaries, verdicts = 3 reads that the
+telemetry validator needs), latest decision, INSERT decision. Different tables cannot share an INSERT; the 3-read history is
+the validated accessor (J1-2/J1-4) and was left alone; the user lookup is the authorization step. Not measured here: the JWT /
+JWKS verification, connection acquisition and BEGIN / COMMIT, which are per request outside these services. The running dev API
+was NOT restarted or rebuilt; it needs a rebuild to pick this up.
+
+Owner: Yasindu.
+
+## 2026-10-20 — The session results screen now shows per-skill mastery bars (owner decision, reversing a recorded rule)
+
+**This reverses a rule, deliberately, and the reversal is the entry.** `live-session-logic.ts`'s
+`resultsView` stated that the results surface carries "no score, no percentage, no stars, no
+streak, no per-skill breakdown, no mastery figure", and that "a child who got everything wrong and
+a child who got everything right see the identical screen, by design". It went further: the
+function takes an `outcomeHistory` parameter it never reads, with a comment saying the parameter
+exists SO THAT ignoring it is testable, and a note ending "If you are here to 'fix' the missing
+score, this comment is the answer: it is not missing."
+
+The owner has ruled that the screen may show what moved. The two costs below were put to them
+before the work started and accepted.
+
+**WHAT WAS KEPT.** The reversal is narrower than it looks, and the narrowing is enforced:
+
+* `resultsView`'s own guarantee is UNCHANGED and still tested -- the COPY (headline and detail) is
+  byte-identical for every possible outcome history, carries no score, and still never reads
+  `outcomeHistory` (`session-results.test.ts`).
+* The bars are drawn from the SERVER's own `p_l` values (`GET /b/learner/skill-states`), never from
+  the `response_matched` values this client happened to observe. That distinction is what keeps the
+  original objection intact: the client is not synthesising a summary that was withheld, it is
+  rendering one the server already serves to the Play prep card under its own 2026-09-21 ruling.
+* No number is printed and none is announced. The bar's length is the whole message; a test asserts
+  no `accessibilityValue`, no percentage text, and no formatted number in the component.
+
+**TWO PROTECTIONS, because the audience is seven.**
+
+* A BAR NEVER SHRINKS. BKT lowers `p_l` on a wrong first attempt, and a bar visibly shrinking at
+  the end of a session is exactly the "you did badly" message the original rule existed to prevent.
+  A fall is clamped to flat and is never flagged as improvement. The stored value is untouched;
+  only the drawing is.
+* NO SNAPSHOT MEANS NO MOVEMENT. The server has no "before" to give -- the endpoint returns current
+  `p_l` only -- so the starting state is photographed client-side at session start. A reload
+  mid-session, a direct link, or a session begun before this shipped leaves nothing to compare, and
+  the screen then draws current mastery with no movement. Rendering `before: 0` instead would sweep
+  every bar from nothing to everything and invent a result.
+
+**THE SNAPSHOT IS IN MEMORY, KEYED BY SESSION, AND NEVER PERSISTED.** Three reasons, each
+load-bearing: a snapshot is meaningless outside its own session; this app runs on shared classroom
+devices and one child's mastery must never be drawn against another's (the rule
+`home-session-state-cache.ts` already follows); and the results screen is documented as not
+surviving a reload, which persisting would quietly undo. First write wins, so a remount or a
+crash-recovery resume cannot re-baseline the snapshot to a mid-session state and erase the child's
+own progress from the screen.
+
+**TWO KNOWN COSTS, accepted rather than solved.**
+
+1. **The bars are driven by TEST_FIXTURE_ONLY parameters.** `p_l0=0.2, p_t=0.15, p_g=0.2, p_s=0.1`
+   saturate `p_l` toward 1.0 after roughly four or five correct answers. After a five-question
+   session the bars move dramatically -- because the parameters are uncalibrated placeholders, not
+   because the child learned that much. The movement a child sees is partly an artefact.
+2. **A child who did not progress watches their bars stay still.** The clamp stops a bar falling,
+   but it cannot manufacture growth. This is the case the original rule was written to avoid, and
+   it is now reachable.
+
+**Navigation changed with it (owner request).** Home is an icon in the top-left; the primary
+action at the bottom is PLAY AGAIN, routing to preparation. Leaving is still one tap away but is
+no longer what the screen offers.
+
+**A FOURTH ARTEFACT EMBEDS THE PROMPT WORDING, found by the frontend suite.** Changing Component C
+wording earlier the same day required regenerating `c-prompt-wording.json`,
+`c-prompt-exemplars.json` and the `perf01` golden -- and then the frontend's own generated
+`src/api/generated/c-prompt-exemplars.ts`, which cross-checks against the backend artefact
+(`npm run generate:c-prompt-exemplars`). Targeted backend runs passed while this was stale. A
+wording change touches FOUR generated files, not one; the cross-check test is what catches it.
+
+**Verified.** Frontend 1516 contract + 22 render passed, 0 failed; `tsc` clean; lint 0 errors.
+Nine new tests cover the pure comparison logic and three structural guards (no printed number, the
+width rule shared with the prep card rather than re-derived, and the snapshot never persisted).
+
+**NOT VERIFIED, and not claimed:** nobody has yet played a session end-to-end and watched the bars
+animate. The logic is tested; the animation is not.
+
+Owner: Yasindu.
